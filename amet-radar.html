@@ -98,6 +98,7 @@
   }
   .amet-pin .badge span{ transform: rotate(45deg); font-size:14px; }
   .amet-pin.stale .badge{ background: var(--muted); }
+  .amet-pin.pending .badge{ opacity:.55; border-style:dashed; }
 
   /* "Me" marker */
   .me-marker{ width:22px; height:22px; }
@@ -301,12 +302,19 @@
     return reportsCache;
   }
 
+  class NetworkError extends Error {}
+
   async function insertReport(id, record){
-    const res = await fetch(API_BASE, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, record })
-    });
+    let res;
+    try{
+      res = await fetch(API_BASE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, record })
+      });
+    }catch(e){
+      throw new NetworkError('Sin conexión');
+    }
     if(!res.ok) throw new Error('No se pudo publicar el reporte');
     reportsCache[id] = record;
   }
@@ -349,6 +357,28 @@
     localStorage.setItem(TIMES_KEY, JSON.stringify(times));
   }
 
+  // Cola de reportes ya creados que no se pudieron enviar por falta de red
+  // (distinto de pendingLocation/pendingPhoto/pendingCategory, que son el
+  // estado del flujo de creación en curso). Persistida para sobrevivir un
+  // reload; pendingIds es un derivado en memoria para lookups O(1).
+  const PENDING_KEY = 'amet_pending_queue_v1';
+  function getPendingQueue(){ try{ return JSON.parse(localStorage.getItem(PENDING_KEY)||'[]'); }catch(e){ return []; } }
+  function savePendingQueue(list){ localStorage.setItem(PENDING_KEY, JSON.stringify(list)); }
+
+  let pendingQueue = getPendingQueue();
+  let pendingIds = new Set(pendingQueue.map(p => p.id));
+
+  function enqueuePending(id, record){
+    pendingQueue.push({ id, record });
+    savePendingQueue(pendingQueue);
+    pendingIds.add(id);
+  }
+  function dequeuePending(id){
+    pendingQueue = pendingQueue.filter(p => p.id !== id);
+    savePendingQueue(pendingQueue);
+    pendingIds.delete(id);
+  }
+
   const map = L.map('map', { zoomControl:true, attributionControl:false }).setView(DEFAULT_CENTER, 13);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     subdomains:'abcd', maxZoom:19
@@ -368,12 +398,12 @@
     return `hace ${Math.floor(h/24)} d`;
   }
 
-  function makeIcon(ageMinutes, category){
+  function makeIcon(ageMinutes, category, pending){
     const cat = CATEGORIES[category] || CATEGORIES.reten_fijo;
     const stale = ageMinutes > STALE_MINUTES;
     return L.divIcon({
       className: '',
-      html: `<div class="amet-pin"><div class="badge ${stale?'stale':''}" style="background:${stale?'var(--muted)':cat.color}"><span>${cat.emoji}</span></div></div>`,
+      html: `<div class="amet-pin ${pending?'pending':''}"><div class="badge ${stale?'stale':''}" style="background:${stale?'var(--muted)':cat.color}"><span>${cat.emoji}</span></div></div>`,
       iconSize:[36,36], iconAnchor:[18,32], popupAnchor:[0,-30]
     });
   }
@@ -385,14 +415,19 @@
   function popupHtml(id, r){
     const mine = getMine().has(id);
     const cat = CATEGORIES[r.category] || CATEGORIES.reten_fijo;
+    const pending = pendingIds.has(id);
     const confirms = r.confirms || 0;
     const denies = r.denies || 0;
     return `
       <div class="popup-card" data-id="${id}">
         <span class="cat-label" style="background:${cat.color}">${cat.emoji} ${cat.label}</span>
         <img src="${r.photo}" alt="Foto del reporte">
-        <div class="time">${timeAgo(r.ts)}</div>
+        <div class="time">${pending ? 'Pendiente de sincronizar…' : timeAgo(r.ts)}</div>
         ${r.note ? `<div class="note">${escapeHtml(r.note)}</div>` : ''}
+        ${pending ? `
+        <div class="mini-actions">
+          <button class="mini-btn danger" data-action="cancel-pending" data-id="${id}">Cancelar</button>
+        </div>` : `
         <div class="votes">
           <button class="vote-btn confirm" data-action="confirm" data-id="${id}">👍 Sigue ahí (${confirms})</button>
           <button class="vote-btn deny" data-action="deny" data-id="${id}">👎 Ya no está (${denies})</button>
@@ -400,17 +435,18 @@
         <div class="mini-actions">
           <button class="mini-btn" data-action="share" data-id="${id}">Compartir</button>
           ${mine ? `<button class="mini-btn danger" data-action="delete" data-id="${id}">Eliminar</button>` : ''}
-        </div>
+        </div>`}
       </div>`;
   }
 
   function upsertMarker(id, r){
     const ageMinutes = (Date.now()-r.ts)/60000;
+    const pending = pendingIds.has(id);
     if(markersById[id]){
-      markersById[id].setIcon(makeIcon(ageMinutes, r.category));
+      markersById[id].setIcon(makeIcon(ageMinutes, r.category, pending));
       markersById[id].setPopupContent(popupHtml(id, r));
     } else {
-      const m = L.marker([r.lat, r.lng], { icon: makeIcon(ageMinutes, r.category) }).addTo(map);
+      const m = L.marker([r.lat, r.lng], { icon: makeIcon(ageMinutes, r.category, pending) }).addTo(map);
       m.bindPopup(popupHtml(id, r));
       markersById[id] = m;
     }
@@ -471,16 +507,62 @@
     updateCount();
   }
 
+  // ---- Publicación diferida de reportes pendientes (offline) ----
+  function restorePendingMarkers(){
+    pendingQueue.forEach(item => upsertMarker(item.id, item.record));
+    updateCount();
+  }
+
+  let flushInFlight = false;
+  async function flushPendingQueue(){
+    if(flushInFlight || pendingQueue.length === 0) return;
+    if(navigator.onLine === false) return;
+    flushInFlight = true;
+    let synced = 0;
+    try{
+      for(const item of [...pendingQueue]){
+        if(!pendingIds.has(item.id)) continue; // se canceló mientras esperábamos
+        const ageMinutes = (Date.now() - item.record.ts) / 60000;
+        if(ageMinutes > MAX_AGE_MINUTES){
+          dequeuePending(item.id);
+          removeMarker(item.id);
+          updateCount();
+          continue;
+        }
+        try{
+          await insertReport(item.id, item.record);
+          dequeuePending(item.id);
+          upsertMarker(item.id, item.record);
+          updateCount();
+          synced++;
+        }catch(err){
+          if(err instanceof NetworkError) break; // seguimos offline, se reintenta después
+          dequeuePending(item.id);
+          removeMarker(item.id);
+          updateCount();
+          showToast('No se pudo sincronizar un reporte pendiente.', true);
+        }
+      }
+    } finally {
+      flushInFlight = false;
+    }
+    if(synced > 0) showToast(synced === 1 ? 'Reporte pendiente publicado.' : `${synced} reportes pendientes publicados.`);
+  }
+
   // Sondeo periódico: así se ven los reportes que publican otros usuarios
-  // desde otro dispositivo, no solo los que crea este navegador.
+  // desde otro dispositivo, no solo los que crea este navegador. Se
+  // reutiliza el mismo intervalo como respaldo para reintentar la cola.
   async function refreshReports(){
     await fetchAllReports();
     renderVisibleMarkers();
+    await flushPendingQueue();
   }
 
+  restorePendingMarkers();
   map.on('moveend zoomend', renderVisibleMarkers);
   const reportsReady = refreshReports();
   setInterval(refreshReports, 8000);
+  window.addEventListener('online', flushPendingQueue);
 
   // ---- Deep link: abrir un reporte compartido ----
   async function openSharedReportFromHash(){
@@ -504,6 +586,17 @@
     const action = btn.dataset.action;
     const id = btn.dataset.id;
     if(!id) return;
+
+    if(action === 'cancel-pending'){
+      dequeuePending(id);
+      const mine = getMine(); mine.delete(id); saveMine(mine);
+      removeMarker(id);
+      updateCount();
+      map.closePopup();
+      showToast('Reporte pendiente cancelado');
+      return;
+    }
+
     const r = reportsCache[id];
     if(!r) return;
 
@@ -803,6 +896,17 @@
       registerReportTime();
       showToast('Reporte publicado. Gracias por avisar.');
     }catch(err){
+      if(err instanceof NetworkError){
+        enqueuePending(id, record); // antes de upsertMarker, para que ya se vea "pending"
+        const mine = getMine(); mine.add(id); saveMine(mine);
+        upsertMarker(id, record);
+        updateCount();
+        map.setView([record.lat, record.lng], 15);
+        closeOverlay();
+        registerReportTime();
+        showToast('Sin conexión: el reporte se publicará solo cuando vuelvas a tener internet.', true);
+        return;
+      }
       renderSheet(`
         <h2>No se pudo publicar</h2>
         <div class="error-box">Hubo un problema guardando el reporte. Intenta de nuevo.</div>
