@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="theme-color" content="#1c1c1e">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>AMET Radar</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --asphalt: #1c1c1e;
+    --asphalt-2: #26262a;
+    --concrete: #2e2e32;
+    --line: #3c3c40;
+    --caution: #f5c518;
+    --caution-dim: #b89412;
+    --signal: #f7f6f3;
+    --muted: #9a9a9e;
+    --route-teal: #2fa089;
+    --alert: #e4572e;
+    --control-blue: #4a90d9;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; height:100%; background:var(--asphalt); font-family:'Inter',sans-serif; color:var(--signal); overflow:hidden; }
+  #app{ position:relative; width:100%; height:100vh; display:flex; flex-direction:column; }
+
+  /* Header */
+  header{
+    background: var(--asphalt);
+    border-bottom: 3px solid var(--caution);
+    padding: 12px 16px;
+    display:flex; align-items:center; justify-content:space-between;
+    z-index: 500;
+    flex-shrink:0;
+  }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand-mark{
+    width:34px;height:34px; border-radius:6px;
+    background: var(--caution);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Oswald',sans-serif; font-weight:700; color:var(--asphalt); font-size:16px;
+    transform: rotate(-4deg);
+  }
+  .brand h1{
+    font-family:'Oswald',sans-serif; font-weight:600; letter-spacing:0.5px;
+    font-size:18px; margin:0; text-transform:uppercase;
+  }
+  .brand p{ margin:0; font-size:11px; color:var(--muted); letter-spacing:0.3px; }
+  .stat{
+    font-family:'Oswald',sans-serif; text-align:right; font-size:11px; color:var(--muted);
+  }
+  .stat b{ color:var(--caution); font-size:18px; display:block; line-height:1; }
+
+  /* Filter chips */
+  #filters{
+    display:flex; gap:8px; padding:10px 16px; overflow-x:auto;
+    background:var(--asphalt); border-bottom:1px solid var(--line);
+    flex-shrink:0; -webkit-overflow-scrolling:touch;
+  }
+  #filters::-webkit-scrollbar{ display:none; }
+  .chip{
+    display:flex; align-items:center; gap:6px; white-space:nowrap;
+    padding:7px 12px; border-radius:20px; border:1px solid var(--line);
+    background:var(--concrete); color:var(--muted);
+    font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:0.3px; text-transform:uppercase;
+    cursor:pointer; user-select:none; transition:all 0.15s ease;
+  }
+  .chip[aria-pressed="true"]{ background:var(--chip-color,var(--caution)); color:var(--asphalt); border-color:var(--chip-color,var(--caution)); }
+
+  /* Map */
+  #map{ flex:1; background:var(--asphalt-2); position:relative; }
+  .leaflet-container{ background:var(--asphalt-2); }
+
+  #map-loader{
+    position:absolute; inset:0; z-index:450; background:rgba(20,20,22,0.75);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+    font-family:'Oswald',sans-serif; font-size:12px; color:var(--muted); letter-spacing:0.3px;
+  }
+  #map-loader[hidden]{ display:none; }
+
+  /* Marker */
+  .amet-pin{
+    width:36px; height:36px;
+    display:flex; align-items:center; justify-content:center;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+  }
+  .amet-pin .badge{
+    width:30px; height:30px; border-radius:50% 50% 50% 0;
+    transform: rotate(-45deg);
+    background: var(--caution);
+    border: 2px solid var(--asphalt);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .amet-pin .badge span{ transform: rotate(45deg); font-size:14px; }
+  .amet-pin.stale .badge{ background: var(--muted); }
+
+  /* "Me" marker */
+  .me-marker{ width:22px; height:22px; }
+  .me-dot{
+    width:16px; height:16px; border-radius:50%; background:var(--control-blue);
+    border:3px solid #fff; box-shadow:0 0 0 4px rgba(74,144,217,0.35);
+    animation: me-pulse 2s ease-out infinite;
+  }
+  @keyframes me-pulse{
+    0%{ box-shadow:0 0 0 4px rgba(74,144,217,0.35); }
+    70%{ box-shadow:0 0 0 12px rgba(74,144,217,0); }
+    100%{ box-shadow:0 0 0 4px rgba(74,144,217,0); }
+  }
+
+  .leaflet-popup-content-wrapper{
+    background: var(--concrete); color: var(--signal); border-radius: 10px;
+  }
+  .leaflet-popup-tip{ background: var(--concrete); }
+  .popup-card{ font-family:'Inter',sans-serif; width:210px; }
+  .popup-card img{ width:100%; border-radius:6px; display:block; margin-bottom:6px; aspect-ratio:4/3; object-fit:cover; }
+  .popup-card .cat-label{
+    display:inline-block; font-family:'Oswald',sans-serif; font-size:10px; letter-spacing:0.4px;
+    text-transform:uppercase; padding:2px 8px; border-radius:10px; color:var(--asphalt);
+    background:var(--caution); margin-bottom:6px;
+  }
+  .popup-card .time{ font-size:11px; color:var(--caution); font-family:'Oswald',sans-serif; letter-spacing:0.3px; }
+  .popup-card .note{ font-size:12px; color:var(--muted); margin-top:4px; }
+  .popup-card .votes{ display:flex; gap:6px; margin-top:10px; }
+  .vote-btn{
+    flex:1; display:flex; align-items:center; justify-content:center; gap:4px;
+    background:var(--asphalt-2); border:1px solid var(--line); color:var(--signal);
+    border-radius:8px; padding:6px 4px; font-size:11px; cursor:pointer; font-family:'Inter',sans-serif;
+  }
+  .vote-btn:active{ transform:scale(0.96); }
+  .vote-btn.deny{ color:#f0a08a; }
+  .vote-btn.confirm{ color:#8fd6c6; }
+  .popup-card .mini-actions{ display:flex; gap:6px; margin-top:8px; }
+  .mini-btn{
+    flex:1; background:transparent; border:1px solid var(--line); color:var(--muted);
+    border-radius:8px; padding:6px 4px; font-size:10.5px; cursor:pointer; font-family:'Oswald',sans-serif;
+    text-transform:uppercase; letter-spacing:0.3px;
+  }
+  .mini-btn.danger{ color:var(--alert); border-color:rgba(228,87,46,0.4); }
+
+  /* FAB row */
+  #fab-row{
+    position:absolute; left:0; right:0; bottom:22px;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    z-index:400; padding:0 16px;
+  }
+  #locate-btn{
+    width:48px; height:48px; border-radius:50%; flex-shrink:0;
+    background: var(--concrete); border:1px solid var(--line); color:var(--signal);
+    font-size:18px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.4);
+  }
+  #locate-btn:active{ transform:scale(0.94); }
+  #report-btn{
+    background: var(--caution); color: var(--asphalt);
+    border:none; border-radius: 30px;
+    padding: 14px 24px;
+    font-family:'Oswald',sans-serif; font-weight:600; font-size:14px; letter-spacing:0.4px; text-transform:uppercase;
+    display:flex; align-items:center; gap:8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    cursor:pointer;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  #report-btn:active{ transform: scale(0.96); }
+  #report-btn:disabled{ background: var(--line); color: var(--muted); cursor:default; }
+
+  /* Overlay flow */
+  #flow-overlay{
+    position:absolute; inset:0; background: rgba(20,20,22,0.86);
+    display:flex; align-items:flex-end; justify-content:center;
+    z-index:1000;
+  }
+  #flow-overlay[hidden]{ display:none; }
+  .sheet{
+    background: var(--concrete); width:100%; max-width:480px;
+    border-radius: 18px 18px 0 0;
+    padding: 20px 20px 26px;
+    border-top: 3px solid var(--caution);
+  }
+  .sheet h2{
+    font-family:'Oswald',sans-serif; font-size:16px; margin:0 0 4px; text-transform:uppercase; letter-spacing:0.4px;
+  }
+  .sheet p.sub{ margin:0 0 16px; font-size:13px; color:var(--muted); }
+  .spinner{
+    width:22px; height:22px; border-radius:50%;
+    border: 3px solid var(--line); border-top-color: var(--caution);
+    animation: spin 0.8s linear infinite; margin: 6px 0 16px;
+  }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+  .row-center{ display:flex; align-items:center; gap:10px; }
+
+  .cat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
+  .cat-option{
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+    background:var(--asphalt-2); border:1px solid var(--line); border-radius:12px;
+    padding:14px 8px; cursor:pointer; color:var(--signal); font-size:12px;
+    font-family:'Inter',sans-serif; text-align:center;
+  }
+  .cat-option span.emoji{ font-size:22px; }
+  .cat-option:active{ transform:scale(0.97); }
+
+  .preview-photo{ width:100%; border-radius:10px; margin-bottom:12px; aspect-ratio:4/3; object-fit:cover; }
+  textarea{
+    width:100%; background: var(--asphalt-2); border:1px solid var(--line); border-radius:8px;
+    color: var(--signal); padding:10px; font-family:'Inter',sans-serif; font-size:13px; resize:none;
+    margin-bottom:14px;
+  }
+  textarea::placeholder{ color: var(--muted); }
+  .btn-row{ display:flex; gap:10px; }
+  .btn{
+    flex:1; border:none; border-radius:10px; padding:13px; font-family:'Oswald',sans-serif;
+    font-weight:600; font-size:13px; letter-spacing:0.3px; text-transform:uppercase; cursor:pointer;
+  }
+  .btn-primary{ background: var(--caution); color: var(--asphalt); }
+  .btn-ghost{ background: transparent; color: var(--muted); border:1px solid var(--line); }
+  .error-box{
+    background: rgba(228,87,46,0.12); border:1px solid var(--alert); color:#f0a08a;
+    padding:10px 12px; border-radius:8px; font-size:12px; margin-bottom:14px;
+  }
+  .toast{
+    position:absolute; top:70px; left:50%; transform:translateX(-50%);
+    background: var(--route-teal); color:#fff; padding:10px 18px; border-radius:24px;
+    font-family:'Oswald',sans-serif; font-size:12px; letter-spacing:0.3px; z-index:1100;
+    box-shadow:0 4px 12px rgba(0,0,0,0.35);
+    animation: toast-in 0.25s ease;
+    max-width:80%; text-align:center;
+  }
+  .toast.warn{ background:var(--alert); }
+  @keyframes toast-in{ from{ opacity:0; transform:translate(-50%,-8px);} to{opacity:1; transform:translate(-50%,0);} }
+
+  #camera-input{ display:none; }
+
+  @media (prefers-reduced-motion: reduce){
+    .me-dot, .spinner, .toast{ animation:none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <div class="brand-mark">A</div>
+      <div>
+        <h1>AMET Radar</h1>
+        <p>Reportes de la comunidad</p>
+      </div>
+    </div>
+    <div class="stat"><b id="stat-count">0</b>en vista</div>
+  </header>
+
+  <div id="filters" role="group" aria-label="Filtrar por categoría"></div>
+
+  <div id="map">
+    <div id="map-loader"><div class="spinner"></div><span>Buscando tu ubicación…</span></div>
+  </div>
+
+  <div id="fab-row">
+    <button id="locate-btn" aria-label="Centrar mapa en mi ubicación" title="Centrar en mi ubicación">🎯</button>
+    <button id="report-btn" aria-label="Reportar ubicación de un retén">📍 Reportar ubicación</button>
+  </div>
+
+  <input type="file" id="camera-input" accept="image/*" capture="environment">
+
+  <div id="flow-overlay" hidden></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+  const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
+  const STALE_MINUTES = 180;   // a partir de aqui se consideran "viejos"
+  const MAX_AGE_MINUTES = 360; // se ocultan/borran pasado este tiempo
+  const DENY_THRESHOLD = 2;    // (negaciones - confirmaciones) para retirar antes
+  const REPORT_LIMIT = 3;      // reportes máximos por ventana
+  const REPORT_WINDOW_MIN = 60;
+
+  const CATEGORIES = {
+    reten_fijo:  { label:'Retén fijo',      emoji:'👮', color:'var(--caution)' },
+    reten_movil: { label:'Retén móvil',     emoji:'🚓', color:'var(--route-teal)' },
+    accidente:   { label:'Accidente',       emoji:'⚠️', color:'var(--alert)' },
+    control:     { label:'Control tránsito',emoji:'🚦', color:'var(--control-blue)' }
+  };
+  const activeCategories = new Set(Object.keys(CATEGORIES));
+
+  // ---- Persistencia local (para pruebas en este dispositivo) ----
+  // Nota: esto reemplaza temporalmente un backend real. En producción,
+  // estas mismas funciones deben apuntar a una API/base de datos compartida
+  // para que los reportes se vean entre distintos usuarios.
+  const STORAGE_KEY = 'amet_reports_v1';
+  const VOTED_KEY = 'amet_voted_v1';
+  const MINE_KEY = 'amet_my_reports_v1';
+  const TIMES_KEY = 'amet_report_times_v1';
+
+  function loadAllReports(){
+    try{ return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+    catch(e){ return {}; }
+  }
+  function saveAllReports(obj){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); return true; }
+    catch(e){ console.error('No se pudo guardar en localStorage', e); return false; }
+  }
+  function getVoted(){ try{ return new Set(JSON.parse(localStorage.getItem(VOTED_KEY)||'[]')); }catch(e){ return new Set(); } }
+  function saveVoted(set){ localStorage.setItem(VOTED_KEY, JSON.stringify([...set])); }
+  function getMine(){ try{ return new Set(JSON.parse(localStorage.getItem(MINE_KEY)||'[]')); }catch(e){ return new Set(); } }
+  function saveMine(set){ localStorage.setItem(MINE_KEY, JSON.stringify([...set])); }
+
+  function canReport(){
+    const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]').filter(t => (Date.now()-t) < REPORT_WINDOW_MIN*60000);
+    localStorage.setItem(TIMES_KEY, JSON.stringify(times));
+    return times.length < REPORT_LIMIT;
+  }
+  function registerReportTime(){
+    const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]');
+    times.push(Date.now());
+    localStorage.setItem(TIMES_KEY, JSON.stringify(times));
+  }
+
+  const map = L.map('map', { zoomControl:true, attributionControl:false }).setView(DEFAULT_CENTER, 13);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    subdomains:'abcd', maxZoom:19
+  }).addTo(map);
+
+  const markersById = {};
+  let pendingLocation = null;
+  let pendingPhoto = null;
+  let pendingCategory = null;
+
+  function timeAgo(ts){
+    const min = Math.floor((Date.now()-ts)/60000);
+    if(min < 1) return 'justo ahora';
+    if(min < 60) return `hace ${min} min`;
+    const h = Math.floor(min/60);
+    if(h < 24) return `hace ${h} h`;
+    return `hace ${Math.floor(h/24)} d`;
+  }
+
+  function makeIcon(ageMinutes, category){
+    const cat = CATEGORIES[category] || CATEGORIES.reten_fijo;
+    const stale = ageMinutes > STALE_MINUTES;
+    return L.divIcon({
+      className: '',
+      html: `<div class="amet-pin"><div class="badge ${stale?'stale':''}" style="background:${stale?'var(--muted)':cat.color}"><span>${cat.emoji}</span></div></div>`,
+      iconSize:[36,36], iconAnchor:[18,32], popupAnchor:[0,-30]
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function popupHtml(id, r){
+    const mine = getMine().has(id);
+    const cat = CATEGORIES[r.category] || CATEGORIES.reten_fijo;
+    const confirms = r.confirms || 0;
+    const denies = r.denies || 0;
+    return `
+      <div class="popup-card" data-id="${id}">
+        <span class="cat-label" style="background:${cat.color}">${cat.emoji} ${cat.label}</span>
+        <img src="${r.photo}" alt="Foto del reporte">
+        <div class="time">${timeAgo(r.ts)}</div>
+        ${r.note ? `<div class="note">${escapeHtml(r.note)}</div>` : ''}
+        <div class="votes">
+          <button class="vote-btn confirm" data-action="confirm" data-id="${id}">👍 Sigue ahí (${confirms})</button>
+          <button class="vote-btn deny" data-action="deny" data-id="${id}">👎 Ya no está (${denies})</button>
+        </div>
+        <div class="mini-actions">
+          <button class="mini-btn" data-action="share" data-id="${id}">Compartir</button>
+          ${mine ? `<button class="mini-btn danger" data-action="delete" data-id="${id}">Eliminar</button>` : ''}
+        </div>
+      </div>`;
+  }
+
+  function upsertMarker(id, r){
+    const ageMinutes = (Date.now()-r.ts)/60000;
+    if(markersById[id]){
+      markersById[id].setIcon(makeIcon(ageMinutes, r.category));
+      markersById[id].setPopupContent(popupHtml(id, r));
+    } else {
+      const m = L.marker([r.lat, r.lng], { icon: makeIcon(ageMinutes, r.category) }).addTo(map);
+      m.bindPopup(popupHtml(id, r));
+      markersById[id] = m;
+    }
+  }
+
+  function removeMarker(id){
+    if(markersById[id]){ map.removeLayer(markersById[id]); delete markersById[id]; }
+  }
+
+  function updateCount(){
+    document.getElementById('stat-count').textContent = Object.keys(markersById).length;
+  }
+
+  // ---- Filtros de categoría ----
+  const filtersEl = document.getElementById('filters');
+  Object.entries(CATEGORIES).forEach(([key, cat]) => {
+    const chip = document.createElement('button');
+    chip.className = 'chip';
+    chip.type = 'button';
+    chip.style.setProperty('--chip-color', cat.color);
+    chip.setAttribute('aria-pressed', 'true');
+    chip.textContent = `${cat.emoji} ${cat.label}`;
+    chip.addEventListener('click', () => {
+      if(activeCategories.has(key)){
+        activeCategories.delete(key);
+        chip.setAttribute('aria-pressed', 'false');
+      } else {
+        activeCategories.add(key);
+        chip.setAttribute('aria-pressed', 'true');
+      }
+      renderVisibleMarkers();
+    });
+    filtersEl.appendChild(chip);
+  });
+
+  // ---- Renderizado por zona visible + limpieza de vencidos ----
+  function renderVisibleMarkers(){
+    const bounds = map.getBounds().pad(0.25);
+    const all = loadAllReports();
+    const now = Date.now();
+    let changed = false;
+
+    for(const id in all){
+      const r = all[id];
+      const ageMinutes = (now - r.ts) / 60000;
+      if(ageMinutes > MAX_AGE_MINUTES){
+        delete all[id];
+        removeMarker(id);
+        changed = true;
+        continue;
+      }
+      const inView = bounds.contains(L.latLng(r.lat, r.lng));
+      const catOn = activeCategories.has(r.category);
+      if(inView && catOn){
+        upsertMarker(id, r);
+      } else {
+        removeMarker(id);
+      }
+    }
+    if(changed) saveAllReports(all);
+    updateCount();
+  }
+
+  map.on('moveend zoomend', renderVisibleMarkers);
+  renderVisibleMarkers();
+  setInterval(renderVisibleMarkers, 20000);
+
+  // ---- Deep link: abrir un reporte compartido ----
+  function openSharedReportFromHash(){
+    const match = location.hash.match(/r=([^&]+)/);
+    if(!match) return;
+    const id = decodeURIComponent(match[1]);
+    const all = loadAllReports();
+    const r = all[id];
+    if(!r) return;
+    map.setView([r.lat, r.lng], 16);
+    setTimeout(() => {
+      upsertMarker(id, r);
+      markersById[id] && markersById[id].openPopup();
+    }, 300);
+  }
+
+  // ---- Votos, compartir y borrado (delegación de eventos) ----
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if(!btn) return;
+    const action = btn.dataset.action;
+    const id = btn.dataset.id;
+    if(!id) return;
+    const all = loadAllReports();
+    const r = all[id];
+    if(!r) return;
+
+    if(action === 'confirm' || action === 'deny'){
+      const voted = getVoted();
+      if(voted.has(id)){ showToast('Ya votaste en este reporte'); return; }
+      voted.add(id); saveVoted(voted);
+      if(action === 'confirm') r.confirms = (r.confirms||0) + 1;
+      else r.denies = (r.denies||0) + 1;
+
+      if((r.denies||0) - (r.confirms||0) >= DENY_THRESHOLD){
+        delete all[id];
+        saveAllReports(all);
+        removeMarker(id);
+        updateCount();
+        showToast('Reporte retirado por la comunidad');
+        return;
+      }
+      all[id] = r;
+      saveAllReports(all);
+      if(markersById[id]) markersById[id].setPopupContent(popupHtml(id, r));
+      showToast(action === 'confirm' ? 'Gracias por confirmar' : 'Gracias por avisar');
+    }
+
+    if(action === 'share'){
+      const url = `${location.origin}${location.pathname}#r=${encodeURIComponent(id)}`;
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(url).then(
+          () => showToast('Enlace copiado al portapapeles'),
+          () => showToast(url)
+        );
+      } else {
+        showToast(url);
+      }
+    }
+
+    if(action === 'delete'){
+      const mine = getMine();
+      if(!mine.has(id)){ showToast('Solo puedes eliminar tus propios reportes'); return; }
+      delete all[id];
+      saveAllReports(all);
+      mine.delete(id); saveMine(mine);
+      removeMarker(id);
+      updateCount();
+      map.closePopup();
+      showToast('Reporte eliminado');
+    }
+  });
+
+  // ---- Geolocalización continua ("mi ubicación") ----
+  const mapLoader = document.getElementById('map-loader');
+  const locateBtn = document.getElementById('locate-btn');
+  let meMarker = null;
+  let firstFix = true;
+  let lastKnownLatLng = null;
+
+  const meIcon = L.divIcon({
+    className: '',
+    html: `<div class="me-marker"><div class="me-dot"></div></div>`,
+    iconSize:[22,22], iconAnchor:[11,11]
+  });
+
+  function hideLoader(){ mapLoader.hidden = true; }
+
+  function startLocationWatch(){
+    if(!('geolocation' in navigator)){
+      hideLoader();
+      showToast('Este navegador no soporta geolocalización');
+      return;
+    }
+    navigator.geolocation.watchPosition(
+      pos => {
+        const latlng = [pos.coords.latitude, pos.coords.longitude];
+        lastKnownLatLng = latlng;
+        if(!meMarker){
+          meMarker = L.marker(latlng, { icon: meIcon, zIndexOffset: 1000, keyboard:false }).addTo(map);
+        } else {
+          meMarker.setLatLng(latlng);
+        }
+        if(firstFix){
+          map.setView(latlng, 15);
+          firstFix = false;
+          hideLoader();
+          openSharedReportFromHash();
+        }
+      },
+      err => {
+        if(firstFix){
+          hideLoader();
+          showToast('No se pudo obtener tu ubicación. Mostrando Santo Domingo.', true);
+          firstFix = false;
+          openSharedReportFromHash();
+        }
+      },
+      { enableHighAccuracy:true, timeout:8000, maximumAge:5000 }
+    );
+    // Tope de seguridad: no dejar el loader visible más de 8s.
+    setTimeout(() => { if(!mapLoader.hidden) hideLoader(); }, 8500);
+  }
+
+  locateBtn.addEventListener('click', () => {
+    if(lastKnownLatLng){
+      map.setView(lastKnownLatLng, 16);
+    } else {
+      showToast('Aún buscando tu ubicación…');
+    }
+  });
+
+  startLocationWatch();
+
+  // ---- Flujo de reporte ----
+  const overlay = document.getElementById('flow-overlay');
+  const reportBtn = document.getElementById('report-btn');
+  const cameraInput = document.getElementById('camera-input');
+
+  function showToast(msg, warn){
+    const t = document.createElement('div');
+    t.className = 'toast' + (warn ? ' warn' : '');
+    t.textContent = msg;
+    document.getElementById('app').appendChild(t);
+    setTimeout(()=> t.remove(), 2600);
+  }
+
+  function renderSheet(html){
+    overlay.innerHTML = `<div class="sheet">${html}</div>`;
+    overlay.hidden = false;
+  }
+  function closeOverlay(){
+    overlay.hidden = true;
+    overlay.innerHTML = '';
+    overlay.style.pointerEvents = '';
+    pendingLocation = null;
+    pendingPhoto = null;
+    pendingCategory = null;
+    reportBtn.disabled = false;
+    if(manualPickHandler){
+      map.off('click', manualPickHandler);
+      map.getContainer().style.cursor = '';
+      manualPickHandler = null;
+    }
+  }
+
+  let manualPickHandler = null;
+
+  reportBtn.addEventListener('click', () => {
+    if(!canReport()){
+      showToast('Límite de reportes por hora alcanzado. Intenta más tarde.', true);
+      return;
+    }
+    reportBtn.disabled = true;
+    startManualPick();
+  });
+
+  function startManualPick(){
+    renderSheet(`
+      <h2>Marca el lugar</h2>
+      <p class="sub">Toca el punto exacto en el mapa donde está el agente.</p>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
+      </div>
+    `);
+    document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+    overlay.style.pointerEvents = 'none';
+    overlay.querySelector('.sheet').style.pointerEvents = 'auto';
+    map.getContainer().style.cursor = 'crosshair';
+    manualPickHandler = (e) => {
+      pendingLocation = { lat: e.latlng.lat, lng: e.latlng.lng };
+      map.getContainer().style.cursor = '';
+      map.off('click', manualPickHandler);
+      manualPickHandler = null;
+      overlay.style.pointerEvents = '';
+      askForCategory();
+    };
+    map.on('click', manualPickHandler);
+  }
+
+  function askForCategory(){
+    const options = Object.entries(CATEGORIES).map(([key, cat]) => `
+      <button class="cat-option" data-cat="${key}">
+        <span class="emoji">${cat.emoji}</span>
+        <span>${cat.label}</span>
+      </button>
+    `).join('');
+    renderSheet(`
+      <h2>¿Qué estás reportando?</h2>
+      <p class="sub">Elige la categoría que mejor describe la situación.</p>
+      <div class="cat-grid">${options}</div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
+      </div>
+    `);
+    document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+    overlay.querySelectorAll('.cat-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        pendingCategory = btn.dataset.cat;
+        askForPhoto();
+      });
+    });
+  }
+
+  function askForPhoto(){
+    renderSheet(`
+      <h2>Foto obligatoria</h2>
+      <p class="sub">Toma una foto en el lugar. Cada reporte necesita una imagen como comprobante.</p>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
+        <button class="btn btn-primary" id="open-camera-btn">Abrir cámara</button>
+      </div>
+    `);
+    document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+    document.getElementById('open-camera-btn').addEventListener('click', () => cameraInput.click());
+  }
+
+  cameraInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    cameraInput.value = '';
+    if(!file) return;
+    renderSheet(`
+      <h2>Procesando foto</h2>
+      <div class="row-center"><div class="spinner"></div><span style="font-size:13px;color:var(--muted)">Comprimiendo imagen…</span></div>
+    `);
+    try{
+      pendingPhoto = await compressImage(file);
+      askForConfirmation();
+    }catch(err){
+      renderSheet(`
+        <h2>Error con la foto</h2>
+        <div class="error-box">No se pudo procesar la imagen. Intenta de nuevo.</div>
+        <div class="btn-row"><button class="btn btn-ghost" id="cancel-btn">Cerrar</button></div>
+      `);
+      document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+    }
+  });
+
+  function compressImage(file){
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const reader = new FileReader();
+      reader.onload = e => { img.src = e.target.result; };
+      reader.onerror = reject;
+      img.onload = () => {
+        const maxW = 480;
+        const scale = Math.min(1, maxW / img.width);
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function askForConfirmation(){
+    const cat = CATEGORIES[pendingCategory] || CATEGORIES.reten_fijo;
+    renderSheet(`
+      <h2>Confirmar reporte</h2>
+      <span class="cat-label" style="background:${cat.color}">${cat.emoji} ${cat.label}</span>
+      <img class="preview-photo" src="${pendingPhoto}" alt="Vista previa" style="margin-top:8px;">
+      <textarea id="note-input" rows="2" placeholder="Nota opcional (ej: sentido, esquina, hora pico)"></textarea>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="cancel-btn">Descartar</button>
+        <button class="btn btn-primary" id="publish-btn">Publicar</button>
+      </div>
+    `);
+    document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+    document.getElementById('publish-btn').addEventListener('click', publishReport);
+  }
+
+  async function publishReport(){
+    const publishBtn = document.getElementById('publish-btn');
+    publishBtn.disabled = true;
+    publishBtn.textContent = 'Publicando…';
+    const note = document.getElementById('note-input').value.trim().slice(0, 140);
+    const id = `report_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+    const record = {
+      lat: pendingLocation.lat, lng: pendingLocation.lng,
+      photo: pendingPhoto, note, ts: Date.now(),
+      category: pendingCategory || 'reten_fijo',
+      confirms: 0, denies: 0
+    };
+    try{
+      const all = loadAllReports();
+      all[id] = record;
+      const ok = saveAllReports(all);
+      if(!ok) throw new Error('sin respuesta');
+      const mine = getMine(); mine.add(id); saveMine(mine);
+      upsertMarker(id, record);
+      updateCount();
+      map.setView([record.lat, record.lng], 15);
+      closeOverlay();
+      registerReportTime();
+      showToast('Reporte publicado. Gracias por avisar.');
+    }catch(err){
+      renderSheet(`
+        <h2>No se pudo publicar</h2>
+        <div class="error-box">Hubo un problema guardando el reporte. Intenta de nuevo.</div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="cancel-btn">Cerrar</button>
+          <button class="btn btn-primary" id="retry-btn">Reintentar</button>
+        </div>
+      `);
+      document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+      document.getElementById('retry-btn').addEventListener('click', publishReport);
+    }
+  }
+
+  // ---- PWA: service worker (requiere servir por http/https, no file://) ----
+  if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
