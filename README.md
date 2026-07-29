@@ -1,14 +1,21 @@
 # AMET Radar — Prueba local
 
+## Requisitos
+
+- [Node.js](https://nodejs.org/) instalado (cualquier versión reciente, no
+  usa dependencias externas). No necesita `npm install` — `server.js` solo
+  usa módulos nativos de Node.
+
 ## Cómo correrlo
 
 La geolocalización y el service worker (PWA) no funcionan bien abriendo el
-archivo directamente con doble clic (`file://`). Sirve la carpeta con un
-servidor local simple:
+archivo directamente con doble clic (`file://`). Además, ahora los reportes
+se guardan en el servidor (no en el navegador), así que hay que levantar
+`server.js` en vez de un servidor de archivos estático simple:
 
 ```bash
 cd carpeta-donde-estan-los-archivos
-python3 -m http.server 8000
+node server.js
 ```
 
 Luego abre en el navegador (idealmente Chrome/Android o Safari/iOS si vas a
@@ -20,6 +27,20 @@ http://localhost:8000/amet-radar.html
 
 Si quieres probarlo desde tu teléfono en la misma red Wi-Fi, usa la IP de tu
 computadora en vez de `localhost`, por ejemplo `http://192.168.1.20:8000/amet-radar.html`.
+Nota: la geolocalización solo funciona sobre HTTPS o `localhost` — por IP de
+red (`http://`) los navegadores móviles la bloquean por defecto. Para probar
+desde el móvil con geolocalización, usa un túnel HTTPS (ej. `npx localtunnel
+--port 8000`) o activa el flag de Chrome
+`chrome://flags/#unsafely-treat-insecure-origin-as-secure` agregando la IP.
+
+## Reportes compartidos entre dispositivos
+
+`server.js` expone una API (`/api/reports`) que guarda los reportes en
+`data/reports.json`, en el servidor — no en `localStorage` del navegador.
+Cualquier dispositivo que entre a la misma URL (misma red o mismo túnel) ve,
+publica, vota y borra sobre los mismos reportes; el cliente refresca cada 8
+segundos. La carpeta `data/` está en `.gitignore` porque es contenido en
+tiempo de ejecución, no código fuente — en una PC nueva arranca vacía.
 
 ## Qué se implementó de la lista de mejoras
 

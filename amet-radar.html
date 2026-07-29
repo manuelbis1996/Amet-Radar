@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1c1c1e">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
@@ -27,7 +27,7 @@
   }
   *{ box-sizing: border-box; }
   html,body{ margin:0; padding:0; height:100%; background:var(--asphalt); font-family:'Inter',sans-serif; color:var(--signal); overflow:hidden; }
-  #app{ position:relative; width:100%; height:100vh; display:flex; flex-direction:column; }
+  #app{ position:relative; width:100%; height:100vh; height:100dvh; display:flex; flex-direction:column; }
 
   /* Header */
   header{
@@ -73,8 +73,8 @@
   .chip[aria-pressed="true"]{ background:var(--chip-color,var(--caution)); color:var(--asphalt); border-color:var(--chip-color,var(--caution)); }
 
   /* Map */
-  #map{ flex:1; background:var(--asphalt-2); position:relative; }
-  .leaflet-container{ background:var(--asphalt-2); }
+  #map{ flex:1; background:#e8e6e1; position:relative; }
+  .leaflet-container{ background:#e8e6e1; }
 
   #map-loader{
     position:absolute; inset:0; z-index:450; background:rgba(20,20,22,0.75);
@@ -144,7 +144,7 @@
 
   /* FAB row */
   #fab-row{
-    position:absolute; left:0; right:0; bottom:22px;
+    position:absolute; left:0; right:0; bottom:calc(22px + env(safe-area-inset-bottom, 0px));
     display:flex; align-items:center; justify-content:center; gap:10px;
     z-index:400; padding:0 16px;
   }
@@ -177,7 +177,7 @@
   .sheet{
     background: var(--concrete); width:100%; max-width:480px;
     border-radius: 18px 18px 0 0;
-    padding: 20px 20px 26px;
+    padding: 20px 20px calc(26px + env(safe-area-inset-bottom, 0px));
     border-top: 3px solid var(--caution);
   }
   .sheet h2{
@@ -285,23 +285,54 @@
   };
   const activeCategories = new Set(Object.keys(CATEGORIES));
 
-  // ---- Persistencia local (para pruebas en este dispositivo) ----
-  // Nota: esto reemplaza temporalmente un backend real. En producción,
-  // estas mismas funciones deben apuntar a una API/base de datos compartida
-  // para que los reportes se vean entre distintos usuarios.
-  const STORAGE_KEY = 'amet_reports_v1';
+  // ---- Backend compartido (servidor local, ver server.js) ----
+  // Los reportes viven en data/reports.json en el servidor (no en el
+  // navegador), así que cualquier dispositivo que entre a esta misma URL
+  // ve los mismos reportes. reportsCache es la copia en memoria del cliente,
+  // refrescada al cargar y luego por sondeo periódico (ver refreshReports).
+  const API_BASE = '/api/reports';
+  let reportsCache = {};
+
+  async function fetchAllReports(){
+    try{
+      const res = await fetch(API_BASE);
+      if(res.ok) reportsCache = await res.json();
+    }catch(e){ console.error('Error cargando reportes', e); }
+    return reportsCache;
+  }
+
+  async function insertReport(id, record){
+    const res = await fetch(API_BASE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, record })
+    });
+    if(!res.ok) throw new Error('No se pudo publicar el reporte');
+    reportsCache[id] = record;
+  }
+
+  async function updateReportVotes(id, confirms, denies){
+    try{
+      await fetch(`${API_BASE}/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirms, denies })
+      });
+    }catch(e){ console.error('Error actualizando votos', e); }
+    if(reportsCache[id]){ reportsCache[id].confirms = confirms; reportsCache[id].denies = denies; }
+  }
+
+  async function deleteReportRemote(id){
+    try{ await fetch(`${API_BASE}/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+    catch(e){ console.error('Error eliminando reporte', e); }
+    delete reportsCache[id];
+  }
+
+  // ---- Preferencias de este dispositivo (siguen siendo locales) ----
   const VOTED_KEY = 'amet_voted_v1';
   const MINE_KEY = 'amet_my_reports_v1';
   const TIMES_KEY = 'amet_report_times_v1';
 
-  function loadAllReports(){
-    try{ return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
-    catch(e){ return {}; }
-  }
-  function saveAllReports(obj){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); return true; }
-    catch(e){ console.error('No se pudo guardar en localStorage', e); return false; }
-  }
   function getVoted(){ try{ return new Set(JSON.parse(localStorage.getItem(VOTED_KEY)||'[]')); }catch(e){ return new Set(); } }
   function saveVoted(set){ localStorage.setItem(VOTED_KEY, JSON.stringify([...set])); }
   function getMine(){ try{ return new Set(JSON.parse(localStorage.getItem(MINE_KEY)||'[]')); }catch(e){ return new Set(); } }
@@ -319,7 +350,7 @@
   }
 
   const map = L.map('map', { zoomControl:true, attributionControl:false }).setView(DEFAULT_CENTER, 13);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     subdomains:'abcd', maxZoom:19
   }).addTo(map);
 
@@ -418,17 +449,15 @@
   // ---- Renderizado por zona visible + limpieza de vencidos ----
   function renderVisibleMarkers(){
     const bounds = map.getBounds().pad(0.25);
-    const all = loadAllReports();
     const now = Date.now();
-    let changed = false;
 
-    for(const id in all){
-      const r = all[id];
+    for(const id in reportsCache){
+      const r = reportsCache[id];
       const ageMinutes = (now - r.ts) / 60000;
       if(ageMinutes > MAX_AGE_MINUTES){
-        delete all[id];
+        delete reportsCache[id];
         removeMarker(id);
-        changed = true;
+        deleteReportRemote(id);
         continue;
       }
       const inView = bounds.contains(L.latLng(r.lat, r.lng));
@@ -439,21 +468,27 @@
         removeMarker(id);
       }
     }
-    if(changed) saveAllReports(all);
     updateCount();
   }
 
+  // Sondeo periódico: así se ven los reportes que publican otros usuarios
+  // desde otro dispositivo, no solo los que crea este navegador.
+  async function refreshReports(){
+    await fetchAllReports();
+    renderVisibleMarkers();
+  }
+
   map.on('moveend zoomend', renderVisibleMarkers);
-  renderVisibleMarkers();
-  setInterval(renderVisibleMarkers, 20000);
+  const reportsReady = refreshReports();
+  setInterval(refreshReports, 8000);
 
   // ---- Deep link: abrir un reporte compartido ----
-  function openSharedReportFromHash(){
+  async function openSharedReportFromHash(){
     const match = location.hash.match(/r=([^&]+)/);
     if(!match) return;
+    await reportsReady;
     const id = decodeURIComponent(match[1]);
-    const all = loadAllReports();
-    const r = all[id];
+    const r = reportsCache[id];
     if(!r) return;
     map.setView([r.lat, r.lng], 16);
     setTimeout(() => {
@@ -463,34 +498,31 @@
   }
 
   // ---- Votos, compartir y borrado (delegación de eventos) ----
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-action]');
     if(!btn) return;
     const action = btn.dataset.action;
     const id = btn.dataset.id;
     if(!id) return;
-    const all = loadAllReports();
-    const r = all[id];
+    const r = reportsCache[id];
     if(!r) return;
 
     if(action === 'confirm' || action === 'deny'){
       const voted = getVoted();
       if(voted.has(id)){ showToast('Ya votaste en este reporte'); return; }
       voted.add(id); saveVoted(voted);
-      if(action === 'confirm') r.confirms = (r.confirms||0) + 1;
-      else r.denies = (r.denies||0) + 1;
+      const confirms = (r.confirms||0) + (action === 'confirm' ? 1 : 0);
+      const denies = (r.denies||0) + (action === 'deny' ? 1 : 0);
 
-      if((r.denies||0) - (r.confirms||0) >= DENY_THRESHOLD){
-        delete all[id];
-        saveAllReports(all);
+      if(denies - confirms >= DENY_THRESHOLD){
+        await deleteReportRemote(id);
         removeMarker(id);
         updateCount();
         showToast('Reporte retirado por la comunidad');
         return;
       }
-      all[id] = r;
-      saveAllReports(all);
-      if(markersById[id]) markersById[id].setPopupContent(popupHtml(id, r));
+      await updateReportVotes(id, confirms, denies);
+      if(markersById[id]) markersById[id].setPopupContent(popupHtml(id, reportsCache[id]));
       showToast(action === 'confirm' ? 'Gracias por confirmar' : 'Gracias por avisar');
     }
 
@@ -509,8 +541,7 @@
     if(action === 'delete'){
       const mine = getMine();
       if(!mine.has(id)){ showToast('Solo puedes eliminar tus propios reportes'); return; }
-      delete all[id];
-      saveAllReports(all);
+      await deleteReportRemote(id);
       mine.delete(id); saveMine(mine);
       removeMarker(id);
       updateCount();
@@ -601,6 +632,7 @@
     overlay.hidden = true;
     overlay.innerHTML = '';
     overlay.style.pointerEvents = '';
+    overlay.style.background = '';
     pendingLocation = null;
     pendingPhoto = null;
     pendingCategory = null;
@@ -623,6 +655,8 @@
     startManualPick();
   });
 
+  const PICK_ZOOM = 18;
+
   function startManualPick(){
     renderSheet(`
       <h2>Marca el lugar</h2>
@@ -633,8 +667,12 @@
     `);
     document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
     overlay.style.pointerEvents = 'none';
+    overlay.style.background = 'transparent';
     overlay.querySelector('.sheet').style.pointerEvents = 'auto';
     map.getContainer().style.cursor = 'crosshair';
+    if(map.getZoom() < PICK_ZOOM){
+      map.flyTo(lastKnownLatLng || map.getCenter(), PICK_ZOOM, { duration: 0.5 });
+    }
     manualPickHandler = (e) => {
       pendingLocation = { lat: e.latlng.lat, lng: e.latlng.lng };
       map.getContainer().style.cursor = '';
@@ -647,6 +685,7 @@
   }
 
   function askForCategory(){
+    overlay.style.background = '';
     const options = Object.entries(CATEGORIES).map(([key, cat]) => `
       <button class="cat-option" data-cat="${key}">
         <span class="emoji">${cat.emoji}</span>
@@ -755,10 +794,7 @@
       confirms: 0, denies: 0
     };
     try{
-      const all = loadAllReports();
-      all[id] = record;
-      const ok = saveAllReports(all);
-      if(!ok) throw new Error('sin respuesta');
+      await insertReport(id, record);
       const mine = getMine(); mine.add(id); saveMine(mine);
       upsertMarker(id, record);
       updateCount();
