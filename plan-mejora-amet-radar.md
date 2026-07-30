@@ -1,114 +1,170 @@
 # Plan de Mejora — AMET Radar
 
-Análisis del archivo `amet-radar.html`: app de reportes comunitarios de retenes/AMET sobre mapa Leaflet, con flujo de reporte (ubicación + foto obligatoria + nota) y almacenamiento compartido.
+App de reportes comunitarios de retenes/AMET sobre mapa Leaflet, con flujo
+de reporte (ubicación + foto obligatoria + nota), backend real en Supabase
+y panel de administración. Este plan reemplaza la versión original (que
+describía la app todavía sobre `localStorage`, sin backend compartido) —
+casi todo lo que proponía ya está hecho; ver "Ya implementado" abajo.
 
 Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 
 ---
 
-## 1. Arquitectura y datos
+## Ya implementado (no reabrir sin razón)
 
-**🔴 Migrar de `window.storage` a un backend real**
-Esta API solo funciona dentro del entorno de artifacts de Claude.ai. Para publicar la app en un dominio propio se necesita:
-- Backend con base de datos (Supabase, Firebase, o API propia)
-- Almacenamiento de imágenes en un bucket (S3, Cloudinary) en vez de base64 en la base de datos
-- Esfuerzo: alto · Bloqueante para lanzamiento real.
+- **Backend real**: Supabase (tabla `public.reports`), no `localStorage` ni
+  archivo del servidor — cualquier dispositivo ve/publica/vota/borra sobre
+  los mismos reportes.
+- **Confirmación comunitaria**: botones "Sigue ahí" / "Ya no está"; se
+  retira solo con suficientes negaciones.
+- **Categorías**: retén fijo, retén móvil, accidente, control de tránsito.
+- **Filtrado por zona visible** en el mapa.
+- **Manejo de geolocalización denegada** con aviso y centro por defecto.
+- **PWA instalable** (`manifest.json` + `sw.js`).
+- **Compartir por deep link** (`?r=<id>`) + preview dinámico por reporte
+  para bots de WhatsApp/Twitter (Netlify Edge Function).
+- **Notificaciones push por cercanía**, con filtro por categoría.
+- **Panel de administración** (`admin.html`): moderar reportes, ver
+  estadísticas, editar parámetros del sistema (`app_config`), protegido
+  por password vía Edge Function `admin-login`.
+- **Anti-spam** cliente (3 reportes/hora) y reporte rápido sin foto
+  (`approx: true`, círculo de zona aproximada).
 
-**🔴 Rediseñar el modelo de lectura de reportes**
-Hoy: `list()` + un `get()` por cada reporte cada 20s (N+1 queries).
-Propuesta: guardar los reportes activos en una sola clave tipo `reports:activos` como array/objeto, actualizada al publicar/expirar, y leerla con una sola llamada. Reduce drásticamente las peticiones.
-- Esfuerzo: medio.
-
-**🟡 Limpieza automática de reportes vencidos**
-Actualmente los reportes con `ageMinutes > MAX_AGE_MINUTES` solo se ocultan del mapa, nunca se borran del storage. Agregar una rutina (client-side al cargar, o job de backend) que haga `delete()` de los vencidos.
-- Esfuerzo: bajo.
-
-**🟢 Compresión de imagen más agresiva**
-480px / calidad 0.6 está bien, pero conviene limitar tamaño máximo final (ej. rechazar/comprimir más si el resultado supera ~150KB) para no acercarse al límite de 5MB por clave con muchas fotos.
-- Esfuerzo: bajo.
+Detalle completo de cómo funciona cada uno en `CLAUDE.md`.
 
 ---
 
-## 2. Producto y funcionalidad
+## 1. Seguridad (la brecha más real hoy)
 
-**🔴 Confirmación comunitaria ("sigue ahí" / "ya no está")**
-Sin esto, la confianza en los reportes se degrada rápido. Añadir botones de voto en el popup que ajusten un contador; con suficientes votos "ya no está" se elimina antes del `MAX_AGE_MINUTES`.
+**🔴 RLS completamente abierta en Supabase**
+`reports`, `push_subscriptions` (insert/update/delete) y `app_config`
+tienen políticas `USING (true)` — cualquiera con la anon key (pública,
+embebida en el HTML) puede borrar o editar cualquier fila de cualquier
+tabla pegándole directo a la REST API, sin pasar por la UI ni por el
+panel admin. Ya se aceptó como diseño consciente para el volumen actual,
+pero ahora que hay un panel admin real vale evaluar mediar el DELETE de
+reportes (y la edición de `app_config`) a través de una Postgres function
+o Edge Function con lógica propia (rate limit, registro de quién borró),
+en vez de dejar la tabla abierta a cualquiera.
+- Esfuerzo: alto (implica autenticación real o funciones + revocar
+  acceso directo a la tabla). Bloqueante solo si el proyecto crece a un
+  punto donde el abuso se vuelva un problema real.
+
+**🟡 Rate-limit de `admin-login` no persiste**
+Vive en memoria de la instancia del Edge Function; se resetea en cada
+cold start (Supabase puede reciclar instancias en cualquier momento).
+Pasar el contador de intentos a una tabla (`admin_login_attempts`) lo
+haría un límite real en vez de best-effort.
+- Esfuerzo: bajo.
+
+**🟢 Documentar el modelo de "gate de conveniencia" para el password de admin**
+Ya está anotado en `CLAUDE.md` que el login de `admin.html` no protege
+datos reales (la RLS abierta ya los expone). Si en algún momento se agrega
+autenticación de usuarios de verdad, revisar esto junto con el punto de
+RLS de arriba, no por separado.
+- Esfuerzo: n/a, solo mantenerlo en mente.
+
+---
+
+## 2. Datos y escalabilidad
+
+**🟡 Fotos en base64 dentro de `reports.photo`**
+Cada fila carga la imagen completa codificada; `GET .../reports?select=*`
+trae *todas* las fotos en cada refresh de 8s, para todos los reportes
+activos. Migrar a Supabase Storage (subir el archivo, guardar solo la
+URL en la fila) reduce el tamaño de cada fila y el payload de cada
+refresco.
 - Esfuerzo: medio.
 
-**🟡 Categorías de reporte**
-Hoy todo es un ícono fijo (👮). Agregar tipos: retén fijo, retén móvil, accidente, control de tránsito — con íconos y colores distintos, y filtro por tipo.
+**🟡 Sin límite/paginación en el fetch de reportes**
+Se trae la tabla entera en cada poll; el filtrado por zona visible ya
+existe pero es client-side (`renderVisibleMarkers`), el fetch trae todo
+igual. No es un problema con el volumen actual, pero no escala si crece
+mucho la cantidad de reportes activos simultáneos.
 - Esfuerzo: medio.
 
-**🟡 Filtrado por zona visible**
-Cargar solo los reportes dentro del viewport/radio actual del mapa en vez de todos los activos. Importante en cuanto crezca el volumen de datos.
-- Esfuerzo: medio.
+**🟢 Polling de 8s en vez de Supabase Realtime**
+Supabase soporta suscripciones en tiempo real sobre la tabla `reports`;
+reemplazar el `setInterval(refreshReports, 8000)` por una suscripción
+bajaría la latencia de "ver un reporte nuevo" y el tráfico redundante de
+polling constante.
+- Esfuerzo: medio-alto, cambio de patrón — no crítico hoy.
 
-**🟡 Gestión de reporte propio**
-Permitir borrar o editar un reporte que el propio usuario acaba de publicar (ej. guardando su ID en localStorage/sessionStorage del dispositivo).
+---
+
+## 3. Producto y funcionalidad
+
+**🟡 Editar (no solo borrar) un reporte propio**
+Hoy `getMine()` solo habilita "Eliminar" en el popup; permitir corregir
+la nota o la categoría de un reporte recién publicado evitaría el ciclo
+de borrar y volver a publicar por un error de tipeo.
 - Esfuerzo: bajo-medio.
 
-**🟢 Límite de reportes por usuario/hora**
-Prevención básica de spam o abuso, aunque sea heurística (ej. basada en dispositivo/IP en el backend).
-- Esfuerzo: medio (requiere backend).
+**🟢 Colapsar notificaciones push repetidas**
+Documentado como decisión consciente de no hacerlo todavía ("sin volumen
+real de suscriptores para que el ruido sea un dolor real") — repriorizar
+si empieza a haber varios reportes cercanos en poco tiempo y empiezan a
+quejarse los usuarios.
+- Esfuerzo: medio.
+
+**🟢 Imagen OG dinámica por reporte**
+El preview por WhatsApp/Twitter reusa `icon-512.png` genérico en vez de
+un thumbnail del mapa centrado en el reporte — quedó fuera de alcance a
+propósito al construir el preview dinámico, por simplicidad. Mejora
+cosmética, no urgente.
+- Esfuerzo: medio-alto.
 
 ---
 
-## 3. Confiabilidad y manejo de errores
+## 4. Accesibilidad
 
-**🔴 Manejo explícito de permiso de geolocalización denegado**
-Hoy si el usuario rechaza el permiso, simplemente no pasa nada (`() => {}`). Mostrar un mensaje o mantener el centro por defecto con aviso.
+**🟡 `admin.html` no tiene ningún `aria-label`**
+La app principal (`amet-radar.html`) sí los tiene en sus botones de
+ícono; el panel admin quedó afuera de esa convención al construirse.
+Etiquetar los botones de acción (eliminar, guardar, cerrar sesión) para
+que quede a la par del resto del proyecto.
 - Esfuerzo: bajo.
 
-**🟡 Estado de carga inicial del mapa/reportes**
-No hay feedback visual mientras se cargan los primeros reportes. Agregar un loader breve.
-- Esfuerzo: bajo.
-
-**🟢 Reintento offline**
-Si `publishReport` falla por falta de conexión, guardar el intento localmente y reintentar cuando vuelva la red.
+**🟢 Soporte de teclado para elegir ubicación en el reporte manual**
+El picker de ubicación sigue dependiendo de un click en el mapa; una
+alternativa por dirección/buscador serviría para quien no puede
+interactuar con el mapa táctil.
 - Esfuerzo: medio.
 
 ---
 
-## 4. Accesibilidad y UI
+## 5. Calidad y DX
 
-**🟡 Contraste y etiquetas ARIA**
-Revisar contraste de `--muted` (#9a9a9e) sobre fondo oscuro y añadir `aria-label` a botones de ícono (📍, cámara).
-- Esfuerzo: bajo.
-
-**🟢 Soporte de teclado en el flujo de reporte**
-El picker de ubicación depende de clic en el mapa; considerar alternativa accesible (buscar dirección) para quienes no pueden interactuar con el mapa táctil.
+**🟡 Cero tests, cero CI**
+No hay `.github/workflows` ni suite de tests en el repo. El proyecto ya
+tiene lógica no trivial (RLS, Edge Functions, trigger de notificaciones,
+panel admin) que se puede romper en silencio con un cambio sin querer.
+Un smoke test automatizado en cada push a `main` (ej. GitHub Actions
+corriendo un check básico contra la app desplegada, o el mismo flujo de
+Playwright que se usó manualmente para validar `admin.html` en esta
+sesión) evitaría regresiones que hoy solo se detectan probando a mano.
 - Esfuerzo: medio.
 
----
-
-## 5. Distribución
-
-**🟡 Convertir en PWA instalable**
-Manifest + service worker para que funcione como app real en la calle (uso principal esperado: mientras se conduce). Incluye ícono, splash screen y modo standalone.
-- Esfuerzo: medio.
-
-**🟢 Compartir reporte individual (deep link)**
-Generar un enlace que abra el mapa centrado en un reporte específico, útil para compartir por WhatsApp.
-- Esfuerzo: bajo.
+**🟢 Vigilar que `server.js` no vuelva a acumular lógica de API**
+Hoy `server.js` es puro servidor de archivos estáticos para desarrollo
+local (correcto, documentado) — si en el futuro alguien le vuelve a
+agregar rutas `/api/*` sin querer, diverge silenciosamente del modelo
+real en Supabase. No es un problema actual, solo un riesgo a vigilar en
+PRs futuros.
+- Esfuerzo: n/a, solo revisión.
 
 ---
 
-## Orden sugerido de implementación
+## Orden sugerido
 
-1. Backend real + modelo de datos consolidado (base indispensable)
-2. Limpieza automática de reportes vencidos
-3. Confirmación comunitaria ("sigue ahí" / "ya no está")
-4. Manejo de errores de geolocalización + estado de carga
-5. Categorías de reporte + filtrado por zona
-6. PWA instalable
-7. Resto de mejoras de accesibilidad y pulido
-
----
-
-## Estado de implementación (prueba local)
-
-Las mejoras de las secciones 2, 3, 4 y 5 ya están implementadas en
-`amet-radar.html` para pruebas locales, usando `localStorage` como
-almacenamiento temporal en vez de un backend compartido (ver README.md).
-El punto pendiente y bloqueante para producción sigue siendo migrar a un
-backend real que sincronice reportes entre distintos usuarios/dispositivos.
+1. `aria-label` en `admin.html` (rápido, cierra una inconsistencia recién
+   introducida)
+2. Rate-limit persistente de `admin-login`
+3. Fotos a Supabase Storage (impacto directo en performance del refresh)
+4. Editar reporte propio
+5. Smoke test / CI básico
+6. Evaluar mediar el DELETE de reportes con lógica propia (el ítem de
+   seguridad más grande, pero también el de mayor esfuerzo — requiere
+   decisión de producto sobre autenticación real antes de encararlo)
+7. Resto (Realtime, paginación, imagen OG dinámica, notificaciones
+   colapsadas, teclado en el picker)
