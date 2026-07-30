@@ -119,6 +119,27 @@ key embebida en el `<script>` — no hay backend propio de por medio.
   así que es equivalente al CORS abierto que tenía antes `server.js`; el
   linter de Supabase marca esto como warning esperado, no como bug.
 - `server.js` ya no expone ninguna ruta `/api/*`.
+- **`photo` guarda una URL, no base64**: bucket público `report-photos` en
+  Supabase Storage, archivo `<id-del-reporte>.jpg`. `uploadPhoto()` en
+  `amet-radar.html` sube la foto comprimida (`compressImage()`, sigue
+  produciendo un `data:` URL igual que antes) y guarda la URL pública
+  (`{SUPABASE_URL}/storage/v1/object/public/report-photos/<id>.jpg`) en
+  vez del base64 completo — antes cada fila cargaba la imagen entera y
+  `GET .../reports?select=*` la traía completa en cada refresh de 8s, para
+  todos los reportes activos. `deleteReportRemote()`
+  (`amet-radar.html`)/`deleteReport()` (`admin.html`) borran la foto del
+  bucket al borrar el reporte (best-effort, `deletePhoto()`, no bloquea el
+  borrado si falla). Bucket con políticas abiertas de insert/delete para
+  `anon` en `storage.objects` (mismo criterio que `reports`), sin política
+  de select — un bucket `public` sirve sus objetos vía
+  `/object/public/<bucket>/<path>` sin pasar por RLS. Las filas existentes
+  con foto en base64 (de antes de esta migración) no se reprocesaron —
+  siguen renderizando igual, un `data:` URL y una URL de Storage son
+  ambos valores válidos de `<img src>`. La cola offline
+  (`amet_pending_queue_v1`) sigue guardando el base64 en `localStorage`
+  hasta que hay red — recién en `flushPendingQueue()` se sube a Storage
+  (detectado por el prefijo `data:` en `record.photo`, para no
+  re-subir si ya se subió en un intento previo).
 
 ## Notificaciones push por cercanía
 La app avisa (aunque esté cerrada) cuando alguien publica un reporte nuevo

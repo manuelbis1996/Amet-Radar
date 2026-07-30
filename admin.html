@@ -168,6 +168,7 @@
   const REPORTS_URL = `${SUPABASE_URL}/rest/v1/reports`;
   const CONFIG_URL = `${SUPABASE_URL}/rest/v1/app_config`;
   const ADMIN_LOGIN_URL = `${SUPABASE_URL}/functions/v1/admin-login`;
+  const PHOTOS_BUCKET_URL = `${SUPABASE_URL}/storage/v1/object/report-photos`;
   const SUPABASE_HEADERS = {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -320,6 +321,19 @@
     });
   }
 
+  // Best-effort: no bloquea el borrado del reporte si falla (ej. reporte
+  // rápido sin foto, o filas viejas con foto en base64 sin objeto en
+  // Storage). Mismo nombre de archivo <id>.jpg que usa uploadPhoto() en
+  // amet-radar.html.
+  async function deletePhoto(id){
+    try{
+      await fetch(`${PHOTOS_BUCKET_URL}/${id}.jpg`, {
+        method: 'DELETE',
+        headers: SUPABASE_HEADERS
+      });
+    }catch(e){ /* no-op */ }
+  }
+
   async function deleteReport(id){
     if(!confirm('¿Eliminar este reporte?')) return;
     try{
@@ -327,6 +341,7 @@
         method: 'DELETE',
         headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' }
       });
+      deletePhoto(id);
       showToast('Reporte eliminado');
       await fetchReports();
       renderReportsTable();

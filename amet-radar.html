@@ -417,6 +417,8 @@
   const SUPABASE_ANON_KEY = 'sb_publishable_p8U6gvvBwPVHdfmspjyCXA_g6clP58v';
   const REPORTS_URL = `${SUPABASE_URL}/rest/v1/reports`;
   const CONFIG_URL = `${SUPABASE_URL}/rest/v1/app_config`;
+  const PHOTOS_BUCKET_URL = `${SUPABASE_URL}/storage/v1/object/report-photos`;
+  const PHOTOS_PUBLIC_URL = `${SUPABASE_URL}/storage/v1/object/public/report-photos`;
   const SUPABASE_HEADERS = {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -485,6 +487,43 @@
 
   class NetworkError extends Error {}
 
+  // Sube la foto comprimida (data: URL de compressImage) a Supabase
+  // Storage y devuelve la URL pública — reemplaza guardar el base64
+  // completo en reports.photo (ver "Datos y escalabilidad" en
+  // plan-mejora-amet-radar.md). El nombre del archivo es <id>.jpg, así
+  // deletePhoto() puede borrar la foto de un reporte por el mismo id.
+  async function uploadPhoto(id, dataUrl){
+    const blob = await (await fetch(dataUrl)).blob();
+    let res;
+    try{
+      res = await fetch(`${PHOTOS_BUCKET_URL}/${id}.jpg`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'image/jpeg'
+        },
+        body: blob
+      });
+    }catch(e){
+      throw new NetworkError('Sin conexión');
+    }
+    if(!res.ok) throw new Error('No se pudo subir la foto');
+    return `${PHOTOS_PUBLIC_URL}/${id}.jpg`;
+  }
+
+  // Best-effort: no bloquea el borrado del reporte si falla (ej. reporte
+  // rápido sin foto, o filas viejas con foto en base64 que nunca tuvieron
+  // un objeto en Storage para empezar).
+  async function deletePhoto(id){
+    try{
+      await fetch(`${PHOTOS_BUCKET_URL}/${id}.jpg`, {
+        method: 'DELETE',
+        headers: SUPABASE_HEADERS
+      });
+    }catch(e){ /* no-op */ }
+  }
+
   async function insertReport(id, record){
     let res;
     try{
@@ -518,6 +557,7 @@
         headers: SUPABASE_HEADERS
       });
     }catch(e){ console.error('Error eliminando reporte', e); }
+    deletePhoto(id);
     delete reportsCache[id];
   }
 
@@ -764,6 +804,14 @@
           continue;
         }
         try{
+          // record.photo sigue en base64 si uploadPhoto no llegó a correr
+          // (offline desde el momento de publicar); si ya se subió en un
+          // intento previo, ya es una URL de Storage y no hace falta
+          // volver a subirla.
+          if(item.record.photo && item.record.photo.startsWith('data:')){
+            item.record.photo = await uploadPhoto(item.id, item.record.photo);
+            savePendingQueue(pendingQueue);
+          }
           await insertReport(item.id, item.record);
           dequeuePending(item.id);
           upsertMarker(item.id, item.record);
@@ -1441,6 +1489,7 @@
       confirms: 0, denies: 0
     };
     try{
+      record.photo = await uploadPhoto(id, record.photo);
       await insertReport(id, record);
       const mine = getMine(); mine.add(id); saveMine(mine);
       upsertMarker(id, record);
@@ -1451,6 +1500,9 @@
       showToast('Reporte publicado. Gracias por avisar.');
     }catch(err){
       if(err instanceof NetworkError){
+        // Si uploadPhoto falló antes de terminar, record.photo sigue
+        // siendo el data: URL original — flushPendingQueue lo sube
+        // recién cuando vuelva la red (ver ahí el chequeo por prefijo).
         enqueuePending(id, record); // antes de upsertMarker, para que ya se vea "pending"
         const mine = getMine(); mine.add(id); saveMine(mine);
         upsertMarker(id, record);

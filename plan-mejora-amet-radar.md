@@ -67,13 +67,16 @@ RLS de arriba, no por separado.
 
 ## 2. Datos y escalabilidad
 
-**🟡 Fotos en base64 dentro de `reports.photo`**
-Cada fila carga la imagen completa codificada; `GET .../reports?select=*`
-trae *todas* las fotos en cada refresh de 8s, para todos los reportes
-activos. Migrar a Supabase Storage (subir el archivo, guardar solo la
-URL en la fila) reduce el tamaño de cada fila y el payload de cada
-refresco.
-- Esfuerzo: medio.
+**✅ Fotos en base64 dentro de `reports.photo` — resuelto**
+Bucket público `report-photos` en Supabase Storage (nombre de archivo
+`<id-del-reporte>.jpg`). `publishReport()` sube la foto comprimida antes
+de insertar el reporte y guarda la URL pública en `photo` en vez del
+base64 completo; `deleteReportRemote()`/`deleteReport()` (admin) borran
+la foto al borrar el reporte. La cola offline (`flushPendingQueue`) sigue
+guardando el base64 en `localStorage` hasta que hay red, y recién ahí lo
+sube. Las filas viejas con foto en base64 no se migraron (bajo volumen) —
+siguen renderizando igual, un `data:` URL y una URL de Storage son ambos
+valores válidos de `<img src>`.
 
 **🟡 Sin límite/paginación en el fetch de reportes**
 Se trae la tabla entera en cada poll; el filtrado por zona visible ya
@@ -160,7 +163,7 @@ PRs futuros.
 
 1. ~~`aria-label` en `admin.html`~~ ✅ hecho
 2. ~~Rate-limit persistente de `admin-login`~~ ✅ hecho
-3. Fotos a Supabase Storage (impacto directo en performance del refresh)
+3. ~~Fotos a Supabase Storage~~ ✅ hecho
 4. Editar reporte propio
 5. Smoke test / CI básico
 6. Evaluar mediar el DELETE de reportes con lógica propia (el ítem de
