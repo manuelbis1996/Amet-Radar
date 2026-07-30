@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#12141a">
+<meta name="description" content="Reportes comunitarios de retenes de tránsito en tiempo real en Santo Domingo.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AMET Radar">
+<meta property="og:description" content="Reportes comunitarios de retenes de tránsito en tiempo real en Santo Domingo.">
+<meta property="og:url" content="https://amet-radar.netlify.app/">
+<meta property="og:image" content="https://amet-radar.netlify.app/icon-512.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="AMET Radar">
+<meta name="twitter:description" content="Reportes comunitarios de retenes de tránsito en tiempo real en Santo Domingo.">
+<meta name="twitter:image" content="https://amet-radar.netlify.app/icon-512.png">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -85,6 +95,18 @@
     color:var(--amber); font-size:21px; display:block; line-height:1.15;
     font-variant-numeric:tabular-nums; font-weight:600;
   }
+  .header-actions{ display:flex; align-items:center; gap:12px; }
+  #push-toggle-btn{
+    width:34px; height:34px; border-radius:50%; flex-shrink:0;
+    background: rgba(32,37,46,0.85); border:1px solid var(--line); color:var(--muted);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; transition: transform 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  #push-toggle-btn svg{ width:16px; height:16px; }
+  #push-toggle-btn:active{ transform:scale(0.9); }
+  #push-toggle-btn[data-state="active"]{ color:var(--amber); border-color:var(--amber-dim); }
+  #push-toggle-btn[data-state="loading"]{ opacity:.55; cursor:default; }
+  #push-toggle-btn[hidden]{ display:none; }
 
   /* Filter chips */
   #filters{
@@ -318,7 +340,12 @@
         <p>Reportes de la comunidad<span class="version-tag" id="app-version"></span></p>
       </div>
     </div>
-    <div class="stat"><b id="stat-count">0</b>en vista</div>
+    <div class="header-actions">
+      <div class="stat"><b id="stat-count">0</b>en vista</div>
+      <button id="push-toggle-btn" data-state="inactive" aria-label="Avisarme de retenes cerca" title="Avisarme de retenes cerca" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      </button>
+    </div>
   </header>
 
   <div id="filters" role="group" aria-label="Filtrar por categoría"></div>
@@ -349,7 +376,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v5.0';
+  const APP_VERSION = 'v6.0';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const STALE_MINUTES = 180;   // a partir de aqui se consideran "viejos"
   const MAX_AGE_MINUTES = 360; // se ocultan/borran pasado este tiempo
@@ -386,6 +413,18 @@
     'Content-Type': 'application/json'
   };
   let reportsCache = {};
+
+  // ---- Notificaciones push por cercanía ----
+  // Avisa (aunque la app esté cerrada) cuando alguien publica un reporte
+  // nuevo cerca de la última posición conocida de este dispositivo. La
+  // suscripción vive en la tabla push_subscriptions de Supabase; el envío
+  // real lo hace el Edge Function notify-nearby, disparado por un trigger
+  // en cada INSERT sobre reports (ver CLAUDE.md).
+  const VAPID_PUBLIC_KEY = 'BOg_VDCTXvRF0l9cLLFI_sGgWGkiyVb3SmIu93c8bcFatvEcxzSPfqUwvAfaO6X8nMdVH596vW0pIAdhaHe5nKY';
+  const PUSH_SUBS_URL = `${SUPABASE_URL}/rest/v1/push_subscriptions`;
+  const PUSH_ENDPOINT_KEY = 'amet_push_endpoint_v1';
+  const PUSH_POS_UPDATE_MIN_METERS = 400;
+  const PUSH_POS_UPDATE_MIN_MS = 5 * 60 * 1000;
 
   async function fetchAllReports(){
     try{
@@ -507,6 +546,18 @@
   // en una dirección aleatoria. El reporte rápido la usa solo para variar
   // el centro del círculo de zona; la imprecisión real la da el radio
   // (APPROX_RADIUS_METERS) que se dibuja alrededor, no este desplazamiento.
+  // Distancia real entre dos puntos (Haversine) — usada para decidir si
+  // vale la pena reportar la nueva posición de la suscripción push, no
+  // para nada relacionado al jitter de abajo.
+  function distanceMeters(lat1, lng1, lat2, lng2){
+    const R = 6371000;
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
   function jitterLocation(lat, lng, minMeters, maxMeters){
     const angle = Math.random() * Math.PI * 2;
     const dist = minMeters + Math.random() * (maxMeters - minMeters);
@@ -707,11 +758,10 @@
   window.addEventListener('online', flushPendingQueue);
 
   // ---- Deep link: abrir un reporte compartido ----
-  async function openSharedReportFromHash(){
-    const match = location.hash.match(/r=([^&]+)/);
-    if(!match) return;
-    await reportsReady;
-    const id = decodeURIComponent(match[1]);
+  // openReportById es la parte reutilizable (centrar mapa + abrir popup);
+  // la usan tanto el link con hash #r= como el click en una notificación
+  // push mientras la app ya está abierta (ver listener de 'message' más abajo).
+  function openReportById(id){
     const r = reportsCache[id];
     if(!r) return;
     map.setView([r.lat, r.lng], 16);
@@ -719,6 +769,135 @@
       upsertMarker(id, r);
       markersById[id] && markersById[id].openPopup();
     }, 300);
+  }
+
+  async function openSharedReportFromHash(){
+    const match = location.hash.match(/r=([^&]+)/);
+    if(!match) return;
+    await reportsReady;
+    openReportById(decodeURIComponent(match[1]));
+  }
+
+  // ---- Notificaciones push: suscripción y estado del botón ----
+  function urlBase64ToUint8Array(base64String){
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+  }
+
+  const pushToggleBtn = document.getElementById('push-toggle-btn');
+  function setPushButtonState(state){ pushToggleBtn.dataset.state = state; }
+
+  async function subscribeToPush(){
+    setPushButtonState('loading');
+    try{
+      const permission = await Notification.requestPermission();
+      if(permission !== 'granted'){
+        showToast('Necesitamos permiso de notificaciones para poder avisarte');
+        setPushButtonState('inactive');
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+      const json = sub.toJSON();
+      const latlng = lastKnownLatLng || [DEFAULT_CENTER[0], DEFAULT_CENTER[1]];
+      // Sin política de SELECT en push_subscriptions a propósito (ver
+      // CLAUDE.md), así que un upsert con on_conflict/return=representation
+      // falla: PostgREST necesita "leer de vuelta" la fila para resolverlo,
+      // y esa lectura choca con la ausencia deliberada de esa política.
+      // Se resuelve con DELETE (no-op si no existía) + POST simple, ambos
+      // con return=minimal, en vez de un upsert.
+      await fetch(`${PUSH_SUBS_URL}?endpoint=eq.${encodeURIComponent(json.endpoint)}`, {
+        method: 'DELETE', headers: SUPABASE_HEADERS
+      });
+      const res = await fetch(PUSH_SUBS_URL, {
+        method: 'POST',
+        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({
+          endpoint: json.endpoint,
+          p256dh: json.keys.p256dh,
+          auth: json.keys.auth,
+          lat: latlng[0], lng: latlng[1],
+          updated_at: new Date().toISOString()
+        })
+      });
+      if(!res.ok) throw new Error('No se pudo guardar la suscripción');
+      localStorage.setItem(PUSH_ENDPOINT_KEY, json.endpoint);
+      lastPushPosUpdate = { latlng, ts: Date.now() };
+      setPushButtonState('active');
+      showToast('Listo, te vamos a avisar de retenes cerca');
+    }catch(err){
+      console.error('Error suscribiendo a push', err);
+      showToast('No se pudo activar el aviso de retenes cerca');
+      setPushButtonState('inactive');
+    }
+  }
+
+  async function unsubscribeFromPush(){
+    setPushButtonState('loading');
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(sub){
+        await fetch(`${PUSH_SUBS_URL}?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {
+          method: 'DELETE', headers: SUPABASE_HEADERS
+        });
+        await sub.unsubscribe();
+      }
+    }catch(err){ console.error('Error cancelando suscripción push', err); }
+    localStorage.removeItem(PUSH_ENDPOINT_KEY);
+    setPushButtonState('inactive');
+    showToast('Avisos de retenes cerca desactivados');
+  }
+
+  let lastPushPosUpdate = null;
+  async function updatePushSubscriptionPosition(latlng){
+    if(pushToggleBtn.dataset.state !== 'active') return;
+    if(lastPushPosUpdate){
+      const elapsed = Date.now() - lastPushPosUpdate.ts;
+      const moved = distanceMeters(lastPushPosUpdate.latlng[0], lastPushPosUpdate.latlng[1], latlng[0], latlng[1]);
+      if(elapsed < PUSH_POS_UPDATE_MIN_MS && moved < PUSH_POS_UPDATE_MIN_METERS) return;
+    }
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(!sub) return;
+      await fetch(`${PUSH_SUBS_URL}?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {
+        method: 'PATCH',
+        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ lat: latlng[0], lng: latlng[1], updated_at: new Date().toISOString() })
+      });
+      lastPushPosUpdate = { latlng, ts: Date.now() };
+    }catch(err){ console.error('Error actualizando posición de suscripción push', err); }
+  }
+
+  async function initPushUI(){
+    if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+    pushToggleBtn.hidden = false;
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      setPushButtonState(sub ? 'active' : 'inactive');
+    }catch(err){ setPushButtonState('inactive'); }
+
+    pushToggleBtn.addEventListener('click', () => {
+      if(pushToggleBtn.dataset.state === 'loading') return;
+      if(pushToggleBtn.dataset.state === 'active') unsubscribeFromPush();
+      else subscribeToPush();
+    });
+  }
+  initPushUI();
+
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.addEventListener('message', event => {
+      if(event.data && event.data.type === 'open-report' && event.data.id){
+        openReportById(event.data.id);
+      }
+    });
   }
 
   // ---- Votos, compartir y borrado (delegación de eventos) ----
@@ -763,7 +942,11 @@
 
     if(action === 'share'){
       const url = `${location.origin}${location.pathname}#r=${encodeURIComponent(id)}`;
-      if(navigator.clipboard && navigator.clipboard.writeText){
+      const cat = CATEGORIES[r.category] || CATEGORIES.reten_fijo;
+      const text = `${cat.emoji} ${cat.label} reportado en AMET Radar`;
+      if(navigator.share){
+        navigator.share({ title: 'AMET Radar', text, url }).catch(() => {});
+      } else if(navigator.clipboard && navigator.clipboard.writeText){
         navigator.clipboard.writeText(url).then(
           () => showToast('Enlace copiado al portapapeles'),
           () => showToast(url)
@@ -823,6 +1006,7 @@
       pos => {
         const latlng = [pos.coords.latitude, pos.coords.longitude];
         lastKnownLatLng = latlng;
+        updatePushSubscriptionPosition(latlng);
         if(!meMarker){
           meMarker = L.marker(latlng, { icon: meIcon, zIndexOffset: 1000, keyboard:false }).addTo(map);
         } else {

@@ -59,6 +59,13 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   Netlify devuelve 404 en `/` porque no hay `index.html`. Solo lo lee
   Netlify; `server.js` ya maneja este mismo caso con su propia lógica
   (`pathname === '/' → amet-radar.html`) así que en local no hace falta.
+- `supabase/migrations/*.sql` — copia versionada de las migraciones
+  aplicadas por MCP (tabla `push_subscriptions`, trigger de notificaciones,
+  ver "Notificaciones push" abajo). El estado real de la base es el que
+  está en Supabase; estos archivos son documentación/histórico, no se
+  vuelven a aplicar automáticamente.
+- `supabase/functions/notify-nearby/index.ts` — Edge Function que manda
+  las notificaciones push (ver "Notificaciones push" abajo).
 
 ## Cómo correrlo
 Requiere Node.js instalado y servirse por `http://` (no abrir con doble
@@ -103,6 +110,72 @@ key embebida en el `<script>` — no hay backend propio de por medio.
   así que es equivalente al CORS abierto que tenía antes `server.js`; el
   linter de Supabase marca esto como warning esperado, no como bug.
 - `server.js` ya no expone ninguna ruta `/api/*`.
+
+## Notificaciones push por cercanía
+La app avisa (aunque esté cerrada) cuando alguien publica un reporte nuevo
+cerca de la última posición conocida del dispositivo — pensado para el
+efecto "me salvó, se lo cuento a mis contactos" que impulsa el boca a boca
+en apps de esta categoría (ver historial de decisiones).
+
+**Flujo**: usuario toca la campana del header (`#push-toggle-btn`, oculta
+si el navegador no soporta `PushManager`) → `Notification.requestPermission()`
+→ `pushManager.subscribe()` → el cliente guarda la suscripción en
+`public.push_subscriptions` (Supabase) → cuando alguien inserta un reporte
+nuevo, un trigger de Postgres llama al Edge Function `notify-nearby`, que
+busca suscripciones dentro de un radio y les manda el push vía
+`npm:web-push`. El service worker (`sw.js`) muestra la notificación
+(`push`) y al tocarla enfoca/abre la app en el reporte (`notificationclick`,
+reusando `openReportById` — la misma función que usa el deep link `#r=`).
+
+- **Tabla `public.push_subscriptions`**: `endpoint text PK`, `p256dh text`,
+  `auth text`, `lat/lng double precision`, `created_at`/`updated_at
+  timestamptz`. RLS habilitado, **sin política de SELECT** para `anon`
+  (a diferencia de `reports`) — nadie necesita leer endpoint/lat/lng de
+  otro dispositivo; solo insert/update/delete abiertos. El Edge Function
+  usa la `service_role` key (bypassa RLS) para leer todas las filas.
+- **Importante para cualquier cambio futuro al insert desde el cliente**:
+  como no hay política de SELECT, un upsert (`on_conflict` +
+  `Prefer: resolution=merge-duplicates`) o cualquier `Prefer:
+  return=representation` **falla con 401** ("new row violates row-level
+  security policy"), porque PostgREST necesita poder "leer de vuelta" la
+  fila para resolver esas variantes, y esa lectura choca con la ausencia
+  deliberada de SELECT. Por eso `subscribeToPush()` en `amet-radar.html`
+  hace `DELETE` (no-op si no existía) + `POST` simple, ambos con
+  `Prefer: return=minimal` — no un upsert. Confirmado a mano contra la API
+  real (ver verificación end-to-end); no es un supuesto teórico.
+- **Trigger**: `reports_notify_nearby` (`AFTER INSERT ON public.reports`)
+  llama a `net.http_post` (extensión `pg_net`, sus funciones viven en el
+  schema fijo `net`, no en el schema que se le pase a `CREATE EXTENSION`)
+  hacia `{SUPABASE_URL}/functions/v1/notify-nearby`, autenticado con la
+  publishable/anon key del proyecto (la misma que usa el cliente — ya es
+  pública, no hace falta Vault para esto). La función del trigger es
+  `SECURITY DEFINER`; se le revocó `EXECUTE` a `public`/`anon`/`authenticated`
+  porque si no PostgREST la expone como RPC pública (linter de seguridad lo
+  marca).
+- **Edge Function `notify-nearby`**: recibe el webhook, calcula un bounding
+  box desde `lat/lng` del reporte (radio **2 km**, constante
+  `RADIUS_METERS` en el archivo — conversión grados↔metros con
+  `cos(latitud)`, no es simétrica), refina con Haversine, arma
+  `title`/`body` con un mapa propio de las 4 categorías (el service worker
+  no tiene acceso a `CATEGORIES`, vive en otro scope), manda el push con
+  `npm:web-push`, y borra suscripciones que respondan 404/410 (expiradas).
+- **Secrets pendientes de configurar a mano** (ninguna herramienta
+  MCP conectada permite setearlos): `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+  `VAPID_SUBJECT` como secrets del Edge Function (Project Settings → Edge
+  Functions → Secrets, o `supabase secrets set`). Sin esto la función
+  responde 500 "vapid keys not configured" — verificado que el trigger y
+  la autenticación funcionan igual, solo falta este paso manual del dueño
+  para que el envío real funcione. La llave pública ya está embebida en
+  `amet-radar.html` (`VAPID_PUBLIC_KEY`); la privada nunca debe vivir en
+  el repo ni en el cliente.
+- **Actualización de posición de la suscripción**: throttleada (solo si
+  pasaron ≥5 min o el dispositivo se movió ≥400m desde el último envío),
+  enganchada al callback de `watchPosition` ya existente
+  (`updatePushSubscriptionPosition` dentro de `startLocationWatch`).
+- **Decisiones tomadas, no reabrir sin razón**: onboarding discreto (sin
+  banner/modal al abrir la app la primera vez); el autor de un reporte
+  recibe su propia notificación (no se excluye); sin colapsar
+  notificaciones repetidas ni filtro por categoría en esta versión.
 
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
@@ -154,6 +227,15 @@ key embebida en el `<script>` — no hay backend propio de por medio.
   el primer fix y mantiene un marcador azul (`meMarker`) actualizado.
 - **Mapa**: tiles claros de CartoDB Positron (`light_all`); antes eran los
   oscuros (`dark_all`) a juego con el resto de la UI, se cambió a pedido.
+- **Compartir y SEO social**: el botón "Compartir" de cada popup usa
+  `navigator.share()` (hoja nativa del sistema) con el clipboard-copy
+  anterior como fallback si el navegador no lo soporta. El `<head>` tiene
+  meta tags Open Graph/Twitter Card estáticos apuntando siempre a la home
+  (`https://amet-radar.netlify.app/`) — los bots de preview de
+  WhatsApp/Twitter/Facebook no ejecutan JS y el fragmento `#r=` de los
+  deep links nunca llega al servidor, así que no puede haber preview
+  distinto por reporte mientras se use hash; migrar a `?r=` sería el
+  prerrequisito para eso, deliberadamente no hecho todavía.
 
 ## Despliegue (Netlify)
 El frontend está publicado en **Netlify**, cuenta del dueño del proyecto
@@ -202,3 +284,13 @@ tamaño de las filas se vuelve un problema.
   Pages porque el MCP de Netlify estaba disponible en el entorno y permitió
   hacerlo sin salir del flujo; no hay razón técnica fuerte para preferir
   uno sobre otro en este proyecto (ambos son hosting estático gratuito).
+- Se agregaron notificaciones push por cercanía y se mejoró el compartir
+  (nativo + meta tags OG) como respuesta directa a "qué mejora haría que
+  el proyecto se haga conocido y la gente lo use" — pasar de un modelo
+  100% pull (el usuario tiene que abrir la app) a uno push (la app avisa
+  sola) es la palanca de retención/boca-a-boca más fuerte para esta
+  categoría de app (mismo mecanismo que Waze). Al implementarlo se
+  descubrió que un upsert sobre una tabla sin política de SELECT falla en
+  PostgREST (ver "Notificaciones push" arriba) — no es intuitivo a partir
+  de la documentación de RLS, vale la pena recordarlo si se agregan más
+  tablas con este mismo patrón de "sin SELECT para anon".
