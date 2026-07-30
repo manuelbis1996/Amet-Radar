@@ -1,4 +1,4 @@
-const CACHE_NAME = 'amet-radar-v6.0';
+const CACHE_NAME = 'amet-radar-v7.0';
 const APP_SHELL = [
   './amet-radar.html',
   './manifest.json',
@@ -65,7 +65,7 @@ self.addEventListener('notificationclick', (event) => {
         }
       }
       if (self.clients.openWindow) {
-        return self.clients.openWindow(id ? `./amet-radar.html#r=${encodeURIComponent(id)}` : './amet-radar.html');
+        return self.clients.openWindow(id ? `./amet-radar.html?r=${encodeURIComponent(id)}` : './amet-radar.html');
       }
     })
   );

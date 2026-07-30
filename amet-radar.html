@@ -376,7 +376,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v6.0';
+  const APP_VERSION = 'v7.0';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const STALE_MINUTES = 180;   // a partir de aqui se consideran "viejos"
   const MAX_AGE_MINUTES = 360; // se ocultan/borran pasado este tiempo
@@ -759,7 +759,7 @@
 
   // ---- Deep link: abrir un reporte compartido ----
   // openReportById es la parte reutilizable (centrar mapa + abrir popup);
-  // la usan tanto el link con hash #r= como el click en una notificación
+  // la usan tanto el link compartido como el click en una notificación
   // push mientras la app ya está abierta (ver listener de 'message' más abajo).
   function openReportById(id){
     const r = reportsCache[id];
@@ -771,11 +771,18 @@
     }, 300);
   }
 
-  async function openSharedReportFromHash(){
-    const match = location.hash.match(/r=([^&]+)/);
-    if(!match) return;
+  // Los links nuevos usan ?r= (query param, visible al servidor — lo
+  // necesita netlify/edge-functions/report-preview.ts para armar el
+  // preview de WhatsApp/Twitter, algo que un #hash nunca podría lograr
+  // porque el fragmento no se manda en la request). Se sigue leyendo
+  // #r= también por si queda algún link viejo compartido con el esquema
+  // anterior — no cuesta nada mantenerlo.
+  async function openSharedReportFromUrl(){
+    const id = new URLSearchParams(location.search).get('r')
+      || (location.hash.match(/r=([^&]+)/) || [])[1];
+    if(!id) return;
     await reportsReady;
-    openReportById(decodeURIComponent(match[1]));
+    openReportById(decodeURIComponent(id));
   }
 
   // ---- Notificaciones push: suscripción y estado del botón ----
@@ -941,7 +948,7 @@
     }
 
     if(action === 'share'){
-      const url = `${location.origin}${location.pathname}#r=${encodeURIComponent(id)}`;
+      const url = `${location.origin}${location.pathname}?r=${encodeURIComponent(id)}`;
       const cat = CATEGORIES[r.category] || CATEGORIES.reten_fijo;
       const text = `${cat.emoji} ${cat.label} reportado en AMET Radar`;
       if(navigator.share){
@@ -993,7 +1000,7 @@
   function tryOpenHashOnce(){
     if(hashHandled) return;
     hashHandled = true;
-    openSharedReportFromHash();
+    openSharedReportFromUrl();
   }
 
   function startLocationWatch(){

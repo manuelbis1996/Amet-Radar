@@ -66,6 +66,9 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   vuelven a aplicar automáticamente.
 - `supabase/functions/notify-nearby/index.ts` — Edge Function que manda
   las notificaciones push (ver "Notificaciones push" abajo).
+- `netlify/edge-functions/report-preview.ts` — Edge Function (Netlify, no
+  Supabase) que arma el preview dinámico por reporte para bots de
+  WhatsApp/Twitter/etc. (ver "Preview dinámico por reporte" abajo).
 
 ## Cómo correrlo
 Requiere Node.js instalado y servirse por `http://` (no abrir con doble
@@ -159,15 +162,15 @@ reusando `openReportById` — la misma función que usa el deep link `#r=`).
   `title`/`body` con un mapa propio de las 4 categorías (el service worker
   no tiene acceso a `CATEGORIES`, vive en otro scope), manda el push con
   `npm:web-push`, y borra suscripciones que respondan 404/410 (expiradas).
-- **Secrets pendientes de configurar a mano** (ninguna herramienta
-  MCP conectada permite setearlos): `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
-  `VAPID_SUBJECT` como secrets del Edge Function (Project Settings → Edge
-  Functions → Secrets, o `supabase secrets set`). Sin esto la función
-  responde 500 "vapid keys not configured" — verificado que el trigger y
-  la autenticación funcionan igual, solo falta este paso manual del dueño
-  para que el envío real funcione. La llave pública ya está embebida en
-  `amet-radar.html` (`VAPID_PUBLIC_KEY`); la privada nunca debe vivir en
-  el repo ni en el cliente.
+- **Secrets del Edge Function ya configurados**: `VAPID_PUBLIC_KEY`,
+  `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` se cargaron a mano en Project
+  Settings → Edge Functions → Secrets (ninguna herramienta MCP conectada
+  permite setearlos, así que si el proyecto se migra a otra cuenta de
+  Supabase hay que repetir este paso manual). Verificado con un reporte
+  real que la función ya manda el push sin el error de "vapid keys not
+  configured". La llave pública vive embebida en `amet-radar.html`
+  (`VAPID_PUBLIC_KEY`); la privada nunca debe vivir en el repo ni en el
+  cliente.
 - **Actualización de posición de la suscripción**: throttleada (solo si
   pasaron ≥5 min o el dispositivo se movió ≥400m desde el último envío),
   enganchada al callback de `watchPosition` ya existente
@@ -176,6 +179,42 @@ reusando `openReportById` — la misma función que usa el deep link `#r=`).
   banner/modal al abrir la app la primera vez); el autor de un reporte
   recibe su propia notificación (no se excluye); sin colapsar
   notificaciones repetidas ni filtro por categoría en esta versión.
+
+## Preview dinámico por reporte (Netlify Edge Function)
+Cuando se comparte el link de un reporte puntual (`?r=<id>`) por WhatsApp,
+Twitter, Facebook, etc., el bot que arma la tarjeta de preview recibe meta
+tags específicos de ESE reporte (categoría, nota, hace cuánto se publicó)
+en vez de la tarjeta genérica de la app — así el link se ve como algo real
+("🚦 Control de tránsito — AMET Radar") y no como una URL pelada.
+
+- **Archivo**: `netlify/edge-functions/report-preview.ts`. Corre en el
+  runtime Deno de Netlify Edge Functions, no en Supabase — es
+  infraestructura separada de los Edge Functions de Supabase (que sí
+  corren en la sección "Notificaciones push" de arriba). El `path` que
+  intercepta (`/` y `/amet-radar.html`) se declara con un `export const
+  config` dentro del mismo archivo, no en un `netlify.toml` (Netlify
+  soporta ambas formas; esta evita un archivo de config extra).
+- **Cómo decide si mostrar el preview**: solo si la request tiene
+  `?r=<id>` en la URL **y** el `User-Agent` matchea alguno de los bots de
+  link-preview conocidos (`BOT_UA_PATTERNS` en el archivo — WhatsApp,
+  Facebook, Twitter/X, LinkedIn, Slack, Telegram, Discord, Pinterest,
+  Reddit). Cualquier otro caso (`context.next()`) sigue de largo a la SPA
+  normal, sin latencia ni cambio de comportamiento para usuarios reales.
+- **De dónde saca los datos**: llama directo a la REST API de Supabase
+  (`{SUPABASE_URL}/rest/v1/reports?id=eq.<id>`) con la misma publishable
+  key que usa el cliente — no hay backend propio, mismo patrón que el
+  resto del proyecto.
+- **Reporte ya no existe** (expiró a las 6h, o lo borró la comunidad): cae
+  a `context.next()`, la SPA muestra los meta tags genéricos del `<head>`.
+  No hay error visible ni para el bot ni para un usuario real.
+- **Imagen OG**: reusa `icon-512.png` (card `summary`, no
+  `summary_large_image`) — igual que el preview genérico. Generar una
+  imagen dinámica por reporte (ej. thumbnail del mapa) quedó fuera de
+  alcance a propósito, por simplicidad.
+- **Verificado con `curl -A "<user-agent>"` contra producción**, no es un
+  supuesto teórico: bot + reporte real → HTML con meta tags del reporte;
+  bot + id inexistente → 200, cae a la SPA; navegador normal → SPA
+  completa sin cambios.
 
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
@@ -230,12 +269,16 @@ reusando `openReportById` — la misma función que usa el deep link `#r=`).
 - **Compartir y SEO social**: el botón "Compartir" de cada popup usa
   `navigator.share()` (hoja nativa del sistema) con el clipboard-copy
   anterior como fallback si el navegador no lo soporta. El `<head>` tiene
-  meta tags Open Graph/Twitter Card estáticos apuntando siempre a la home
-  (`https://amet-radar.netlify.app/`) — los bots de preview de
-  WhatsApp/Twitter/Facebook no ejecutan JS y el fragmento `#r=` de los
-  deep links nunca llega al servidor, así que no puede haber preview
-  distinto por reporte mientras se use hash; migrar a `?r=` sería el
-  prerrequisito para eso, deliberadamente no hecho todavía.
+  meta tags Open Graph/Twitter Card genéricos (título/descripción de la
+  app) que se ven cuando no aplica el preview dinámico por reporte (ver
+  "Preview dinámico por reporte" abajo).
+- **Deep link de reporte usa `?r=`, no `#r=`**: se migró de hash a query
+  param porque un fragmento `#` nunca se manda al servidor — un bot de
+  preview no puede verlo, así que no podía haber preview distinto por
+  reporte mientras se usara hash. `openSharedReportFromUrl()` sigue
+  leyendo `#r=` también como fallback (por si queda algún link viejo
+  compartido con el esquema anterior), pero todo lo que genera la app
+  (botón compartir, `notificationclick` del service worker) ya usa `?r=`.
 
 ## Despliegue (Netlify)
 El frontend está publicado en **Netlify**, cuenta del dueño del proyecto
@@ -294,3 +337,11 @@ tamaño de las filas se vuelve un problema.
   PostgREST (ver "Notificaciones push" arriba) — no es intuitivo a partir
   de la documentación de RLS, vale la pena recordarlo si se agregan más
   tablas con este mismo patrón de "sin SELECT para anon".
+- Se migró el deep link de reporte de `#r=` a `?r=` y se agregó el Edge
+  Function `report-preview` en Netlify para profundizar la palanca de
+  amplificación (compartir): entre esto y un filtro de categorías para
+  las notificaciones push, se priorizó el preview dinámico porque
+  resuelve un problema que ya existe hoy para el 100% de los links
+  compartidos, mientras que el filtro habría resuelto un problema
+  hipotético (todavía no hay volumen real de suscriptores para que el
+  "ruido" de notificaciones sea un dolor real).
