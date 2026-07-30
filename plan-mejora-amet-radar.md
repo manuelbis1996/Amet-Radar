@@ -50,12 +50,11 @@ en vez de dejar la tabla abierta a cualquiera.
   acceso directo a la tabla). Bloqueante solo si el proyecto crece a un
   punto donde el abuso se vuelva un problema real.
 
-**🟡 Rate-limit de `admin-login` no persiste**
-Vive en memoria de la instancia del Edge Function; se resetea en cada
-cold start (Supabase puede reciclar instancias en cualquier momento).
-Pasar el contador de intentos a una tabla (`admin_login_attempts`) lo
-haría un límite real en vez de best-effort.
-- Esfuerzo: bajo.
+**✅ Rate-limit de `admin-login` — resuelto**
+El contador de intentos ahora vive en la tabla `public.admin_login_attempts`
+(RLS habilitada, sin políticas — solo la toca el Edge Function con la
+service_role key) en vez de un `Map` en memoria que se reseteaba en cada
+cold start.
 
 **🟢 Documentar el modelo de "gate de conveniencia" para el password de admin**
 Ya está anotado en `CLAUDE.md` que el login de `admin.html` no protege
@@ -160,7 +159,7 @@ PRs futuros.
 ## Orden sugerido
 
 1. ~~`aria-label` en `admin.html`~~ ✅ hecho
-2. Rate-limit persistente de `admin-login`
+2. ~~Rate-limit persistente de `admin-login`~~ ✅ hecho
 3. Fotos a Supabase Storage (impacto directo en performance del refresh)
 4. Editar reporte propio
 5. Smoke test / CI básico
