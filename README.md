@@ -8,10 +8,9 @@
 
 ## Cómo correrlo
 
-La geolocalización y el service worker (PWA) no funcionan bien abriendo el
-archivo directamente con doble clic (`file://`). Además, ahora los reportes
-se guardan en el servidor (no en el navegador), así que hay que levantar
-`server.js` en vez de un servidor de archivos estático simple:
+La geolocalización, el service worker (PWA) y el fetch a Supabase no
+funcionan bien abriendo el archivo directamente con doble clic (`file://`),
+así que hay que levantar `server.js` para servirlo por `http://`:
 
 ```bash
 cd carpeta-donde-estan-los-archivos
@@ -35,12 +34,13 @@ desde el móvil con geolocalización, usa un túnel HTTPS (ej. `npx localtunnel
 
 ## Reportes compartidos entre dispositivos
 
-`server.js` expone una API (`/api/reports`) que guarda los reportes en
-`data/reports.json`, en el servidor — no en `localStorage` del navegador.
-Cualquier dispositivo que entre a la misma URL (misma red o mismo túnel) ve,
-publica, vota y borra sobre los mismos reportes; el cliente refresca cada 8
-segundos. La carpeta `data/` está en `.gitignore` porque es contenido en
-tiempo de ejecución, no código fuente — en una PC nueva arranca vacía.
+Los reportes viven en una tabla `reports` de un proyecto Supabase (no en
+`localStorage` ni en un archivo del servidor). `amet-radar.html` llama
+directo a la API REST de Supabase con una publishable key embebida en el
+cliente; el control de acceso lo hacen las políticas RLS de la tabla, no
+`server.js`. Cualquier dispositivo que entre a la app ve, publica, vota y
+borra sobre los mismos reportes, sin depender de que una PC en particular
+esté prendida; el cliente refresca cada 8 segundos.
 
 ## Qué se implementó de la lista de mejoras
 
@@ -64,12 +64,10 @@ tiempo de ejecución, no código fuente — en una PC nueva arranca vacía.
 - **PWA**: `manifest.json` + `sw.js` para instalar la app y cachear el shell
   básico (funciona una vez que se sirve por `http://localhost` o HTTPS).
 
-## Importante: esto sigue siendo una prueba local
+## Importante: falta desplegar el frontend
 
-`localStorage` guarda los reportes solo en el navegador donde los creaste —
-**no se comparten entre distintos dispositivos o usuarios**. Para el
-lanzamiento real, según el plan de mejora, el siguiente paso es reemplazar
-las funciones `loadAllReports` / `saveAllReports` (están agrupadas y
-comentadas en el `<script>`) por llamadas a un backend real (Supabase,
-Firebase o una API propia) para que los reportes se vean entre todos los
-usuarios de la comunidad.
+Los reportes ya se comparten entre todos los usuarios vía Supabase (backend
+real, alcanzable desde cualquier lugar). Lo que falta para un lanzamiento
+real es dejar de servir `amet-radar.html` desde `server.js` en una PC local
+y publicarlo en un hosting estático (GitHub Pages, Netlify, Vercel, etc.) —
+no requiere backend propio, es solo archivos estáticos.

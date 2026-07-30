@@ -11,21 +11,31 @@ hay un retén, categoría, foto obligatoria y nota opcional; otros usuarios
 pueden confirmar o desmentir el reporte.
 
 ## Estado actual (importante)
-Los reportes ahora se guardan en un **servidor local compartido**
-(`server.js`, Node sin dependencias externas), en `data/reports.json` —
-ya no en `localStorage` del navegador. Cualquier dispositivo que entre a la
-misma URL (misma red Wi-Fi, o un túnel HTTPS apuntando al mismo servidor)
-ve, publica, vota y borra sobre los mismos reportes. Sigue sin ser un
-backend desplegado en internet: mientras `server.js` no corra en un hosting
-real, solo funciona mientras la PC que lo ejecuta esté prendida y
-alcanzable — ese es el bloqueante #1 antes de lanzar a producción real
-(ver sección "Pendiente" más abajo).
+Los reportes se guardan en **Supabase** (proyecto `amet-radar`,
+`nikexwjxxcxzhsuypsjn`, org `Amet_Radar`), tabla `public.reports` — ya no en
+`localStorage` ni en un archivo del servidor. `amet-radar.html` llama
+directo a la API REST de Supabase (`SUPABASE_URL`/`SUPABASE_ANON_KEY`
+embebidos en el `<script>`) usando una publishable key, que está pensada
+para vivir en el cliente; el control de acceso real lo hacen las políticas
+RLS de la tabla (ver "Persistencia" más abajo). Cualquier dispositivo que
+entre a la app ve, publica, vota y borra sobre los mismos reportes, y esto
+ya **no depende de que una PC esté prendida** — es un backend real en
+internet.
+
+`server.js` (Node sin dependencias) sigue existiendo solo para servir los
+archivos estáticos por `http://` en local (geolocalización, service worker
+y el fetch a Supabase no funcionan sobre `file://`); ya no tiene ninguna
+API de reportes ni toca `data/reports.json`. El bloqueante real que queda
+para producción es publicar esos archivos estáticos en un hosting (ver
+"Pendiente" más abajo) — no depende de que corra `server.js` en ninguna PC.
 
 ## Archivos
-- `amet-radar.html` — toda la app (HTML + CSS + JS en un solo archivo)
-- `server.js` — servidor Node (sin dependencias) que sirve los archivos
-  estáticos y expone `/api/reports` (GET/POST/PATCH/DELETE) respaldado por
-  `data/reports.json`; reemplaza a un simple servidor de archivos estático
+- `amet-radar.html` — toda la app (HTML + CSS + JS en un solo archivo);
+  incluye las credenciales de Supabase (`SUPABASE_URL`/`SUPABASE_ANON_KEY`)
+  y las llamadas REST a la tabla `reports` (ver "API de Supabase" abajo)
+- `server.js` — servidor Node (sin dependencias) que solo sirve los
+  archivos estáticos por `http://`; no tiene ninguna API ni toca datos de
+  reportes (esos viven en Supabase, no en este servidor)
 - `manifest.json` — manifest de PWA
 - `sw.js` — service worker (cache-first del app shell); subir `CACHE_NAME`
   al cambiar `amet-radar.html`/`manifest.json`/íconos para forzar que los
@@ -43,13 +53,11 @@ alcanzable — ese es el bloqueante #1 antes de lanzar a producción real
 - `plan-mejora-amet-radar.md` — plan de mejoras original (por prioridad
   🔴/🟡/🟢) que dio origen a las decisiones de arquitectura de abajo; incluye
   el orden sugerido de implementación y el estado de qué falta
-- `data/reports.json` — datos en tiempo de ejecución (gitignored, no es
-  código fuente; arranca vacío en una PC nueva)
 
 ## Cómo correrlo
 Requiere Node.js instalado y servirse por `http://` (no abrir con doble
-clic / `file://`), porque geolocalización, el service worker y la API de
-reportes no funcionan sobre `file://`.
+clic / `file://`), porque geolocalización, el service worker y el fetch a
+Supabase no funcionan sobre `file://`.
 
 ```bash
 cd carpeta-del-proyecto
@@ -68,19 +76,27 @@ cual y un servidor Node sin dependencias. Verificar cambios corriendo
 `node server.js` y probando manualmente en el navegador en
 `http://localhost:8000/amet-radar.html`.
 
-## API de `server.js`
-Puerto por `process.env.PORT` (default `8000`), escucha en `0.0.0.0`. Los
-reportes viven en un solo objeto `{ [id]: record }` dentro de
-`data/reports.json`.
-- `GET /api/reports` — devuelve el objeto completo de reportes.
-- `POST /api/reports` — body `{ id, record }`; hace `all[id] = record`.
-- `PATCH /api/reports/:id` — body con campos a mezclar (`Object.assign`);
-  404 si el id no existe.
-- `DELETE /api/reports/:id` — borra la entrada (sin error si no existía).
-- CORS abierto (`Access-Control-Allow-Origin: *`) para poder servir el
-  frontend desde un túnel/IP distinta del propio `server.js`.
-- Cualquier otra ruta se sirve como archivo estático desde la raíz del
-  proyecto (`/` → `amet-radar.html`).
+## API de Supabase (proyecto `amet-radar`, `nikexwjxxcxzhsuypsjn`)
+El cliente (`amet-radar.html`) llama directo a la API REST autogenerada de
+Supabase (PostgREST) sobre la tabla `public.reports`, con la publishable
+key embebida en el `<script>` — no hay backend propio de por medio.
+- `GET  {SUPABASE_URL}/rest/v1/reports?select=*` — todas las filas.
+- `POST {SUPABASE_URL}/rest/v1/reports` — body `{ id, ...record }`, inserta
+  una fila.
+- `PATCH {SUPABASE_URL}/rest/v1/reports?id=eq.<id>` — body con campos a
+  mezclar (`confirms`/`denies`).
+- `DELETE {SUPABASE_URL}/rest/v1/reports?id=eq.<id>` — borra la fila.
+- Headers en todas las llamadas: `apikey` y `Authorization: Bearer
+  <SUPABASE_ANON_KEY>`.
+- Esquema de `reports`: `id text PK`, `lat/lng double precision`,
+  `photo text` (nullable), `note text`, `ts bigint` (epoch ms), `category
+  text` (check contra las 4 categorías), `confirms/denies integer`, `approx
+  boolean`, `created_at timestamptz`.
+- RLS habilitado con políticas abiertas (`USING (true)`) para
+  select/insert/update/delete — no hay autenticación de usuarios en la app,
+  así que es equivalente al CORS abierto que tenía antes `server.js`; el
+  linter de Supabase marca esto como warning esperado, no como bug.
+- `server.js` ya no expone ninguna ruta `/api/*`.
 
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
@@ -113,12 +129,13 @@ reportes viven en un solo objeto `{ [id]: record }` dentro de
   necesitaron cambios. Los colores de categoría tienen ahora un campo
   `hex` además de `color` (`var(--nombre)`) porque el renderer SVG de
   Leaflet necesita un valor de color plano para el círculo.
-- **Persistencia**: `server.js` guarda todos los reportes en un único
-  archivo `data/reports.json` (mismo principio que antes de evitar N+1: una
-  sola lectura/escritura del set completo en vez de una llamada por
-  reporte). El cliente mantiene una copia en memoria (`reportsCache`) que
-  refresca cada 8s vía `fetch('/api/reports')` (`refreshReports()` en el
-  `<script>` de `amet-radar.html`).
+- **Persistencia**: los reportes viven en la tabla `reports` de Supabase
+  (Postgres), no en `server.js` ni en un archivo. El cliente mantiene una
+  copia en memoria (`reportsCache`) que refresca cada 8s vía `fetch` a la
+  REST API de Supabase (`refreshReports()` en el `<script>` de
+  `amet-radar.html`), y sigue trayendo el objeto completo `{ [id]: record }`
+  en cada refresco (no incremental) — mismo principio de antes de evitar
+  N+1 llamadas.
 - **Preferencias por dispositivo**: qué reportes son "míos"
   (`amet_my_reports_v1`), en cuáles ya voté (`amet_voted_v1`) y el
   historial de anti-spam (`amet_report_times_v1`) siguen en `localStorage`
@@ -133,14 +150,16 @@ reportes viven en un solo objeto `{ [id]: record }` dentro de
   oscuros (`dark_all`) a juego con el resto de la UI, se cambió a pedido.
 
 ## Pendiente (siguiente paso lógico, bloqueante para producción real)
-Desplegar `server.js` en un hosting real (Render, Railway, Fly.io, una VPS,
-etc.) con un dominio estable, en vez de correrlo en la PC de quien lo
-prueba. El almacenamiento en un archivo JSON plano también es un límite de
-esta prueba — para producción real conviene migrar `data/reports.json` a
-una base de datos real (Postgres/Supabase, SQLite, etc.) y las fotos a un
-bucket en vez de base64 en el JSON. La lógica de negocio (categorías,
-votos, filtrado por zona, anti-spam) no debería necesitar cambios grandes
-al migrar — solo el punto de persistencia y el hosting.
+Los reportes ya están en un backend real (Supabase) alcanzable desde
+internet — eso ya no es el bloqueante. Lo que falta es publicar los
+archivos estáticos (`amet-radar.html`, `manifest.json`, `sw.js`, íconos) en
+un hosting estático con dominio propio (GitHub Pages, Netlify, Vercel,
+etc.) en vez de servirlos con `server.js` desde la PC de quien prueba;
+`server.js` solo hace falta para desarrollo local. Mejoras posteriores,
+no bloqueantes: reemplazar las políticas RLS abiertas por algo más
+restrictivo si se agrega autenticación, y mover las fotos (hoy base64 en la
+columna `photo`) a Supabase Storage si el tamaño de las filas se vuelve un
+problema.
 
 ## Historial relevante de decisiones (por si se pregunta "por qué así")
 - Se partió de una versión anterior que usaba `window.storage` (API propia
@@ -149,3 +168,7 @@ al migrar — solo el punto de persistencia y el hosting.
 - Se priorizó reducir llamadas de red/almacenamiento agrupando datos en
   una sola clave en vez de una clave por reporte.
 - Se agregaron categorías porque el diseño original solo tenía un ícono fijo.
+- Se migró la persistencia de `server.js` + `data/reports.json` a Supabase
+  (proyecto `amet-radar`, org `Amet_Radar`) para dejar de depender de que
+  una PC específica esté prendida y alcanzable; `server.js` quedó reducido
+  a servidor de archivos estático para desarrollo local.

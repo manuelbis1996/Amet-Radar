@@ -349,7 +349,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v4.0';
+  const APP_VERSION = 'v5.0';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const STALE_MINUTES = 180;   // a partir de aqui se consideran "viejos"
   const MAX_AGE_MINUTES = 360; // se ocultan/borran pasado este tiempo
@@ -368,18 +368,37 @@
 
   document.getElementById('app-version').textContent = APP_VERSION;
 
-  // ---- Backend compartido (servidor local, ver server.js) ----
-  // Los reportes viven en data/reports.json en el servidor (no en el
-  // navegador), así que cualquier dispositivo que entre a esta misma URL
-  // ve los mismos reportes. reportsCache es la copia en memoria del cliente,
-  // refrescada al cargar y luego por sondeo periódico (ver refreshReports).
-  const API_BASE = '/api/reports';
+  // ---- Backend compartido (Supabase) ----
+  // Los reportes viven en la tabla `reports` de un proyecto Supabase (no en
+  // localStorage ni en un archivo del servidor), así que cualquier
+  // dispositivo que entre a esta app ve los mismos reportes sin depender de
+  // que una PC en particular esté prendida. La SUPABASE_ANON_KEY es una
+  // publishable key: está pensada para vivir en el cliente, el control de
+  // acceso real lo hacen las políticas RLS de la tabla. reportsCache es la
+  // copia en memoria del cliente, refrescada al cargar y luego por sondeo
+  // periódico (ver refreshReports).
+  const SUPABASE_URL = 'https://nikexwjxxcxzhsuypsjn.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_p8U6gvvBwPVHdfmspjyCXA_g6clP58v';
+  const REPORTS_URL = `${SUPABASE_URL}/rest/v1/reports`;
+  const SUPABASE_HEADERS = {
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json'
+  };
   let reportsCache = {};
 
   async function fetchAllReports(){
     try{
-      const res = await fetch(API_BASE);
-      if(res.ok) reportsCache = await res.json();
+      const res = await fetch(`${REPORTS_URL}?select=*`, { headers: SUPABASE_HEADERS });
+      if(res.ok){
+        const rows = await res.json();
+        const next = {};
+        for(const row of rows){
+          const { id, created_at, ...record } = row;
+          next[id] = record;
+        }
+        reportsCache = next;
+      }
     }catch(e){ console.error('Error cargando reportes', e); }
     return reportsCache;
   }
@@ -389,10 +408,10 @@
   async function insertReport(id, record){
     let res;
     try{
-      res = await fetch(API_BASE, {
+      res = await fetch(REPORTS_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, record })
+        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ id, ...record })
       });
     }catch(e){
       throw new NetworkError('Sin conexión');
@@ -403,9 +422,9 @@
 
   async function updateReportVotes(id, confirms, denies){
     try{
-      await fetch(`${API_BASE}/${encodeURIComponent(id)}`, {
+      await fetch(`${REPORTS_URL}?id=eq.${encodeURIComponent(id)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
         body: JSON.stringify({ confirms, denies })
       });
     }catch(e){ console.error('Error actualizando votos', e); }
@@ -413,8 +432,12 @@
   }
 
   async function deleteReportRemote(id){
-    try{ await fetch(`${API_BASE}/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
-    catch(e){ console.error('Error eliminando reporte', e); }
+    try{
+      await fetch(`${REPORTS_URL}?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: SUPABASE_HEADERS
+      });
+    }catch(e){ console.error('Error eliminando reporte', e); }
     delete reportsCache[id];
   }
 
