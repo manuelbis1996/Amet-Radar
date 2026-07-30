@@ -308,6 +308,7 @@
   .btn-primary:active{ transform:scale(0.97); }
   .btn-ghost{ background: transparent; color: var(--muted); border:1px solid var(--line); }
   .btn-ghost:active{ transform:scale(0.97); }
+  .btn:disabled{ opacity:.4; cursor:default; }
   .error-box{
     background: rgba(255,93,58,0.12); border:1px solid var(--alert); color:#ffab8f;
     padding:10px 12px; border-radius:10px; font-size:12px; margin-bottom:14px;
@@ -376,7 +377,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v7.0';
+  const APP_VERSION = 'v8.0';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const STALE_MINUTES = 180;   // a partir de aqui se consideran "viejos"
   const MAX_AGE_MINUTES = 360; // se ocultan/borran pasado este tiempo
@@ -423,8 +424,20 @@
   const VAPID_PUBLIC_KEY = 'BOg_VDCTXvRF0l9cLLFI_sGgWGkiyVb3SmIu93c8bcFatvEcxzSPfqUwvAfaO6X8nMdVH596vW0pIAdhaHe5nKY';
   const PUSH_SUBS_URL = `${SUPABASE_URL}/rest/v1/push_subscriptions`;
   const PUSH_ENDPOINT_KEY = 'amet_push_endpoint_v1';
+  const PUSH_CATEGORIES_KEY = 'amet_push_categories_v1';
   const PUSH_POS_UPDATE_MIN_METERS = 400;
   const PUSH_POS_UPDATE_MIN_MS = 5 * 60 * 1000;
+
+  // Como push_subscriptions no tiene política de SELECT (a propósito, ver
+  // CLAUDE.md), el cliente nunca puede leer de vuelta su fila — la
+  // preferencia de categorías vive solo acá. Ausencia de la clave = nunca
+  // configurado (dispara la hoja de onboarding); presencia = ya se
+  // preguntó, aunque el valor sea la lista completa.
+  function getPushCategories(){
+    try{ const raw = localStorage.getItem(PUSH_CATEGORIES_KEY); return raw ? JSON.parse(raw) : null; }
+    catch(e){ return null; }
+  }
+  function savePushCategories(list){ localStorage.setItem(PUSH_CATEGORIES_KEY, JSON.stringify(list)); }
 
   async function fetchAllReports(){
     try{
@@ -837,6 +850,16 @@
       lastPushPosUpdate = { latlng, ts: Date.now() };
       setPushButtonState('active');
       showToast('Listo, te vamos a avisar de retenes cerca');
+      // subscribeToPush() borra y vuelve a crear la fila (DELETE+POST, no
+      // upsert), así que un re-suscribe pierde las categorías que el
+      // dispositivo ya tenía elegidas del lado del servidor — hay que
+      // restaurarlas, no solo decidir "primera vez sí/no".
+      const savedCategories = getPushCategories();
+      if(savedCategories === null){
+        openPushCategoriesSheet();
+      } else if(savedCategories.length < Object.keys(CATEGORIES).length){
+        updatePushCategories(savedCategories);
+      }
     }catch(err){
       console.error('Error suscribiendo a push', err);
       showToast('No se pudo activar el aviso de retenes cerca');
@@ -882,6 +905,60 @@
     }catch(err){ console.error('Error actualizando posición de suscripción push', err); }
   }
 
+  async function updatePushCategories(categories){
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(!sub) return;
+      const allSelected = categories.length === Object.keys(CATEGORIES).length;
+      await fetch(`${PUSH_SUBS_URL}?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {
+        method: 'PATCH',
+        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ categories: allSelected ? null : categories, updated_at: new Date().toISOString() })
+      });
+      savePushCategories(categories);
+    }catch(err){ console.error('Error actualizando categorías de suscripción push', err); }
+  }
+
+  function openPushCategoriesSheet(){
+    const current = getPushCategories() || Object.keys(CATEGORIES);
+    const selected = new Set(current);
+    const chips = Object.entries(CATEGORIES).map(([key, cat]) => `
+      <button type="button" class="chip" data-cat="${key}" aria-pressed="${selected.has(key)}" style="--chip-color:${cat.color}">${cat.emoji} ${cat.label}</button>
+    `).join('');
+    renderSheet(`
+      <h2>Avisos de retenes</h2>
+      <p class="sub">Elige de qué categorías querés que te avisemos.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">${chips}</div>
+      <div class="btn-row" style="margin-bottom:10px;">
+        <button class="btn btn-ghost" id="push-cat-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="push-cat-save">Guardar</button>
+      </div>
+      <button class="mini-btn danger" style="width:100%;" id="push-cat-unsubscribe">Desactivar avisos</button>
+    `);
+    const saveBtn = document.getElementById('push-cat-save');
+    function refreshSaveState(){ saveBtn.disabled = selected.size === 0; }
+    overlay.querySelectorAll('.chip[data-cat]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const key = chip.dataset.cat;
+        if(selected.has(key)){ selected.delete(key); chip.setAttribute('aria-pressed', 'false'); }
+        else { selected.add(key); chip.setAttribute('aria-pressed', 'true'); }
+        refreshSaveState();
+      });
+    });
+    refreshSaveState();
+    document.getElementById('push-cat-cancel').addEventListener('click', closeOverlay);
+    saveBtn.addEventListener('click', () => {
+      updatePushCategories(Object.keys(CATEGORIES).filter(k => selected.has(k)));
+      closeOverlay();
+      showToast('Preferencias de avisos actualizadas');
+    });
+    document.getElementById('push-cat-unsubscribe').addEventListener('click', () => {
+      closeOverlay();
+      unsubscribeFromPush();
+    });
+  }
+
   async function initPushUI(){
     if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
     pushToggleBtn.hidden = false;
@@ -893,7 +970,7 @@
 
     pushToggleBtn.addEventListener('click', () => {
       if(pushToggleBtn.dataset.state === 'loading') return;
-      if(pushToggleBtn.dataset.state === 'active') unsubscribeFromPush();
+      if(pushToggleBtn.dataset.state === 'active') openPushCategoriesSheet();
       else subscribeToPush();
     });
   }

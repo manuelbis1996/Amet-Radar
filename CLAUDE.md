@@ -123,12 +123,14 @@ en apps de esta categoría (ver historial de decisiones).
 **Flujo**: usuario toca la campana del header (`#push-toggle-btn`, oculta
 si el navegador no soporta `PushManager`) → `Notification.requestPermission()`
 → `pushManager.subscribe()` → el cliente guarda la suscripción en
-`public.push_subscriptions` (Supabase) → cuando alguien inserta un reporte
-nuevo, un trigger de Postgres llama al Edge Function `notify-nearby`, que
-busca suscripciones dentro de un radio y les manda el push vía
+`public.push_subscriptions` (Supabase) → se le pregunta qué categorías le
+interesan (hoja de `openPushCategoriesSheet()`, ver "Filtro por
+categoría" abajo) → cuando alguien inserta un reporte nuevo, un trigger de
+Postgres llama al Edge Function `notify-nearby`, que busca suscripciones
+dentro de un radio **y de la categoría elegida** y les manda el push vía
 `npm:web-push`. El service worker (`sw.js`) muestra la notificación
 (`push`) y al tocarla enfoca/abre la app en el reporte (`notificationclick`,
-reusando `openReportById` — la misma función que usa el deep link `#r=`).
+reusando `openReportById` — la misma función que usa el deep link `?r=`).
 
 - **Tabla `public.push_subscriptions`**: `endpoint text PK`, `p256dh text`,
   `auth text`, `lat/lng double precision`, `created_at`/`updated_at
@@ -178,7 +180,31 @@ reusando `openReportById` — la misma función que usa el deep link `#r=`).
 - **Decisiones tomadas, no reabrir sin razón**: onboarding discreto (sin
   banner/modal al abrir la app la primera vez); el autor de un reporte
   recibe su propia notificación (no se excluye); sin colapsar
-  notificaciones repetidas ni filtro por categoría en esta versión.
+  notificaciones repetidas en esta versión.
+- **Filtro por categoría**: columna `categories text[]` en
+  `push_subscriptions` (nullable, `NULL` = todas las categorías — así las
+  filas viejas y las nuevas suscripciones sin preferencia explícita
+  siguen recibiendo todo, sin backfill). El Edge Function filtra `nearby`
+  por esto además del radio (ver el archivo). El cliente nunca puede leer
+  su propia fila (sin política de SELECT), así que la preferencia
+  "actual" vive en `localStorage` (`amet_push_categories_v1`, un array
+  explícito, nunca `null`/`"all"`) — es la única fuente de verdad del
+  lado del cliente.
+- **La campana, en estado activo, ya NO desuscribe al toque.** Abre un
+  panel de gestión (`openPushCategoriesSheet()`, reusa `renderSheet`/
+  `closeOverlay`, el mismo mecanismo del flujo de reporte) con los chips
+  de categoría y un botón "Desactivar avisos" adentro —
+  `unsubscribeFromPush()` solo se dispara desde ahí. Cambio de
+  comportamiento deliberado sobre la campana ya en producción: de paso
+  corrige que antes un tap accidental desuscribía sin ninguna
+  confirmación. Estado `inactive` sigue suscribiendo directo, sin cambios.
+- **Gotcha al re-suscribir**: `subscribeToPush()` hace DELETE+POST (no
+  upsert, ver el gotcha de arriba), así que un re-suscribe borra
+  `categories` del lado del servidor aunque el dispositivo ya tenga
+  preferencia guardada en `localStorage`. Por eso, después de un
+  `subscribeToPush()` exitoso, se restaura la preferencia guardada
+  (`updatePushCategories`) en vez de asumir "primera vez" — la hoja de
+  onboarding solo se muestra si `localStorage` nunca tuvo la clave.
 
 ## Preview dinámico por reporte (Netlify Edge Function)
 Cuando se comparte el link de un reporte puntual (`?r=<id>`) por WhatsApp,

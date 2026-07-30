@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
 
     const { data: subs, error } = await supabase
       .from("push_subscriptions")
-      .select("endpoint, p256dh, auth, lat, lng")
+      .select("endpoint, p256dh, auth, lat, lng, categories")
       .gte("lat", lat - dLat)
       .lte("lat", lat + dLat)
       .gte("lng", lng - dLng)
@@ -67,8 +67,11 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
+    // categories null/vacío = suscripción sin filtro, avisa de todo.
     const nearby = (subs ?? []).filter(
-      (s) => haversineMeters(lat, lng, s.lat, s.lng) <= RADIUS_METERS,
+      (s) =>
+        haversineMeters(lat, lng, s.lat, s.lng) <= RADIUS_METERS &&
+        (!s.categories || s.categories.length === 0 || s.categories.includes(category)),
     );
 
     const title = CATEGORY_LABELS[category] ?? "Reporte";
