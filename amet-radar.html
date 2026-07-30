@@ -379,12 +379,20 @@
   // versión nueva del service worker, sin tener que abrir devtools.
   const APP_VERSION = 'v8.0';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
-  const STALE_MINUTES = 180;   // a partir de aqui se consideran "viejos"
-  const MAX_AGE_MINUTES = 360; // se ocultan/borran pasado este tiempo
-  const DENY_THRESHOLD = 2;    // (negaciones - confirmaciones) para retirar antes
-  const REPORT_LIMIT = 3;      // reportes máximos por ventana
-  const REPORT_WINDOW_MIN = 60;
   const APPROX_RADIUS_METERS = 150; // radio del círculo de zona aproximada (reporte rápido)
+
+  // Parámetros del sistema: valores por defecto, sobreescritos al arrancar
+  // por la fila única de public.app_config en Supabase (editable desde el
+  // panel admin en admin.html). Se leen en tiempo de ejecución, no se
+  // capturan, así que ajustar CONFIG acá adentro alcanza para que todo el
+  // código de abajo los use.
+  const CONFIG = {
+    staleMinutes: 180,    // a partir de aqui se consideran "viejos"
+    maxAgeMinutes: 360,   // se ocultan/borran pasado este tiempo
+    denyThreshold: 2,     // (negaciones - confirmaciones) para retirar antes
+    reportLimit: 3,       // reportes máximos por ventana
+    reportWindowMin: 60
+  };
 
   const CATEGORIES = {
     reten_fijo:  { label:'Retén fijo',      emoji:'👮', color:'var(--amber)',      hex:'#f5c518' },
@@ -408,12 +416,32 @@
   const SUPABASE_URL = 'https://nikexwjxxcxzhsuypsjn.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_p8U6gvvBwPVHdfmspjyCXA_g6clP58v';
   const REPORTS_URL = `${SUPABASE_URL}/rest/v1/reports`;
+  const CONFIG_URL = `${SUPABASE_URL}/rest/v1/app_config`;
   const SUPABASE_HEADERS = {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
     'Content-Type': 'application/json'
   };
   let reportsCache = {};
+
+  // Fila única de public.app_config (editable desde admin.html); si el
+  // fetch falla o la tabla está vacía, CONFIG se queda con los defaults.
+  async function loadConfig(){
+    try{
+      const res = await fetch(`${CONFIG_URL}?select=*&limit=1`, { headers: SUPABASE_HEADERS });
+      if(res.ok){
+        const rows = await res.json();
+        const row = rows[0];
+        if(row){
+          CONFIG.staleMinutes = row.stale_minutes;
+          CONFIG.maxAgeMinutes = row.max_age_minutes;
+          CONFIG.denyThreshold = row.deny_threshold;
+          CONFIG.reportLimit = row.report_limit;
+          CONFIG.reportWindowMin = row.report_window_min;
+        }
+      }
+    }catch(e){ console.error('Error cargando config', e); }
+  }
 
   // ---- Notificaciones push por cercanía ----
   // Avisa (aunque la app esté cerrada) cuando alguien publica un reporte
@@ -504,9 +532,9 @@
   function saveMine(set){ localStorage.setItem(MINE_KEY, JSON.stringify([...set])); }
 
   function canReport(){
-    const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]').filter(t => (Date.now()-t) < REPORT_WINDOW_MIN*60000);
+    const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]').filter(t => (Date.now()-t) < CONFIG.reportWindowMin*60000);
     localStorage.setItem(TIMES_KEY, JSON.stringify(times));
-    return times.length < REPORT_LIMIT;
+    return times.length < CONFIG.reportLimit;
   }
   function registerReportTime(){
     const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]');
@@ -581,7 +609,7 @@
 
   function makeIcon(ageMinutes, category, pending){
     const cat = CATEGORIES[category] || CATEGORIES.reten_fijo;
-    const stale = ageMinutes > STALE_MINUTES;
+    const stale = ageMinutes > CONFIG.staleMinutes;
     return L.divIcon({
       className: '',
       html: `<div class="amet-pin ${pending?'pending':''}"><div class="badge ${stale?'stale':''}" style="background:${stale?'var(--muted)':cat.color}"><span>${cat.emoji}</span></div></div>`,
@@ -627,7 +655,7 @@
     const ageMinutes = (Date.now()-r.ts)/60000;
     const pending = pendingIds.has(id);
     const cat = CATEGORIES[r.category] || CATEGORIES.reten_fijo;
-    const stale = ageMinutes > STALE_MINUTES;
+    const stale = ageMinutes > CONFIG.staleMinutes;
     const color = stale ? '#9a9a9e' : cat.hex;
     const style = {
       radius: APPROX_RADIUS_METERS, color, weight:2,
@@ -696,7 +724,7 @@
     for(const id in reportsCache){
       const r = reportsCache[id];
       const ageMinutes = (now - r.ts) / 60000;
-      if(ageMinutes > MAX_AGE_MINUTES){
+      if(ageMinutes > CONFIG.maxAgeMinutes){
         delete reportsCache[id];
         removeMarker(id);
         deleteReportRemote(id);
@@ -729,7 +757,7 @@
       for(const item of [...pendingQueue]){
         if(!pendingIds.has(item.id)) continue; // se canceló mientras esperábamos
         const ageMinutes = (Date.now() - item.record.ts) / 60000;
-        if(ageMinutes > MAX_AGE_MINUTES){
+        if(ageMinutes > CONFIG.maxAgeMinutes){
           dequeuePending(item.id);
           removeMarker(item.id);
           updateCount();
@@ -764,6 +792,7 @@
     await flushPendingQueue();
   }
 
+  loadConfig();
   restorePendingMarkers();
   map.on('moveend zoomend', renderVisibleMarkers);
   const reportsReady = refreshReports();
@@ -1012,7 +1041,7 @@
       const confirms = (r.confirms||0) + (action === 'confirm' ? 1 : 0);
       const denies = (r.denies||0) + (action === 'deny' ? 1 : 0);
 
-      if(denies - confirms >= DENY_THRESHOLD){
+      if(denies - confirms >= CONFIG.denyThreshold){
         await deleteReportRemote(id);
         removeMarker(id);
         updateCount();

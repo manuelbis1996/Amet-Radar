@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#12141a">
+<link rel="icon" href="icon-192.png">
+<title>AMET Radar — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink: #12141a;
+    --panel: #191d24;
+    --panel-2: #20252e;
+    --line: #2a303b;
+    --amber: #ffb020;
+    --signal: #f4f1ea;
+    --muted: #8a92a1;
+    --teal: #34c9a8;
+    --alert: #ff5d3a;
+    --blue: #4f9bf0;
+    --font-display: 'Big Shoulders Display', sans-serif;
+    --font-body: 'IBM Plex Sans', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; min-height:100%; background:var(--ink); font-family:var(--font-body); color:var(--signal); }
+  h1,h2{ font-family:var(--font-display); text-transform:uppercase; letter-spacing:0.4px; margin:0; }
+  #app{ max-width:960px; margin:0 auto; padding:20px 16px 60px; }
+
+  header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+  header h1{ font-size:22px; }
+  header p{ margin:2px 0 0; font-size:12px; color:var(--muted); font-family:var(--font-mono); }
+  #logout-btn{ background:transparent; border:1px solid var(--line); color:var(--muted); border-radius:8px; padding:8px 14px; font-family:var(--font-display); font-size:12px; text-transform:uppercase; cursor:pointer; }
+  #logout-btn:hover{ color:var(--signal); border-color:var(--alert); }
+
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:20px; }
+  .card h2{ font-size:15px; margin-bottom:14px; color:var(--amber); }
+
+  #login-screen{ max-width:340px; margin:80px auto 0; }
+  #login-screen p.sub{ color:var(--muted); font-size:13px; margin:0 0 18px; font-family:var(--font-mono); }
+  label{ display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.3px; margin-bottom:6px; font-family:var(--font-display); }
+  input[type=password], input[type=number]{
+    width:100%; background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
+    color:var(--signal); padding:10px 12px; font-family:var(--font-body); font-size:14px; margin-bottom:14px;
+  }
+  .btn{ border:none; border-radius:10px; padding:11px 18px; font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:0.3px; text-transform:uppercase; cursor:pointer; }
+  .btn-primary{ background:var(--amber); color:var(--ink); }
+  .btn-primary:disabled{ background:var(--line); color:var(--muted); cursor:default; }
+  .error-box{ background:rgba(255,93,58,0.12); border:1px solid var(--alert); color:#ffb3a0; padding:10px 12px; border-radius:8px; font-size:12px; margin-bottom:14px; }
+  .error-box[hidden]{ display:none; }
+
+  #dashboard[hidden]{ display:none; }
+
+  .stat-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:12px; }
+  .stat-tile{ background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .stat-tile b{ display:block; font-family:var(--font-display); font-size:24px; color:var(--amber); }
+  .stat-tile span{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.3px; }
+  .cat-breakdown{ margin-top:14px; display:flex; flex-wrap:wrap; gap:8px; }
+  .cat-pill{ font-size:11px; padding:4px 10px; border-radius:20px; background:var(--panel-2); border:1px solid var(--line); color:var(--muted); font-family:var(--font-mono); }
+
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th{ text-align:left; font-family:var(--font-display); font-size:11px; text-transform:uppercase; color:var(--muted); padding:8px 6px; border-bottom:1px solid var(--line); }
+  td{ padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  td.note{ color:var(--muted); max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .thumb{ width:44px; height:33px; object-fit:cover; border-radius:4px; display:block; }
+  .cat-tag{ font-size:10px; padding:2px 8px; border-radius:10px; color:var(--ink); white-space:nowrap; font-family:var(--font-mono); }
+  .row-delete{ background:transparent; border:1px solid rgba(255,93,58,0.4); color:var(--alert); border-radius:8px; padding:6px 10px; font-size:11px; cursor:pointer; font-family:var(--font-display); text-transform:uppercase; }
+  .row-delete:hover{ background:rgba(255,93,58,0.12); }
+  .empty-row td{ text-align:center; color:var(--muted); padding:20px; }
+  .table-wrap{ overflow-x:auto; }
+
+  .config-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0 16px; }
+  .config-grid .field{ display:flex; flex-direction:column; }
+  .toast{
+    position:fixed; top:16px; left:50%; transform:translateX(-50%);
+    background:var(--teal); color:#08211c; padding:10px 18px; border-radius:24px;
+    font-family:var(--font-display); font-size:12px; letter-spacing:0.3px; z-index:1000;
+    box-shadow:0 4px 12px rgba(0,0,0,0.35); max-width:80%; text-align:center;
+  }
+  .toast.warn{ background:var(--alert); color:#fff; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="login-screen">
+    <h1>AMET Radar</h1>
+    <p class="sub">Panel de administración</p>
+    <div class="error-box" id="login-error" hidden></div>
+    <form id="login-form">
+      <label for="password-input">Password de admin</label>
+      <input type="password" id="password-input" autocomplete="current-password" required>
+      <button class="btn btn-primary" type="submit" id="login-btn">Entrar</button>
+    </form>
+  </div>
+
+  <div id="dashboard" hidden>
+    <header>
+      <div>
+        <h1>AMET Radar — Admin</h1>
+        <p>Panel de control</p>
+      </div>
+      <button id="logout-btn">Cerrar sesión</button>
+    </header>
+
+    <div class="card">
+      <h2>Estadísticas</h2>
+      <div class="stat-grid" id="stat-grid"></div>
+      <div class="cat-breakdown" id="cat-breakdown"></div>
+    </div>
+
+    <div class="card">
+      <h2>Reportes</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th></th><th>Categoría</th><th>Nota</th><th>Antigüedad</th><th>Votos</th><th></th></tr>
+          </thead>
+          <tbody id="reports-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Parámetros del sistema</h2>
+      <div class="error-box" id="config-error" hidden></div>
+      <form id="config-form">
+        <div class="config-grid">
+          <div class="field">
+            <label for="cfg-stale">Minutos para considerarse "viejo"</label>
+            <input type="number" id="cfg-stale" min="1" required>
+          </div>
+          <div class="field">
+            <label for="cfg-maxage">Minutos para expirar/borrar</label>
+            <input type="number" id="cfg-maxage" min="1" required>
+          </div>
+          <div class="field">
+            <label for="cfg-deny">Umbral de negaciones para retirar</label>
+            <input type="number" id="cfg-deny" min="1" required>
+          </div>
+          <div class="field">
+            <label for="cfg-limit">Reportes máximos por ventana</label>
+            <input type="number" id="cfg-limit" min="1" required>
+          </div>
+          <div class="field" style="grid-column:1/-1">
+            <label for="cfg-window">Duración de la ventana anti-spam (minutos)</label>
+            <input type="number" id="cfg-window" min="1" required>
+          </div>
+        </div>
+        <button class="btn btn-primary" type="submit" id="config-save-btn">Guardar</button>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  // Mismas credenciales que amet-radar.html: publishable key, pensada para
+  // vivir en el cliente — el control de acceso real lo hacen las políticas
+  // RLS (ver CLAUDE.md). El panel no tiene backend propio: le pega directo
+  // a la API REST de Supabase, igual que la app principal.
+  const SUPABASE_URL = 'https://nikexwjxxcxzhsuypsjn.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_p8U6gvvBwPVHdfmspjyCXA_g6clP58v';
+  const REPORTS_URL = `${SUPABASE_URL}/rest/v1/reports`;
+  const CONFIG_URL = `${SUPABASE_URL}/rest/v1/app_config`;
+  const ADMIN_LOGIN_URL = `${SUPABASE_URL}/functions/v1/admin-login`;
+  const SUPABASE_HEADERS = {
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json'
+  };
+
+  const CATEGORIES = {
+    reten_fijo:  { label:'Retén fijo',      emoji:'👮', hex:'#ffb020' },
+    reten_movil: { label:'Retén móvil',     emoji:'🚓', hex:'#34c9a8' },
+    accidente:   { label:'Accidente',       emoji:'⚠️', hex:'#ff5d3a' },
+    control:     { label:'Control tránsito',emoji:'🚦', hex:'#4f9bf0' }
+  };
+
+  // El login solo es un gate de conveniencia (ver admin-login/index.ts):
+  // no hay token que validar en cada llamada porque no hay nada más que
+  // proteger — reports/app_config ya tienen RLS abierta para cualquiera
+  // con la anon key, la misma que ya está embebida en amet-radar.html.
+  const SESSION_KEY = 'amet_admin_ok_v1';
+  let authed = sessionStorage.getItem(SESSION_KEY) === '1';
+
+  const loginScreen = document.getElementById('login-screen');
+  const dashboard = document.getElementById('dashboard');
+  const loginForm = document.getElementById('login-form');
+  const loginError = document.getElementById('login-error');
+  const loginBtn = document.getElementById('login-btn');
+
+  function showToast(msg, warn){
+    const t = document.createElement('div');
+    t.className = 'toast' + (warn ? ' warn' : '');
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(()=> t.remove(), 2600);
+  }
+
+  function showEntry(){
+    if(authed){
+      loginScreen.hidden = true;
+      dashboard.hidden = false;
+      loadDashboard();
+    } else {
+      loginScreen.hidden = false;
+      dashboard.hidden = true;
+    }
+  }
+
+  loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    loginError.hidden = true;
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Entrando…';
+    const password = document.getElementById('password-input').value;
+    try{
+      const res = await fetch(ADMIN_LOGIN_URL, {
+        method: 'POST',
+        headers: SUPABASE_HEADERS,
+        body: JSON.stringify({ password })
+      });
+      const data = await res.json();
+      if(!res.ok){
+        loginError.textContent = data.error || 'No se pudo iniciar sesión';
+        loginError.hidden = false;
+        return;
+      }
+      authed = true;
+      sessionStorage.setItem(SESSION_KEY, '1');
+      document.getElementById('password-input').value = '';
+      showEntry();
+    }catch(err){
+      loginError.textContent = 'Error de conexión con el servidor';
+      loginError.hidden = false;
+    }finally{
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Entrar';
+    }
+  });
+
+  document.getElementById('logout-btn').addEventListener('click', () => {
+    authed = false;
+    sessionStorage.removeItem(SESSION_KEY);
+    showEntry();
+  });
+
+  function timeAgo(ts){
+    const min = Math.floor((Date.now()-ts)/60000);
+    if(min < 1) return 'justo ahora';
+    if(min < 60) return `hace ${min} min`;
+    const h = Math.floor(min/60);
+    if(h < 24) return `hace ${h} h`;
+    return `hace ${Math.floor(h/24)} d`;
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  let reportsCache = [];
+
+  async function fetchReports(){
+    const res = await fetch(`${REPORTS_URL}?select=*`, { headers: SUPABASE_HEADERS });
+    if(!res.ok) throw new Error('No se pudieron cargar los reportes');
+    reportsCache = await res.json();
+    return reportsCache;
+  }
+
+  async function loadStats(){
+    const rows = reportsCache;
+    const maxAgeMinutes = Number(document.getElementById('cfg-maxage').value) || 360;
+    const now = Date.now();
+    const byCategory = {};
+    let newestTs = null, expired = 0;
+    for(const r of rows){
+      byCategory[r.category] = (byCategory[r.category] || 0) + 1;
+      if(newestTs === null || r.ts > newestTs) newestTs = r.ts;
+      if((now - r.ts) / 60000 > maxAgeMinutes) expired++;
+    }
+    const grid = document.getElementById('stat-grid');
+    grid.innerHTML = `
+      <div class="stat-tile"><b>${rows.length}</b><span>Activos</span></div>
+      <div class="stat-tile"><b>${expired}</b><span>Expirados</span></div>
+      <div class="stat-tile"><b>${newestTs ? timeAgo(newestTs) : '—'}</b><span>Último reporte</span></div>
+    `;
+    const breakdown = document.getElementById('cat-breakdown');
+    breakdown.innerHTML = Object.entries(byCategory).map(([key, count]) => {
+      const cat = CATEGORIES[key] || { emoji:'❔', label:key };
+      return `<span class="cat-pill">${cat.emoji} ${cat.label}: ${count}</span>`;
+    }).join('') || '<span class="cat-pill">Sin reportes</span>';
+  }
+
+  function renderReportsTable(){
+    const tbody = document.getElementById('reports-tbody');
+    const rows = [...reportsCache].sort((a, b) => b.ts - a.ts);
+    if(rows.length === 0){
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No hay reportes activos</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(r => {
+      const cat = CATEGORIES[r.category] || { emoji:'❔', label:r.category, hex:'#8a92a1' };
+      return `
+        <tr data-id="${r.id}">
+          <td>${r.photo ? `<img class="thumb" src="${r.photo}" alt="">` : ''}</td>
+          <td><span class="cat-tag" style="background:${cat.hex}">${cat.emoji} ${cat.label}</span></td>
+          <td class="note">${r.note ? escapeHtml(r.note) : '—'}</td>
+          <td>${timeAgo(r.ts)}</td>
+          <td>👍 ${r.confirms||0} · 👎 ${r.denies||0}</td>
+          <td><button class="row-delete" data-id="${r.id}">Eliminar</button></td>
+        </tr>`;
+    }).join('');
+    tbody.querySelectorAll('.row-delete').forEach(btn => {
+      btn.addEventListener('click', () => deleteReport(btn.dataset.id));
+    });
+  }
+
+  async function deleteReport(id){
+    if(!confirm('¿Eliminar este reporte?')) return;
+    try{
+      await fetch(`${REPORTS_URL}?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' }
+      });
+      showToast('Reporte eliminado');
+      await fetchReports();
+      renderReportsTable();
+      loadStats();
+    }catch(err){
+      showToast('No se pudo eliminar el reporte', true);
+    }
+  }
+
+  const configForm = document.getElementById('config-form');
+  const configError = document.getElementById('config-error');
+
+  async function loadConfigForm(){
+    const res = await fetch(`${CONFIG_URL}?select=*&limit=1`, { headers: SUPABASE_HEADERS });
+    if(!res.ok) throw new Error('No se pudo cargar la config');
+    const rows = await res.json();
+    const cfg = rows[0] || {};
+    document.getElementById('cfg-stale').value = cfg.stale_minutes ?? 180;
+    document.getElementById('cfg-maxage').value = cfg.max_age_minutes ?? 360;
+    document.getElementById('cfg-deny').value = cfg.deny_threshold ?? 2;
+    document.getElementById('cfg-limit').value = cfg.report_limit ?? 3;
+    document.getElementById('cfg-window').value = cfg.report_window_min ?? 60;
+  }
+
+  configForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    configError.hidden = true;
+    const saveBtn = document.getElementById('config-save-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Guardando…';
+    const body = {
+      stale_minutes: Number(document.getElementById('cfg-stale').value),
+      max_age_minutes: Number(document.getElementById('cfg-maxage').value),
+      deny_threshold: Number(document.getElementById('cfg-deny').value),
+      report_limit: Number(document.getElementById('cfg-limit').value),
+      report_window_min: Number(document.getElementById('cfg-window').value),
+      updated_at: new Date().toISOString()
+    };
+    if(body.stale_minutes > body.max_age_minutes){
+      configError.textContent = 'Los minutos para "viejo" no pueden superar los de expirar';
+      configError.hidden = false;
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Guardar';
+      return;
+    }
+    try{
+      const res = await fetch(`${CONFIG_URL}?id=eq.true`, {
+        method: 'PATCH',
+        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
+        body: JSON.stringify(body)
+      });
+      if(!res.ok) throw new Error('No se pudo guardar');
+      showToast('Parámetros actualizados');
+    }catch(err){
+      configError.textContent = 'Error de conexión con el servidor';
+      configError.hidden = false;
+    }finally{
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Guardar';
+    }
+  });
+
+  async function loadDashboard(){
+    try{
+      await loadConfigForm();
+      await fetchReports();
+      renderReportsTable();
+      loadStats();
+    }catch(err){
+      showToast('Error cargando el panel', true);
+    }
+  }
+
+  showEntry();
+})();
+</script>
+</body>
+</html>

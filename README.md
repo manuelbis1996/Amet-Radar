@@ -72,11 +72,21 @@ esté prendida; el cliente refresca cada 8 segundos.
 - **PWA**: `manifest.json` + `sw.js` para instalar la app y cachear el shell
   básico (funciona una vez que se sirve por `http://localhost` o HTTPS).
 
+## Panel de administración
+
+`admin.html` — moderar reportes (verlos todos, borrar cualquiera), ver
+estadísticas y editar en caliente los parámetros del sistema, sin backend
+propio (le pega directo a Supabase, protegido por password vía un Edge
+Function). Detalles completos en
+[CLAUDE.md](CLAUDE.md#panel-de-administración).
+
 ## Redesplegar a producción
 
 El sitio de Netlify (`amet-radar`, site ID `8958378d-0be4-42bb-ab5c-4ba7e3181dd8`)
-no está conectado al repo de GitHub, así que un push a `main` **no**
-redespliega solo. Tras mergear cambios hay que subirlos a mano:
+está conectado al repo de GitHub — un push a la **rama de producción
+configurada en Netlify** redespliega solo (confirmar cuál es esa rama en
+`Project configuration → Continuous deployment` antes de asumir que es
+`main`). Si hace falta forzar un deploy fuera de ese flujo:
 
 ```bash
 npx -y netlify-cli deploy --prod --site 8958378d-0be4-42bb-ab5c-4ba7e3181dd8 --dir .

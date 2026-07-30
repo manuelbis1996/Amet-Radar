@@ -66,9 +66,15 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   vuelven a aplicar automáticamente.
 - `supabase/functions/notify-nearby/index.ts` — Edge Function que manda
   las notificaciones push (ver "Notificaciones push" abajo).
+- `supabase/functions/admin-login/index.ts` — Edge Function que valida el
+  password del panel admin (ver "Panel de administración" abajo).
 - `netlify/edge-functions/report-preview.ts` — Edge Function (Netlify, no
   Supabase) que arma el preview dinámico por reporte para bots de
   WhatsApp/Twitter/etc. (ver "Preview dinámico por reporte" abajo).
+- `admin.html` — panel de administración (moderar reportes, ver
+  estadísticas, editar parámetros del sistema), sin backend propio — le
+  pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
+  administración" abajo).
 
 ## Cómo correrlo
 Requiere Node.js instalado y servirse por `http://` (no abrir con doble
@@ -242,6 +248,50 @@ en vez de la tarjeta genérica de la app — así el link se ve como algo real
   bot + id inexistente → 200, cae a la SPA; navegador normal → SPA
   completa sin cambios.
 
+## Panel de administración
+`admin.html` — moderar reportes (verlos todos, borrar cualquiera), ver
+estadísticas (total, por categoría, último reporte) y editar en caliente
+los parámetros del sistema (antes hardcodeados en `amet-radar.html`) sin
+tocar código. Igual que el resto del proyecto desde que se migró a
+Supabase: **sin backend propio**, el panel le pega directo a la REST API
+de Supabase con la misma publishable key que ya está embebida en
+`amet-radar.html` — no hay Netlify Functions ni ningún servidor propio de
+por medio.
+
+- **Tabla `public.app_config`**: fila única (`id boolean primary key
+  default true` + `check (id)`, truco de "singleton" para que la PK
+  impida una segunda fila) con `stale_minutes`, `max_age_minutes`,
+  `deny_threshold`, `report_limit`, `report_window_min`. RLS abierta
+  (select + update, `USING (true)`), mismo criterio que `reports`.
+  `amet-radar.html` la lee al arrancar (`loadConfig()`) hacia un objeto
+  `CONFIG` mutable con los valores de antes como default si el fetch
+  falla; `admin.html` la edita con `PATCH .../app_config?id=eq.true`.
+- **Auth del panel**: password compartido, validado por un Edge Function
+  nuevo (`supabase/functions/admin-login`) que compara contra el secret
+  `ADMIN_PASSWORD` (mismo mecanismo manual que las VAPID keys — no hay
+  herramienta MCP conectada que permita setear secrets) con rate-limit
+  básico en memoria (5 intentos/15 min → bloqueo 15 min, best-effort, no
+  sobrevive un cold start). **Importante**: como las políticas RLS de
+  `reports`/`app_config` ya son abiertas a cualquiera con la publishable
+  key (la misma que ya está en `amet-radar.html`, pública por diseño), este
+  login **no protege ningún dato real** — es solo un gate de conveniencia
+  para que no cualquiera encuentre la pantalla de moderación, mismo
+  espíritu que "no hay autenticación de usuarios en la app". Por eso no
+  hay tokens de sesión: tras un login exitoso, `admin.html` solo guarda un
+  flag en `sessionStorage` y a partir de ahí llama a Supabase igual que
+  cualquier visitante.
+- **Borrado de reportes desde el panel**: usa el mismo `DELETE
+  .../reports?id=eq.<id>` que ya podía hacer cualquiera con la anon key
+  desde antes del panel (RLS abierta) — no se introdujo una superficie de
+  ataque nueva, solo una forma cómoda de hacer lo que ya era posible.
+- **Por qué no quedó en Netlify Functions + Blobs**: la primera versión de
+  este panel (antes de este commit) se construyó sobre un backend propio en
+  Netlify Functions con Netlify Blobs como reemplazo de un `data/*.json` —
+  pensado para un `server.js` con API propia que ya no existe en este
+  proyecto desde que se migró a Supabase. Se descartó esa rama entera y se
+  reconstruyó el panel contra Supabase directo, coherente con cómo ya
+  funciona el resto de la app.
+
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
   (objeto `CATEGORIES` dentro del `<script>`, con emoji y color cada una).
@@ -312,10 +362,17 @@ El frontend está publicado en **Netlify**, cuenta del dueño del proyecto
 - **URL pública**: https://amet-radar.netlify.app
 - **Site ID**: `8958378d-0be4-42bb-ab5c-4ba7e3181dd8` (nombre del sitio:
   `amet-radar`)
-- **No está conectado al repo de GitHub** — no hay auto-deploy en cada
-  push. Cada deploy es manual, subiendo el contenido de la carpeta del
-  proyecto tal cual (sin build step, coincide 1:1 con lo que hay en git).
-  Para redesplegar tras un cambio: usar el MCP de Netlify (herramienta
+- **Conectado al repo de GitHub** (`manuelbis1996/Amet-Radar`) con
+  auto-deploy: cada push a la **rama de producción configurada en Netlify**
+  dispara un build/deploy solo. Importante: por un rato quedó apuntando a
+  una rama de trabajo (`claude/project-analysis-g7rbe9`) en vez de `main`,
+  lo que hizo que el sitio en vivo perdiera temporalmente las
+  notificaciones push y el preview dinámico (ambos solo existían en
+  `main`) — confirmar en el dashboard (`Project configuration → Build &
+  deploy → Continuous deployment`) que la rama de producción sea `main`
+  antes de asumir que un merge a `main` se refleja solo.
+- **Deploy manual** (alternativa si hace falta forzar uno fuera del flujo
+  de git): usar el MCP de Netlify (herramienta
   `netlify-deploy-services-updater`, operación `deploy-site` con ese
   `siteId`) o, equivalente en CLI, `npx -y netlify-cli deploy --prod
   --site 8958378d-0be4-42bb-ab5c-4ba7e3181dd8 --dir .` desde la raíz del
@@ -327,11 +384,13 @@ El frontend está publicado en **Netlify**, cuenta del dueño del proyecto
   autenticación de usuarios.
 - **`_redirects`**: necesario para que `/` sirva `amet-radar.html` (ver
   "Archivos" arriba) — sin este archivo Netlify tira 404 en la raíz.
-- **Pendiente, no bloqueante**: conectar el repo de GitHub desde Netlify
-  (`Site settings → Build & deploy → Link repository`) para que cada push
-  a la rama correspondiente dispare un deploy automático — requiere que el
-  dueño autorice el link con GitHub desde la UI de Netlify, no se puede
-  hacer por API/MCP.
+- **`ADMIN_PASSWORD` como env var de Netlify quedó sin uso**: se configuró
+  durante un intento anterior de portar el panel admin a Netlify
+  Functions + Blobs, arquitectura que se descartó (ver "Panel de
+  administración" arriba). El `ADMIN_PASSWORD` que de verdad usa
+  `admin.html` hoy es un **secret de Supabase** (Project Settings → Edge
+  Functions → Secrets), no una env var de Netlify — son proyectos y
+  mecanismos distintos, no confundirlos.
 
 Mejoras posteriores, no bloqueantes: reemplazar las políticas RLS abiertas
 de Supabase por algo más restrictivo si se agrega autenticación, y mover
