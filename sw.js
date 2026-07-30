@@ -1,4 +1,4 @@
-const CACHE_NAME = 'amet-radar-v2';
+const CACHE_NAME = 'amet-radar-v4.0';
 const APP_SHELL = [
   './amet-radar.html',
   './manifest.json',

@@ -3,239 +3,308 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#1c1c1e">
+<meta name="theme-color" content="#12141a">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>AMET Radar</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
+  /*
+    Identidad: "instrumental de retén nocturno" — un tablero tipo HUD de
+    auto, no un mapa turístico. Fondo frío casi negro (para no deslumbrar
+    de noche) contra un ámbar de baliza como único acento cálido.
+    Display: Big Shoulders (condensado/industrial, letrero de carretera).
+    UI/cuerpo: IBM Plex Sans. Datos tabulares (hora, contador, votos):
+    IBM Plex Mono — números de instrumento, no de blog.
+  */
   :root{
-    --asphalt: #1c1c1e;
-    --asphalt-2: #26262a;
-    --concrete: #2e2e32;
-    --line: #3c3c40;
-    --caution: #f5c518;
-    --caution-dim: #b89412;
-    --signal: #f7f6f3;
-    --muted: #9a9a9e;
-    --route-teal: #2fa089;
-    --alert: #e4572e;
-    --control-blue: #4a90d9;
+    --ink: #12141a;
+    --panel: #191d24;
+    --panel-2: #20252e;
+    --line: #2a303b;
+    --amber: #ffb020;
+    --amber-dim: #c98a1c;
+    --signal: #f4f1ea;
+    --muted: #8a92a1;
+    --teal: #34c9a8;
+    --alert: #ff5d3a;
+    --blue: #4f9bf0;
+    --font-display: 'Big Shoulders Display', sans-serif;
+    --font-body: 'IBM Plex Sans', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
   }
   *{ box-sizing: border-box; }
-  html,body{ margin:0; padding:0; height:100%; background:var(--asphalt); font-family:'Inter',sans-serif; color:var(--signal); overflow:hidden; }
+  html,body{ margin:0; padding:0; height:100%; background:var(--ink); font-family:var(--font-body); color:var(--signal); overflow:hidden; }
   #app{ position:relative; width:100%; height:100vh; height:100dvh; display:flex; flex-direction:column; }
+  ::selection{ background:var(--amber); color:var(--ink); }
 
-  /* Header */
+  /* Header: barra HUD translúcida flotando sobre el mapa, con una franja
+     de cinta de precaución (rayada) como remate en vez de un borde plano. */
   header{
-    background: var(--asphalt);
-    border-bottom: 3px solid var(--caution);
-    padding: 12px 16px;
+    background: rgba(18,20,26,0.78);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    padding: 14px 16px 15px;
     display:flex; align-items:center; justify-content:space-between;
-    z-index: 500;
-    flex-shrink:0;
+    z-index: 500; flex-shrink:0; position:relative;
   }
-  .brand{ display:flex; align-items:center; gap:10px; }
+  header::after{
+    content:''; position:absolute; left:0; right:0; bottom:0; height:3px;
+    background: repeating-linear-gradient(135deg, var(--amber) 0 10px, transparent 10px 20px);
+  }
+  .brand{ display:flex; align-items:center; gap:11px; }
   .brand-mark{
-    width:34px;height:34px; border-radius:6px;
-    background: var(--caution);
-    display:flex; align-items:center; justify-content:center;
-    font-family:'Oswald',sans-serif; font-weight:700; color:var(--asphalt); font-size:16px;
-    transform: rotate(-4deg);
+    width:36px; height:36px; border-radius:9px; flex-shrink:0;
+    background: var(--panel-2); border:1px solid var(--line);
+    position:relative; overflow:hidden;
   }
+  .brand-mark::before{
+    content:''; position:absolute; inset:0;
+    background: conic-gradient(from 0deg, transparent 0deg 270deg, var(--amber) 330deg, transparent 360deg);
+    animation: radar-spin 2.4s linear infinite;
+  }
+  .brand-mark::after{
+    content:''; position:absolute; top:50%; left:50%; width:5px; height:5px; margin:-2.5px 0 0 -2.5px;
+    border-radius:50%; background:var(--amber); box-shadow:0 0 6px 1px rgba(255,176,32,0.85);
+  }
+  @keyframes radar-spin{ to{ transform: rotate(360deg); } }
   .brand h1{
-    font-family:'Oswald',sans-serif; font-weight:600; letter-spacing:0.5px;
-    font-size:18px; margin:0; text-transform:uppercase;
+    font-family:var(--font-display); font-weight:700; letter-spacing:0.2px;
+    font-size:21px; margin:0; text-transform:uppercase; line-height:1;
   }
-  .brand p{ margin:0; font-size:11px; color:var(--muted); letter-spacing:0.3px; }
+  .brand p{ margin:2px 0 0; font-size:11px; color:var(--muted); letter-spacing:0.2px; }
+  .version-tag{ font-family:var(--font-mono); font-size:9px; opacity:.65; margin-left:4px; }
   .stat{
-    font-family:'Oswald',sans-serif; text-align:right; font-size:11px; color:var(--muted);
+    font-family:var(--font-mono); text-align:right; font-size:9.5px; color:var(--muted);
+    letter-spacing:0.5px; text-transform:uppercase;
   }
-  .stat b{ color:var(--caution); font-size:18px; display:block; line-height:1; }
+  .stat b{
+    color:var(--amber); font-size:21px; display:block; line-height:1.15;
+    font-variant-numeric:tabular-nums; font-weight:600;
+  }
 
   /* Filter chips */
   #filters{
-    display:flex; gap:8px; padding:10px 16px; overflow-x:auto;
-    background:var(--asphalt); border-bottom:1px solid var(--line);
-    flex-shrink:0; -webkit-overflow-scrolling:touch;
+    display:flex; gap:8px; padding:11px 16px; overflow-x:auto;
+    background: linear-gradient(to bottom, rgba(18,20,26,0.6), rgba(18,20,26,0));
+    flex-shrink:0; -webkit-overflow-scrolling:touch; position:relative; z-index:490;
   }
   #filters::-webkit-scrollbar{ display:none; }
   .chip{
     display:flex; align-items:center; gap:6px; white-space:nowrap;
-    padding:7px 12px; border-radius:20px; border:1px solid var(--line);
-    background:var(--concrete); color:var(--muted);
-    font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:0.3px; text-transform:uppercase;
-    cursor:pointer; user-select:none; transition:all 0.15s ease;
+    padding:8px 14px; border-radius:999px; border:1px solid var(--line);
+    background:rgba(32,37,46,0.85); color:var(--muted);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    font-family:var(--font-display); font-weight:600; font-size:12.5px; letter-spacing:0.3px; text-transform:uppercase;
+    cursor:pointer; user-select:none; transition:background .15s ease, color .15s ease, border-color .15s ease, transform .1s ease;
   }
-  .chip[aria-pressed="true"]{ background:var(--chip-color,var(--caution)); color:var(--asphalt); border-color:var(--chip-color,var(--caution)); }
+  .chip:active{ transform:scale(0.96); }
+  .chip[aria-pressed="true"]{ background:var(--chip-color,var(--amber)); color:var(--ink); border-color:var(--chip-color,var(--amber)); }
 
   /* Map */
   #map{ flex:1; background:#e8e6e1; position:relative; }
   .leaflet-container{ background:#e8e6e1; }
 
   #map-loader{
-    position:absolute; inset:0; z-index:450; background:rgba(20,20,22,0.75);
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
-    font-family:'Oswald',sans-serif; font-size:12px; color:var(--muted); letter-spacing:0.3px;
+    position:absolute; inset:0; z-index:450;
+    background: radial-gradient(circle at 50% 45%, rgba(24,27,34,0.4), rgba(12,14,18,0.9));
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+    font-family:var(--font-display); font-weight:600; font-size:12px; color:var(--muted); letter-spacing:0.4px; text-transform:uppercase;
   }
   #map-loader[hidden]{ display:none; }
 
-  /* Marker */
+  /* Radar sweep: reemplaza el spinner genérico; el mismo motivo se usa en
+     el loader de pantalla completa y, en tamaño chico, dentro de las hojas
+     (compresión de foto, publicación) para que todo el "esperar" de la app
+     se sienta como una sola cosa reconocible. */
+  .radar-sweep{
+    width:64px; height:64px; border-radius:50%; position:relative; flex-shrink:0;
+    border:1px solid rgba(255,176,32,0.22);
+    background: radial-gradient(circle, rgba(255,176,32,0.07) 0%, transparent 72%);
+  }
+  .radar-sweep::before{
+    content:''; position:absolute; inset:9px; border-radius:50%; border:1px solid rgba(255,176,32,0.18);
+  }
+  .radar-sweep::after{
+    content:''; position:absolute; inset:0; border-radius:50%;
+    background: conic-gradient(from 0deg, transparent 0deg, rgba(255,176,32,0.6) 40deg, transparent 95deg);
+    animation: radar-spin 1.5s linear infinite;
+  }
+  .radar-sweep.small{ width:22px; height:22px; margin:4px 0 0; }
+  .radar-sweep.small::before{ inset:3px; }
+
+  /* Marcador: rombo de señal de precaución en vez de pin genérico —
+     centrado sobre el punto, sin "cola" que apunte, como un ícono de
+     instrumento más que un alfiler de mapa turístico. */
   .amet-pin{
-    width:36px; height:36px;
+    width:34px; height:34px;
     display:flex; align-items:center; justify-content:center;
-    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+    filter: drop-shadow(0 3px 7px rgba(0,0,0,0.55));
   }
   .amet-pin .badge{
-    width:30px; height:30px; border-radius:50% 50% 50% 0;
-    transform: rotate(-45deg);
-    background: var(--caution);
-    border: 2px solid var(--asphalt);
+    width:25px; height:25px; border-radius:6px;
+    transform: rotate(45deg);
+    background: var(--amber);
+    border: 2px solid var(--ink);
     display:flex; align-items:center; justify-content:center;
   }
-  .amet-pin .badge span{ transform: rotate(45deg); font-size:14px; }
+  .amet-pin .badge span{ transform: rotate(-45deg); font-size:13px; }
   .amet-pin.stale .badge{ background: var(--muted); }
   .amet-pin.pending .badge{ opacity:.55; border-style:dashed; }
 
   /* "Me" marker */
   .me-marker{ width:22px; height:22px; }
   .me-dot{
-    width:16px; height:16px; border-radius:50%; background:var(--control-blue);
-    border:3px solid #fff; box-shadow:0 0 0 4px rgba(74,144,217,0.35);
+    width:16px; height:16px; border-radius:50%; background:var(--blue);
+    border:3px solid #fff; box-shadow:0 0 0 4px rgba(79,155,240,0.35);
     animation: me-pulse 2s ease-out infinite;
   }
   @keyframes me-pulse{
-    0%{ box-shadow:0 0 0 4px rgba(74,144,217,0.35); }
-    70%{ box-shadow:0 0 0 12px rgba(74,144,217,0); }
-    100%{ box-shadow:0 0 0 4px rgba(74,144,217,0); }
+    0%{ box-shadow:0 0 0 4px rgba(79,155,240,0.35); }
+    70%{ box-shadow:0 0 0 12px rgba(79,155,240,0); }
+    100%{ box-shadow:0 0 0 4px rgba(79,155,240,0); }
   }
 
   .leaflet-popup-content-wrapper{
-    background: var(--concrete); color: var(--signal); border-radius: 10px;
+    background: var(--panel-2); color: var(--signal); border-radius: 14px;
+    box-shadow: 0 14px 32px rgba(0,0,0,0.5);
   }
-  .leaflet-popup-tip{ background: var(--concrete); }
-  .popup-card{ font-family:'Inter',sans-serif; width:210px; }
-  .popup-card img{ width:100%; border-radius:6px; display:block; margin-bottom:6px; aspect-ratio:4/3; object-fit:cover; }
+  .leaflet-popup-tip{ background: var(--panel-2); }
+  .popup-card{ font-family:var(--font-body); width:216px; }
+  .popup-card img{ width:100%; border-radius:8px; display:block; margin-bottom:8px; aspect-ratio:4/3; object-fit:cover; }
   .popup-card .cat-label{
-    display:inline-block; font-family:'Oswald',sans-serif; font-size:10px; letter-spacing:0.4px;
-    text-transform:uppercase; padding:2px 8px; border-radius:10px; color:var(--asphalt);
-    background:var(--caution); margin-bottom:6px;
+    display:inline-block; font-family:var(--font-display); font-weight:700; font-size:10.5px; letter-spacing:0.3px;
+    text-transform:uppercase; padding:3px 9px; border-radius:999px; color:var(--ink);
+    background:var(--amber); margin-bottom:8px;
   }
-  .popup-card .time{ font-size:11px; color:var(--caution); font-family:'Oswald',sans-serif; letter-spacing:0.3px; }
-  .popup-card .note{ font-size:12px; color:var(--muted); margin-top:4px; }
-  .popup-card .votes{ display:flex; gap:6px; margin-top:10px; }
+  .popup-card .time{
+    font-size:11px; color:var(--amber); font-family:var(--font-mono); letter-spacing:0.2px;
+    font-variant-numeric:tabular-nums;
+  }
+  .popup-card .note{ font-size:12.5px; color:var(--muted); margin-top:5px; line-height:1.4; }
+  .popup-card .votes{ display:flex; gap:6px; margin-top:11px; }
   .vote-btn{
-    flex:1; display:flex; align-items:center; justify-content:center; gap:4px;
-    background:var(--asphalt-2); border:1px solid var(--line); color:var(--signal);
-    border-radius:8px; padding:6px 4px; font-size:11px; cursor:pointer; font-family:'Inter',sans-serif;
+    flex:1; display:flex; align-items:center; justify-content:center; gap:5px;
+    background:var(--panel); border:1px solid var(--line); color:var(--signal);
+    border-radius:10px; padding:7px 4px; font-size:11.5px; font-weight:500; cursor:pointer; font-family:var(--font-body);
+    transition: transform .1s ease;
   }
-  .vote-btn:active{ transform:scale(0.96); }
-  .vote-btn.deny{ color:#f0a08a; }
-  .vote-btn.confirm{ color:#8fd6c6; }
+  .vote-btn:active{ transform:scale(0.95); }
+  .vote-btn.deny{ color:#ffab8f; }
+  .vote-btn.confirm{ color:#7fe4c9; }
   .popup-card .mini-actions{ display:flex; gap:6px; margin-top:8px; }
   .mini-btn{
     flex:1; background:transparent; border:1px solid var(--line); color:var(--muted);
-    border-radius:8px; padding:6px 4px; font-size:10.5px; cursor:pointer; font-family:'Oswald',sans-serif;
+    border-radius:10px; padding:7px 4px; font-size:10.5px; cursor:pointer; font-family:var(--font-display); font-weight:600;
     text-transform:uppercase; letter-spacing:0.3px;
   }
-  .mini-btn.danger{ color:var(--alert); border-color:rgba(228,87,46,0.4); }
+  .mini-btn.danger{ color:var(--alert); border-color:rgba(255,93,58,0.4); }
 
-  /* FAB row */
+  /* FAB row: barra de vidrio flotante sobre el mapa */
   #fab-row{
-    position:absolute; left:0; right:0; bottom:calc(22px + env(safe-area-inset-bottom, 0px));
-    display:flex; align-items:center; justify-content:center; gap:10px;
+    position:absolute; left:0; right:0; bottom:calc(20px + env(safe-area-inset-bottom, 0px));
+    display:flex; align-items:center; justify-content:center; gap:12px;
     z-index:400; padding:0 16px;
   }
   #locate-btn{
-    width:48px; height:48px; border-radius:50%; flex-shrink:0;
-    background: var(--concrete); border:1px solid var(--line); color:var(--signal);
-    font-size:18px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.4);
+    width:50px; height:50px; border-radius:50%; flex-shrink:0;
+    background: rgba(25,29,36,0.85); border:1px solid var(--line); color:var(--signal);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; box-shadow:0 6px 18px rgba(0,0,0,0.45);
+    transition: transform 0.15s ease;
   }
-  #locate-btn:active{ transform:scale(0.94); }
+  #locate-btn svg{ width:20px; height:20px; }
+  #locate-btn:active{ transform:scale(0.92); }
   #report-btn{
-    background: var(--caution); color: var(--asphalt);
-    border:none; border-radius: 30px;
-    padding: 14px 24px;
-    font-family:'Oswald',sans-serif; font-weight:600; font-size:14px; letter-spacing:0.4px; text-transform:uppercase;
-    display:flex; align-items:center; gap:8px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    background: linear-gradient(135deg, var(--amber), var(--amber-dim));
+    color: var(--ink);
+    border:none; border-radius: 999px;
+    padding: 14px 26px;
+    font-family:var(--font-display); font-weight:700; font-size:14.5px; letter-spacing:0.3px; text-transform:uppercase;
+    display:flex; align-items:center; gap:9px;
+    box-shadow: 0 8px 22px rgba(255,176,32,0.28), 0 2px 6px rgba(0,0,0,0.4);
     cursor:pointer;
-    transition: transform 0.15s ease, background 0.15s ease;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
+  #report-btn svg{ width:18px; height:18px; flex-shrink:0; }
   #report-btn:active{ transform: scale(0.96); }
-  #report-btn:disabled{ background: var(--line); color: var(--muted); cursor:default; }
+  #report-btn:disabled{ background: var(--line); color: var(--muted); cursor:default; box-shadow:none; }
 
   /* Overlay flow */
   #flow-overlay{
-    position:absolute; inset:0; background: rgba(20,20,22,0.86);
+    position:absolute; inset:0; background: rgba(10,12,16,0.78);
     display:flex; align-items:flex-end; justify-content:center;
     z-index:1000;
   }
   #flow-overlay[hidden]{ display:none; }
   .sheet{
-    background: var(--concrete); width:100%; max-width:480px;
-    border-radius: 18px 18px 0 0;
-    padding: 20px 20px calc(26px + env(safe-area-inset-bottom, 0px));
-    border-top: 3px solid var(--caution);
+    background: var(--panel-2); width:100%; max-width:480px;
+    border-radius: 20px 20px 0 0;
+    padding: 22px 20px calc(28px + env(safe-area-inset-bottom, 0px));
+    position:relative; overflow:hidden;
+    box-shadow: 0 -12px 40px rgba(0,0,0,0.5);
+  }
+  .sheet::before{
+    content:''; position:absolute; top:0; left:0; right:0; height:4px;
+    background: repeating-linear-gradient(135deg, var(--amber) 0 12px, var(--ink) 12px 24px);
   }
   .sheet h2{
-    font-family:'Oswald',sans-serif; font-size:16px; margin:0 0 4px; text-transform:uppercase; letter-spacing:0.4px;
+    font-family:var(--font-display); font-weight:700; font-size:19px; margin:0 0 4px; text-transform:uppercase; letter-spacing:0.2px;
   }
-  .sheet p.sub{ margin:0 0 16px; font-size:13px; color:var(--muted); }
-  .spinner{
-    width:22px; height:22px; border-radius:50%;
-    border: 3px solid var(--line); border-top-color: var(--caution);
-    animation: spin 0.8s linear infinite; margin: 6px 0 16px;
-  }
-  @keyframes spin{ to{ transform: rotate(360deg); } }
-  .row-center{ display:flex; align-items:center; gap:10px; }
+  .sheet p.sub{ margin:0 0 16px; font-size:13px; color:var(--muted); line-height:1.45; }
+  .row-center{ display:flex; align-items:center; gap:12px; }
 
   .cat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
   .cat-option{
     display:flex; flex-direction:column; align-items:center; gap:6px;
-    background:var(--asphalt-2); border:1px solid var(--line); border-radius:12px;
-    padding:14px 8px; cursor:pointer; color:var(--signal); font-size:12px;
-    font-family:'Inter',sans-serif; text-align:center;
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:16px 8px; cursor:pointer; color:var(--signal); font-size:12.5px; font-weight:500;
+    font-family:var(--font-body); text-align:center;
+    transition: background .15s ease, transform .1s ease;
   }
-  .cat-option span.emoji{ font-size:22px; }
-  .cat-option:active{ transform:scale(0.97); }
+  .cat-option span.emoji{ font-size:24px; }
+  .cat-option:active{ transform:scale(0.96); background:var(--panel-2); }
 
-  .preview-photo{ width:100%; border-radius:10px; margin-bottom:12px; aspect-ratio:4/3; object-fit:cover; }
+  .preview-photo{ width:100%; border-radius:12px; margin-bottom:12px; aspect-ratio:4/3; object-fit:cover; }
   textarea{
-    width:100%; background: var(--asphalt-2); border:1px solid var(--line); border-radius:8px;
-    color: var(--signal); padding:10px; font-family:'Inter',sans-serif; font-size:13px; resize:none;
+    width:100%; background: var(--panel); border:1px solid var(--line); border-radius:10px;
+    color: var(--signal); padding:11px; font-family:var(--font-body); font-size:13px; resize:none;
     margin-bottom:14px;
   }
   textarea::placeholder{ color: var(--muted); }
   .btn-row{ display:flex; gap:10px; }
   .btn{
-    flex:1; border:none; border-radius:10px; padding:13px; font-family:'Oswald',sans-serif;
-    font-weight:600; font-size:13px; letter-spacing:0.3px; text-transform:uppercase; cursor:pointer;
+    flex:1; border:none; border-radius:12px; padding:14px; font-family:var(--font-display);
+    font-weight:700; font-size:13.5px; letter-spacing:0.3px; text-transform:uppercase; cursor:pointer;
+    transition: transform .15s ease;
   }
-  .btn-primary{ background: var(--caution); color: var(--asphalt); }
+  .btn-primary{ background: linear-gradient(135deg, var(--amber), var(--amber-dim)); color: var(--ink); box-shadow:0 6px 16px rgba(255,176,32,0.22); }
+  .btn-primary:active{ transform:scale(0.97); }
   .btn-ghost{ background: transparent; color: var(--muted); border:1px solid var(--line); }
+  .btn-ghost:active{ transform:scale(0.97); }
   .error-box{
-    background: rgba(228,87,46,0.12); border:1px solid var(--alert); color:#f0a08a;
-    padding:10px 12px; border-radius:8px; font-size:12px; margin-bottom:14px;
+    background: rgba(255,93,58,0.12); border:1px solid var(--alert); color:#ffab8f;
+    padding:10px 12px; border-radius:10px; font-size:12px; margin-bottom:14px;
   }
   .toast{
-    position:absolute; top:70px; left:50%; transform:translateX(-50%);
-    background: var(--route-teal); color:#fff; padding:10px 18px; border-radius:24px;
-    font-family:'Oswald',sans-serif; font-size:12px; letter-spacing:0.3px; z-index:1100;
-    box-shadow:0 4px 12px rgba(0,0,0,0.35);
+    position:absolute; top:78px; left:50%; transform:translateX(-50%);
+    background: var(--teal); color:var(--ink); padding:11px 20px; border-radius:999px;
+    font-family:var(--font-display); font-weight:700; font-size:12.5px; letter-spacing:0.2px; z-index:1100;
+    box-shadow:0 8px 22px rgba(0,0,0,0.4);
     animation: toast-in 0.25s ease;
     max-width:80%; text-align:center;
   }
-  .toast.warn{ background:var(--alert); }
+  .toast.warn{ background:var(--alert); color:#fff; }
   @keyframes toast-in{ from{ opacity:0; transform:translate(-50%,-8px);} to{opacity:1; transform:translate(-50%,0);} }
 
   #camera-input{ display:none; }
 
   @media (prefers-reduced-motion: reduce){
-    .me-dot, .spinner, .toast{ animation:none; }
+    .me-dot, .toast, .brand-mark::before, .radar-sweep::after{ animation:none; }
   }
 </style>
 </head>
@@ -243,10 +312,10 @@
 <div id="app">
   <header>
     <div class="brand">
-      <div class="brand-mark">A</div>
+      <div class="brand-mark"></div>
       <div>
         <h1>AMET Radar</h1>
-        <p>Reportes de la comunidad</p>
+        <p>Reportes de la comunidad<span class="version-tag" id="app-version"></span></p>
       </div>
     </div>
     <div class="stat"><b id="stat-count">0</b>en vista</div>
@@ -255,12 +324,17 @@
   <div id="filters" role="group" aria-label="Filtrar por categoría"></div>
 
   <div id="map">
-    <div id="map-loader"><div class="spinner"></div><span>Buscando tu ubicación…</span></div>
+    <div id="map-loader"><div class="radar-sweep"></div><span>Buscando tu ubicación…</span></div>
   </div>
 
   <div id="fab-row">
-    <button id="locate-btn" aria-label="Centrar mapa en mi ubicación" title="Centrar en mi ubicación">🎯</button>
-    <button id="report-btn" aria-label="Reportar ubicación de un retén">📍 Reportar ubicación</button>
+    <button id="locate-btn" aria-label="Centrar mapa en mi ubicación" title="Centrar en mi ubicación">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+    </button>
+    <button id="report-btn" aria-label="Reportar ubicación de un retén">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>
+      <span>Reportar ubicación</span>
+    </button>
   </div>
 
   <input type="file" id="camera-input" accept="image/*" capture="environment">
@@ -271,20 +345,28 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 (function(){
+  // Debe coincidir a mano con el sufijo de CACHE_NAME en sw.js (ver
+  // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
+  // poder confirmar a simple vista que una PWA instalada ya tomó la
+  // versión nueva del service worker, sin tener que abrir devtools.
+  const APP_VERSION = 'v4.0';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const STALE_MINUTES = 180;   // a partir de aqui se consideran "viejos"
   const MAX_AGE_MINUTES = 360; // se ocultan/borran pasado este tiempo
   const DENY_THRESHOLD = 2;    // (negaciones - confirmaciones) para retirar antes
   const REPORT_LIMIT = 3;      // reportes máximos por ventana
   const REPORT_WINDOW_MIN = 60;
+  const APPROX_RADIUS_METERS = 150; // radio del círculo de zona aproximada (reporte rápido)
 
   const CATEGORIES = {
-    reten_fijo:  { label:'Retén fijo',      emoji:'👮', color:'var(--caution)' },
-    reten_movil: { label:'Retén móvil',     emoji:'🚓', color:'var(--route-teal)' },
-    accidente:   { label:'Accidente',       emoji:'⚠️', color:'var(--alert)' },
-    control:     { label:'Control tránsito',emoji:'🚦', color:'var(--control-blue)' }
+    reten_fijo:  { label:'Retén fijo',      emoji:'👮', color:'var(--amber)',      hex:'#f5c518' },
+    reten_movil: { label:'Retén móvil',     emoji:'🚓', color:'var(--teal)',   hex:'#2fa089' },
+    accidente:   { label:'Accidente',       emoji:'⚠️', color:'var(--alert)',        hex:'#e4572e' },
+    control:     { label:'Control tránsito',emoji:'🚦', color:'var(--blue)', hex:'#4a90d9' }
   };
   const activeCategories = new Set(Object.keys(CATEGORIES));
+
+  document.getElementById('app-version').textContent = APP_VERSION;
 
   // ---- Backend compartido (servidor local, ver server.js) ----
   // Los reportes viven en data/reports.json en el servidor (no en el
@@ -398,13 +480,25 @@
     return `hace ${Math.floor(h/24)} d`;
   }
 
+  // Desplaza un punto una distancia aleatoria (entre minMeters y maxMeters)
+  // en una dirección aleatoria. El reporte rápido la usa solo para variar
+  // el centro del círculo de zona; la imprecisión real la da el radio
+  // (APPROX_RADIUS_METERS) que se dibuja alrededor, no este desplazamiento.
+  function jitterLocation(lat, lng, minMeters, maxMeters){
+    const angle = Math.random() * Math.PI * 2;
+    const dist = minMeters + Math.random() * (maxMeters - minMeters);
+    const dLat = (dist * Math.cos(angle)) / 111320;
+    const dLng = (dist * Math.sin(angle)) / (111320 * Math.cos(lat * Math.PI / 180));
+    return { lat: lat + dLat, lng: lng + dLng };
+  }
+
   function makeIcon(ageMinutes, category, pending){
     const cat = CATEGORIES[category] || CATEGORIES.reten_fijo;
     const stale = ageMinutes > STALE_MINUTES;
     return L.divIcon({
       className: '',
       html: `<div class="amet-pin ${pending?'pending':''}"><div class="badge ${stale?'stale':''}" style="background:${stale?'var(--muted)':cat.color}"><span>${cat.emoji}</span></div></div>`,
-      iconSize:[36,36], iconAnchor:[18,32], popupAnchor:[0,-30]
+      iconSize:[34,34], iconAnchor:[17,17], popupAnchor:[0,-20]
     });
   }
 
@@ -421,8 +515,8 @@
     return `
       <div class="popup-card" data-id="${id}">
         <span class="cat-label" style="background:${cat.color}">${cat.emoji} ${cat.label}</span>
-        <img src="${r.photo}" alt="Foto del reporte">
-        <div class="time">${pending ? 'Pendiente de sincronizar…' : timeAgo(r.ts)}</div>
+        ${r.photo ? `<img src="${r.photo}" alt="Foto del reporte">` : ''}
+        <div class="time">${pending ? 'Pendiente de sincronizar…' : timeAgo(r.ts)}${r.approx ? ` · Zona aproximada (~${APPROX_RADIUS_METERS} m)` : ''}</div>
         ${r.note ? `<div class="note">${escapeHtml(r.note)}</div>` : ''}
         ${pending ? `
         <div class="mini-actions">
@@ -439,7 +533,32 @@
       </div>`;
   }
 
+  // Reportes rápidos (r.approx) se dibujan como un círculo de zona en vez
+  // de un pin: comunica que la ubicación real está en algún punto dentro de
+  // ese radio, no marcada con precisión.
+  function upsertApproxCircle(id, r){
+    const ageMinutes = (Date.now()-r.ts)/60000;
+    const pending = pendingIds.has(id);
+    const cat = CATEGORIES[r.category] || CATEGORIES.reten_fijo;
+    const stale = ageMinutes > STALE_MINUTES;
+    const color = stale ? '#9a9a9e' : cat.hex;
+    const style = {
+      radius: APPROX_RADIUS_METERS, color, weight:2,
+      fillColor: color, fillOpacity:0.18, dashArray: pending ? '2 6' : '6 6'
+    };
+    if(markersById[id]){
+      markersById[id].setLatLng([r.lat, r.lng]);
+      markersById[id].setStyle(style);
+      markersById[id].setPopupContent(popupHtml(id, r));
+    } else {
+      const c = L.circle([r.lat, r.lng], style).addTo(map);
+      c.bindPopup(popupHtml(id, r));
+      markersById[id] = c;
+    }
+  }
+
   function upsertMarker(id, r){
+    if(r.approx) return upsertApproxCircle(id, r);
     const ageMinutes = (Date.now()-r.ts)/60000;
     const pending = pendingIds.has(id);
     if(markersById[id]){
@@ -647,7 +766,15 @@
   const mapLoader = document.getElementById('map-loader');
   const locateBtn = document.getElementById('locate-btn');
   let meMarker = null;
+  // firstFix: solo pasa a false con un fix exitoso. Un timeout de GPS no lo
+  // toca, porque watchPosition sigue corriendo y puede resolver segundos
+  // después — cuando eso pase, igual queremos centrar el mapa en el
+  // usuario, no dejarlo silenciosamente en Santo Domingo.
   let firstFix = true;
+  // hashHandled evita abrir el deep link de un reporte compartido dos
+  // veces (una vez al mostrar el error de "no ubicación" y otra al llegar
+  // el fix tardío).
+  let hashHandled = false;
   let lastKnownLatLng = null;
 
   const meIcon = L.divIcon({
@@ -657,6 +784,11 @@
   });
 
   function hideLoader(){ mapLoader.hidden = true; }
+  function tryOpenHashOnce(){
+    if(hashHandled) return;
+    hashHandled = true;
+    openSharedReportFromHash();
+  }
 
   function startLocationWatch(){
     if(!('geolocation' in navigator)){
@@ -677,21 +809,27 @@
           map.setView(latlng, 15);
           firstFix = false;
           hideLoader();
-          openSharedReportFromHash();
+          tryOpenHashOnce();
         }
       },
       err => {
-        if(firstFix){
+        // No marcamos firstFix = false aquí: si el GPS solo tardó más de
+        // lo esperado (frecuente al abrir la PWA con GPS frío), el fix
+        // puede llegar igual unos segundos después y sí queremos centrar
+        // el mapa en ese momento en vez de dejarlo trabado en Santo Domingo.
+        if(!mapLoader.hidden){
           hideLoader();
-          showToast('No se pudo obtener tu ubicación. Mostrando Santo Domingo.', true);
-          firstFix = false;
-          openSharedReportFromHash();
+          showToast('Tu ubicación está tardando en llegar. Se centrará el mapa apenas la tengamos.', true);
         }
+        tryOpenHashOnce();
       },
-      { enableHighAccuracy:true, timeout:8000, maximumAge:5000 }
+      { enableHighAccuracy:true, timeout:20000, maximumAge:5000 }
     );
-    // Tope de seguridad: no dejar el loader visible más de 8s.
-    setTimeout(() => { if(!mapLoader.hidden) hideLoader(); }, 8500);
+    // Tope de seguridad: no dejar el loader visible más de 20s.
+    setTimeout(() => {
+      if(!mapLoader.hidden) hideLoader();
+      tryOpenHashOnce();
+    }, 20500);
   }
 
   locateBtn.addEventListener('click', () => {
@@ -745,8 +883,104 @@
       return;
     }
     reportBtn.disabled = true;
-    startManualPick();
+    askReportMode();
   });
+
+  function askReportMode(){
+    renderSheet(`
+      <h2>¿Cómo quieres reportar?</h2>
+      <p class="sub">Elige la opción que mejor se ajuste al momento.</p>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;">
+        <button class="btn btn-primary" id="quick-btn" style="width:100%;">⚡ Reporte rápido — voy manejando</button>
+        <button class="btn btn-ghost" id="detailed-btn" style="width:100%;">📍 Marcar en el mapa + foto</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
+      </div>
+    `);
+    document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+    document.getElementById('quick-btn').addEventListener('click', startQuickReport);
+    document.getElementById('detailed-btn').addEventListener('click', startManualPick);
+  }
+
+  // ---- Reporte rápido: sin foto, ubicación aproximada a partir del GPS ----
+  function startQuickReport(){
+    if(!lastKnownLatLng){
+      showToast('Buscando tu ubicación… intenta de nuevo en unos segundos.', true);
+      closeOverlay();
+      return;
+    }
+    pendingLocation = jitterLocation(lastKnownLatLng[0], lastKnownLatLng[1], 0, 30);
+    askForCategoryQuick();
+  }
+
+  function askForCategoryQuick(){
+    const options = Object.entries(CATEGORIES).map(([key, cat]) => `
+      <button class="cat-option" data-cat="${key}">
+        <span class="emoji">${cat.emoji}</span>
+        <span>${cat.label}</span>
+      </button>
+    `).join('');
+    renderSheet(`
+      <h2>¿Qué estás reportando?</h2>
+      <p class="sub">Toca una categoría para publicar al instante. Sin foto: se marca una zona aproximada, no el punto exacto.</p>
+      <div class="cat-grid">${options}</div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
+      </div>
+    `);
+    document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+    overlay.querySelectorAll('.cat-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        pendingCategory = btn.dataset.cat;
+        publishQuickReport();
+      });
+    });
+  }
+
+  async function publishQuickReport(){
+    renderSheet(`
+      <h2>Publicando…</h2>
+      <div class="row-center"><div class="radar-sweep small"></div><span style="font-size:13px;color:var(--muted)">Enviando reporte rápido…</span></div>
+    `);
+    const id = `report_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+    const record = {
+      lat: pendingLocation.lat, lng: pendingLocation.lng,
+      photo: null, note: '', ts: Date.now(),
+      category: pendingCategory || 'reten_fijo',
+      confirms: 0, denies: 0, approx: true
+    };
+    try{
+      await insertReport(id, record);
+      const mine = getMine(); mine.add(id); saveMine(mine);
+      upsertMarker(id, record);
+      updateCount();
+      closeOverlay();
+      registerReportTime();
+      showToast('Reporte rápido publicado. Gracias por avisar.');
+    }catch(err){
+      if(err instanceof NetworkError){
+        enqueuePending(id, record);
+        const mine = getMine(); mine.add(id); saveMine(mine);
+        upsertMarker(id, record);
+        updateCount();
+        closeOverlay();
+        registerReportTime();
+        showToast('Sin conexión: se publicará cuando vuelvas a tener internet.', true);
+        return;
+      }
+      renderSheet(`
+        <h2>No se pudo publicar</h2>
+        <div class="error-box">Hubo un problema guardando el reporte. Intenta de nuevo.</div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="cancel-btn">Cerrar</button>
+          <button class="btn btn-primary" id="retry-btn">Reintentar</button>
+        </div>
+      `);
+      document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+      document.getElementById('retry-btn').addEventListener('click', publishQuickReport);
+    }
+  }
 
   const PICK_ZOOM = 18;
 
@@ -821,7 +1055,7 @@
     if(!file) return;
     renderSheet(`
       <h2>Procesando foto</h2>
-      <div class="row-center"><div class="spinner"></div><span style="font-size:13px;color:var(--muted)">Comprimiendo imagen…</span></div>
+      <div class="row-center"><div class="radar-sweep small"></div><span style="font-size:13px;color:var(--muted)">Comprimiendo imagen…</span></div>
     `);
     try{
       pendingPhoto = await compressImage(file);

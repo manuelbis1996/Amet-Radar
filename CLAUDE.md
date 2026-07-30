@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # AMET Radar — Contexto del proyecto
 
 ## Qué es
@@ -25,7 +29,14 @@ alcanzable — ese es el bloqueante #1 antes de lanzar a producción real
 - `manifest.json` — manifest de PWA
 - `sw.js` — service worker (cache-first del app shell); subir `CACHE_NAME`
   al cambiar `amet-radar.html`/`manifest.json`/íconos para forzar que los
-  clientes con la PWA instalada bajen la versión nueva
+  clientes con la PWA instalada bajen la versión nueva. Subir junto con
+  `CACHE_NAME` la constante `APP_VERSION` al inicio del `<script>` de
+  `amet-radar.html` (mismo sufijo, formato `vMAYOR.MENOR` ej. `v4.0`) — se
+  muestra en el header junto a "Reportes de la comunidad" para poder
+  confirmar a simple vista, sin devtools, que una PWA instalada ya tomó la
+  versión nueva. Subir el decimal (`v4.0` → `v4.1`) para cambios chicos
+  (ajustes, fixes) y el entero (`v4.1` → `v5.0`) para cambios grandes
+  (rediseños, features nuevas).
 - `icon-192.png`, `icon-512.png` — íconos de la PWA
 - `README.md` — cómo correr el proyecto localmente y qué mejoras de la
   lista ya están implementadas para la prueba local
@@ -52,13 +63,56 @@ contexto seguro — por IP de red simple (`http://192.168.x.x`) los navegadores
 móviles la bloquean. Un túnel rápido tipo `npx localtunnel --port 8000`
 resuelve esto sin desplegar nada.
 
+No hay build step, linter, ni suite de tests — es HTML/CSS/JS servido tal
+cual y un servidor Node sin dependencias. Verificar cambios corriendo
+`node server.js` y probando manualmente en el navegador en
+`http://localhost:8000/amet-radar.html`.
+
+## API de `server.js`
+Puerto por `process.env.PORT` (default `8000`), escucha en `0.0.0.0`. Los
+reportes viven en un solo objeto `{ [id]: record }` dentro de
+`data/reports.json`.
+- `GET /api/reports` — devuelve el objeto completo de reportes.
+- `POST /api/reports` — body `{ id, record }`; hace `all[id] = record`.
+- `PATCH /api/reports/:id` — body con campos a mezclar (`Object.assign`);
+  404 si el id no existe.
+- `DELETE /api/reports/:id` — borra la entrada (sin error si no existía).
+- CORS abierto (`Access-Control-Allow-Origin: *`) para poder servir el
+  frontend desde un túnel/IP distinta del propio `server.js`.
+- Cualquier otra ruta se sirve como archivo estático desde la raíz del
+  proyecto (`/` → `amet-radar.html`).
+
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
   (objeto `CATEGORIES` dentro del `<script>`, con emoji y color cada una).
 - **Modelo de datos por reporte**:
   ```js
-  { lat, lng, photo, note, ts, category, confirms, denies }
+  { lat, lng, photo, note, ts, category, confirms, denies, approx }
   ```
+  `photo` es `null` y `note` es `''` en un reporte rápido; `approx: true`
+  marca que `lat`/`lng` no son la posición exacta del usuario (ver "Reporte
+  rápido" abajo).
+- **Reporte rápido (sin foto, para cuando el usuario va manejando)**: botón
+  "Reportar ubicación" ahora primero pregunta el modo (`askReportMode` en
+  el `<script>`). El modo rápido (`startQuickReport`/`askForCategoryQuick`/
+  `publishQuickReport`) salta la selección manual del punto en el mapa, la
+  foto obligatoria y la nota: toma `lastKnownLatLng` (del `watchPosition`
+  ya activo), le aplica un `jitterLocation()` pequeño (0–30 m) solo para
+  variar el centro, y publica en cuanto se toca una categoría. El modo
+  detallado existente (`startManualPick` → `askForCategory` → foto →
+  confirmación) no cambió.
+- **Renderizado del reporte rápido como círculo, no pin**: los reportes con
+  `approx: true` no se dibujan con `L.marker`/`makeIcon` como los demás —
+  `upsertMarker` los desvía a `upsertApproxCircle`, que dibuja un
+  `L.circle` de radio `APPROX_RADIUS_METERS` (150 m) centrado en el punto.
+  La idea es comunicar "está en algún punto dentro de esta zona", no un
+  punto marcado con precisión falsa. `markersById[id]` puede ser un
+  `L.marker` o un `L.circle` según el reporte; ambos comparten la API que
+  usa el resto del código (`bindPopup`, `setPopupContent`, `setLatLng`,
+  `map.removeLayer`), así que `removeMarker`/`renderVisibleMarkers` no
+  necesitaron cambios. Los colores de categoría tienen ahora un campo
+  `hex` además de `color` (`var(--nombre)`) porque el renderer SVG de
+  Leaflet necesita un valor de color plano para el círculo.
 - **Persistencia**: `server.js` guarda todos los reportes en un único
   archivo `data/reports.json` (mismo principio que antes de evitar N+1: una
   sola lectura/escritura del set completo en vez de una llamada por
