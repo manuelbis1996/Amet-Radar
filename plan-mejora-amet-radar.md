@@ -118,12 +118,14 @@ cosmética, no urgente.
 
 ## 4. Accesibilidad
 
-**🟡 `admin.html` no tiene ningún `aria-label`**
-La app principal (`amet-radar.html`) sí los tiene en sus botones de
-ícono; el panel admin quedó afuera de esa convención al construirse.
-Etiquetar los botones de acción (eliminar, guardar, cerrar sesión) para
-que quede a la par del resto del proyecto.
-- Esfuerzo: bajo.
+**✅ `admin.html` sin `aria-label` — resuelto**
+Se etiquetaron los botones de acción (entrar, guardar, cerrar sesión) y,
+más importante, el botón "Eliminar" por fila de la tabla de reportes
+(antes eran varios botones idénticos sin contexto para un lector de
+pantalla — ahora dicen "Eliminar reporte de <categoría>"). También se
+agregó `alt="Foto del reporte"` a la miniatura y texto oculto
+(`.sr-only`) a las dos columnas de la tabla sin encabezado visible
+(foto/acciones).
 
 **🟢 Soporte de teclado para elegir ubicación en el reporte manual**
 El picker de ubicación sigue dependiendo de un click en el mapa; una
@@ -157,8 +159,7 @@ PRs futuros.
 
 ## Orden sugerido
 
-1. `aria-label` en `admin.html` (rápido, cierra una inconsistencia recién
-   introducida)
+1. ~~`aria-label` en `admin.html`~~ ✅ hecho
 2. Rate-limit persistente de `admin-login`
 3. Fotos a Supabase Storage (impacto directo en performance del refresh)
 4. Editar reporte propio
