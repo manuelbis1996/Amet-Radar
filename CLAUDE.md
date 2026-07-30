@@ -25,9 +25,10 @@ internet.
 `server.js` (Node sin dependencias) sigue existiendo solo para servir los
 archivos estáticos por `http://` en local (geolocalización, service worker
 y el fetch a Supabase no funcionan sobre `file://`); ya no tiene ninguna
-API de reportes ni toca `data/reports.json`. El bloqueante real que queda
-para producción es publicar esos archivos estáticos en un hosting (ver
-"Pendiente" más abajo) — no depende de que corra `server.js` en ninguna PC.
+API de reportes ni toca `data/reports.json`.
+
+El frontend ya está publicado en internet, no solo corriendo local: ver
+"Despliegue (Netlify)" más abajo.
 
 ## Archivos
 - `amet-radar.html` — toda la app (HTML + CSS + JS en un solo archivo);
@@ -53,6 +54,11 @@ para producción es publicar esos archivos estáticos en un hosting (ver
 - `plan-mejora-amet-radar.md` — plan de mejoras original (por prioridad
   🔴/🟡/🟢) que dio origen a las decisiones de arquitectura de abajo; incluye
   el orden sugerido de implementación y el estado de qué falta
+- `_redirects` — regla de Netlify (`/ → /amet-radar.html`, código 200,
+  rewrite no redirect) para que la raíz del sitio sirva la app; sin esto
+  Netlify devuelve 404 en `/` porque no hay `index.html`. Solo lo lee
+  Netlify; `server.js` ya maneja este mismo caso con su propia lógica
+  (`pathname === '/' → amet-radar.html`) así que en local no hace falta.
 
 ## Cómo correrlo
 Requiere Node.js instalado y servirse por `http://` (no abrir con doble
@@ -149,17 +155,37 @@ key embebida en el `<script>` — no hay backend propio de por medio.
 - **Mapa**: tiles claros de CartoDB Positron (`light_all`); antes eran los
   oscuros (`dark_all`) a juego con el resto de la UI, se cambió a pedido.
 
-## Pendiente (siguiente paso lógico, bloqueante para producción real)
-Los reportes ya están en un backend real (Supabase) alcanzable desde
-internet — eso ya no es el bloqueante. Lo que falta es publicar los
-archivos estáticos (`amet-radar.html`, `manifest.json`, `sw.js`, íconos) en
-un hosting estático con dominio propio (GitHub Pages, Netlify, Vercel,
-etc.) en vez de servirlos con `server.js` desde la PC de quien prueba;
-`server.js` solo hace falta para desarrollo local. Mejoras posteriores,
-no bloqueantes: reemplazar las políticas RLS abiertas por algo más
-restrictivo si se agrega autenticación, y mover las fotos (hoy base64 en la
-columna `photo`) a Supabase Storage si el tamaño de las filas se vuelve un
-problema.
+## Despliegue (Netlify)
+El frontend está publicado en **Netlify**, cuenta del dueño del proyecto
+(`manuelbis1996@gmail.com`, team `manuelbis1996`, plan Free).
+- **URL pública**: https://amet-radar.netlify.app
+- **Site ID**: `8958378d-0be4-42bb-ab5c-4ba7e3181dd8` (nombre del sitio:
+  `amet-radar`)
+- **No está conectado al repo de GitHub** — no hay auto-deploy en cada
+  push. Cada deploy es manual, subiendo el contenido de la carpeta del
+  proyecto tal cual (sin build step, coincide 1:1 con lo que hay en git).
+  Para redesplegar tras un cambio: usar el MCP de Netlify (herramienta
+  `netlify-deploy-services-updater`, operación `deploy-site` con ese
+  `siteId`) o, equivalente en CLI, `npx -y netlify-cli deploy --prod
+  --site 8958378d-0be4-42bb-ab5c-4ba7e3181dd8 --dir .` desde la raíz del
+  proyecto.
+- **Control de acceso**: los proyectos nuevos de Netlify vienen con
+  "team protection" (SSO login) activado por defecto, lo que bloquea a
+  cualquier visitante público — se desactivó explícitamente
+  (`requireSSOTeamLogin: false`) porque esta es una app pública sin
+  autenticación de usuarios.
+- **`_redirects`**: necesario para que `/` sirva `amet-radar.html` (ver
+  "Archivos" arriba) — sin este archivo Netlify tira 404 en la raíz.
+- **Pendiente, no bloqueante**: conectar el repo de GitHub desde Netlify
+  (`Site settings → Build & deploy → Link repository`) para que cada push
+  a la rama correspondiente dispare un deploy automático — requiere que el
+  dueño autorice el link con GitHub desde la UI de Netlify, no se puede
+  hacer por API/MCP.
+
+Mejoras posteriores, no bloqueantes: reemplazar las políticas RLS abiertas
+de Supabase por algo más restrictivo si se agrega autenticación, y mover
+las fotos (hoy base64 en la columna `photo`) a Supabase Storage si el
+tamaño de las filas se vuelve un problema.
 
 ## Historial relevante de decisiones (por si se pregunta "por qué así")
 - Se partió de una versión anterior que usaba `window.storage` (API propia
@@ -172,3 +198,7 @@ problema.
   (proyecto `amet-radar`, org `Amet_Radar`) para dejar de depender de que
   una PC específica esté prendida y alcanzable; `server.js` quedó reducido
   a servidor de archivos estático para desarrollo local.
+- Se publicó el frontend en Netlify (sitio `amet-radar`) en vez de GitHub
+  Pages porque el MCP de Netlify estaba disponible en el entorno y permitió
+  hacerlo sin salir del flujo; no hay razón técnica fuerte para preferir
+  uno sobre otro en este proyecto (ambos son hosting estático gratuito).

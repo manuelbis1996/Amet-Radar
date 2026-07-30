@@ -1,4 +1,12 @@
-# AMET Radar — Prueba local
+# AMET Radar
+
+## En producción
+
+La app ya está publicada: **https://amet-radar.netlify.app**. Sirve
+directo desde ahí, con HTTPS (necesario para geolocalización en el
+celular) y sin depender de que ninguna PC esté prendida — los reportes
+viven en Supabase (ver más abajo). El resto de este README es para correr
+el proyecto en local (desarrollo/pruebas).
 
 ## Requisitos
 
@@ -64,10 +72,16 @@ esté prendida; el cliente refresca cada 8 segundos.
 - **PWA**: `manifest.json` + `sw.js` para instalar la app y cachear el shell
   básico (funciona una vez que se sirve por `http://localhost` o HTTPS).
 
-## Importante: falta desplegar el frontend
+## Redesplegar a producción
 
-Los reportes ya se comparten entre todos los usuarios vía Supabase (backend
-real, alcanzable desde cualquier lugar). Lo que falta para un lanzamiento
-real es dejar de servir `amet-radar.html` desde `server.js` en una PC local
-y publicarlo en un hosting estático (GitHub Pages, Netlify, Vercel, etc.) —
-no requiere backend propio, es solo archivos estáticos.
+El sitio de Netlify (`amet-radar`, site ID `8958378d-0be4-42bb-ab5c-4ba7e3181dd8`)
+no está conectado al repo de GitHub, así que un push a `main` **no**
+redespliega solo. Tras mergear cambios hay que subirlos a mano:
+
+```bash
+npx -y netlify-cli deploy --prod --site 8958378d-0be4-42bb-ab5c-4ba7e3181dd8 --dir .
+```
+
+(o con el MCP de Netlify si estás en una sesión de Claude Code con esa
+herramienta conectada). Detalles de la cuenta/config en
+[CLAUDE.md](CLAUDE.md#despliegue-netlify).
