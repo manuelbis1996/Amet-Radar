@@ -335,10 +335,15 @@
     display:flex; align-items:center; justify-content:center; padding:24px;
   }
   #empty-state[hidden]{ display:none; }
+  /* La tarjeta sí recibe toques (el contenedor no), para poder cerrarla
+     antes de que se vaya sola a los 7s. */
   .empty-card{
+    pointer-events:auto; cursor:pointer;
     background:var(--surface); border-radius:var(--r-lg);
     box-shadow:var(--shadow-2); padding:20px 22px; max-width:290px; text-align:center;
+    animation: empty-in .28s ease both;
   }
+  @keyframes empty-in{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:none; } }
   .empty-emoji{ font-size:30px; line-height:1; margin-bottom:8px; }
   .empty-card h3{ margin:0 0 6px; font-size:16px; font-weight:700; letter-spacing:-.2px; }
   .empty-card p{ margin:0; font-size:13.5px; line-height:1.5; color:var(--muted); }
@@ -410,7 +415,7 @@
   }
 
   @media (prefers-reduced-motion: reduce){
-    .me-dot, .toast, .radar-sweep, .sheet, .detail-panel{ animation:none; }
+    .me-dot, .toast, .radar-sweep, .sheet, .detail-panel, .empty-card{ animation:none; }
     *{ transition:none !important; }
   }
 </style>
@@ -473,7 +478,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v10.4';
+  const APP_VERSION = 'v10.5';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -996,10 +1001,39 @@
   let reportsLoadedOnce = false;
   const emptyStateEl = document.getElementById('empty-state');
 
+  // El cartel de "no hay reportes" se muestra UNA sola vez por sesión y se
+  // va solo a los 7s. Si se dejara fijo mientras no haya reportes, con la
+  // app recién lanzada (donde puede no haber ninguno en horas) quedaría
+  // pegado en el medio de la pantalla para siempre, tapando el mapa: pasa
+  // de ser informativo a ser un estorbo. Tampoco reaparece al pasar por
+  // otra zona vacía, para no perseguir al usuario.
+  let emptyStateShown = false;
+  let emptyStateTimer = null;
+
+  function hideEmptyState(){
+    clearTimeout(emptyStateTimer);
+    emptyStateTimer = null;
+    emptyStateEl.hidden = true;
+  }
+  emptyStateEl.addEventListener('click', hideEmptyState);
+
+  function maybeShowEmptyState(n){
+    if(n > 0){ hideEmptyState(); return; }
+    if(!reportsLoadedOnce || emptyStateShown) return;
+    // No mostrarlo debajo de una hoja abierta (bienvenida, flujo de
+    // reporte): quedaría tapado por el scrim y se auto-ocultaría sin que
+    // nadie lo llegue a leer. Se reintenta en el próximo sondeo de 8s.
+    const ov = document.getElementById('flow-overlay');
+    if(ov && !ov.hidden) return;
+    emptyStateShown = true;
+    emptyStateEl.hidden = false;
+    emptyStateTimer = setTimeout(hideEmptyState, 7000);
+  }
+
   function updateCount(){
     const n = Object.keys(markersById).length;
     document.getElementById('stat-count').textContent = n;
-    emptyStateEl.hidden = !(reportsLoadedOnce && n === 0);
+    maybeShowEmptyState(n);
   }
 
   // ---- Filtros de categoría ----
@@ -1582,6 +1616,10 @@
       map.getContainer().style.cursor = '';
       manualPickHandler = null;
     }
+    // Reevaluar el estado vacío ahora que no hay una hoja tapando: mientras
+    // el overlay está abierto se difiere (ver maybeShowEmptyState), y sin
+    // esto habría que esperar hasta 8s al próximo sondeo para verlo.
+    updateCount();
   }
 
   let manualPickHandler = null;

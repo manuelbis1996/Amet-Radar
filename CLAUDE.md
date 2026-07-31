@@ -505,10 +505,19 @@ por medio.
     visible se muestra `#empty-state` ("Todo tranquilo por aquí"). Sin eso
     el usuario ve un mapa mudo y no sabe si la app falló, si no cargó o si
     de verdad no hay nada — y al lanzar en una ciudad nueva ese es
-    literalmente el primer estado que ve todo el mundo. Va con
-    `pointer-events:none` para no bloquear el arrastre del mapa, y solo
-    aparece después del primer fetch que responde (`reportsLoadedOnce`),
-    porque si no saldría durante el arranque.
+    literalmente el primer estado que ve todo el mundo. El contenedor va
+    con `pointer-events:none` para no bloquear el arrastre del mapa (la
+    tarjeta sí los recibe, para poder cerrarla), y solo aparece después del
+    primer fetch que responde (`reportsLoadedOnce`), porque si no saldría
+    durante el arranque. **Se muestra una sola vez por sesión y se va solo
+    a los 7s** (v10.5): la primera versión lo dejaba fijo mientras no
+    hubiera reportes, y con la app recién lanzada (donde puede no haber
+    ninguno en horas) quedaba pegado en el medio de la pantalla para
+    siempre, tapando el mapa — reportado por el usuario. Tampoco reaparece
+    al pasar por otra zona vacía. Mientras hay una hoja abierta se difiere
+    (quedaría tapado por el scrim y se auto-ocultaría sin que nadie lo
+    lea); por eso `closeOverlay()` llama a `updateCount()` al cerrar, si no
+    habría que esperar hasta 8s al próximo sondeo.
   - **La versión NO se muestra en el header** (v10.4): a un usuario final
     "v10.4" no le dice nada. Sigue siendo consultable **manteniendo
     presionado el logo** (600ms → toast), que es como se confirma a simple
