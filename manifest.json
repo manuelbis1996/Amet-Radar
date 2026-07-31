@@ -2,7 +2,7 @@
   "name": "AMET Radar",
   "short_name": "AMET Radar",
   "description": "Reportes comunitarios de retenes en tiempo real",
-  "start_url": "./amet-radar.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#12141a",

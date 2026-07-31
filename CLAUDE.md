@@ -37,7 +37,9 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
 - `server.js` — servidor Node (sin dependencias) que solo sirve los
   archivos estáticos por `http://`; no tiene ninguna API ni toca datos de
   reportes (esos viven en Supabase, no en este servidor)
-- `manifest.json` — manifest de PWA
+- `manifest.json` — manifest de PWA. `start_url` es `"./"` (no
+  `"./amet-radar.html"` como antes de v9.7) — ver el bug de `sw.js` abajo,
+  el motivo del cambio es el mismo.
 - `sw.js` — service worker (cache-first del app shell); subir `CACHE_NAME`
   al cambiar `amet-radar.html`/`manifest.json`/íconos para forzar que los
   clientes con la PWA instalada bajen la versión nueva. Subir junto con
@@ -55,7 +57,23 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   `net::ERR_FAILED` ("No se puede acceder a este sitio") en vez de
   reintentar o mostrar algo entendible — reportado por el usuario
   instalando la PWA en Android/Chrome desde cero. Ahora el fallback de red
-  fallida siempre devuelve un `Response` real (503 "Sin conexión").
+  fallida siempre devuelve un `Response` real (503 "Sin conexión"). El bug
+  solo afectaba a `/amet-radar.html` (la única ruta que este `fetch`
+  handler intercepta, por el chequeo `isAppShell`) — `/` nunca pasaba por
+  acá, por eso el error solo aparecía instalando la PWA (cuyo `start_url`
+  apuntaba a `/amet-radar.html`) y no navegando manualmente a la raíz.
+  Persistía incluso ya con el fix desplegado porque en Android "Agregar a
+  pantalla de inicio" crea un WebAPK — una app instalada de verdad,
+  separada del navegador — que sigue corriendo el service worker viejo
+  hasta que se desinstala la app (no alcanza con borrar el ícono) y se
+  borran los datos del sitio en Chrome. **v9.7**: además, por las dudas y
+  porque es más robusto en general, `start_url` pasa de
+  `"./amet-radar.html"` a `"./"` — la raíz nunca pasó por el `fetch`
+  handler del service worker (ver arriba), así que instalar desde ahí
+  esquiva esta clase de bug aunque vuelva a aparecer en el futuro;
+  `_worker.js` ya reescribe `/` → `/amet-radar.html` del lado del
+  servidor (ver "Despliegue" abajo), así que el contenido servido es
+  idéntico.
 - `icon-192.png`, `icon-512.png` — íconos de la PWA
 - `README.md` — cómo correr el proyecto localmente y qué mejoras de la
   lista ya están implementadas para la prueba local
