@@ -4,6 +4,12 @@
   "main": "./_worker.js",
   "assets": {
     "directory": "./",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    // "none" en vez del default "auto-trailing-slash": ese default hace que
+    // /amet-radar.html responda un 307 a /amet-radar, y eso rompe la PWA
+    // (ver el bug de v9.8 en CLAUDE.md). Con "none" cada .html se sirve tal
+    // cual, sin redirects. La raíz "/" no la maneja ASSETS sino _worker.js,
+    // que la reescribe a /amet-radar.html a mano, así que no se pierde nada.
+    "html_handling": "none"
   }
 }

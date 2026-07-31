@@ -37,9 +37,9 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
 - `server.js` — servidor Node (sin dependencias) que solo sirve los
   archivos estáticos por `http://`; no tiene ninguna API ni toca datos de
   reportes (esos viven en Supabase, no en este servidor)
-- `manifest.json` — manifest de PWA. `start_url` es `"./"` (no
-  `"./amet-radar.html"` como antes de v9.7) — ver el bug de `sw.js` abajo,
-  el motivo del cambio es el mismo.
+- `manifest.json` — manifest de PWA. `start_url` es `"./amet-radar.html"`
+  (ver "Bug del 307" abajo: en v9.7 se lo movió a `"./"` como workaround y
+  en v9.8 se volvió atrás, una vez arreglada la causa real).
 - `sw.js` — service worker (cache-first del app shell); subir `CACHE_NAME`
   al cambiar `amet-radar.html`/`manifest.json`/íconos para forzar que los
   clientes con la PWA instalada bajen la versión nueva. Subir junto con
@@ -49,31 +49,42 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   confirmar a simple vista, sin devtools, que una PWA instalada ya tomó la
   versión nueva. Subir el decimal (`v4.0` → `v4.1`) para cambios chicos
   (ajustes, fixes) y el entero (`v4.1` → `v5.0`) para cambios grandes
-  (rediseños, features nuevas). **Bug corregido en v9.6**: el handler de
-  `fetch` hacía `cached || fetch(...).catch(() => cached)` — si no había
-  nada en caché (típico justo después de "Agregar a pantalla de inicio",
-  antes de que termine el `install`) y el fetch de red fallaba, eso
-  resolvía a `undefined`; `respondWith(undefined)` hace que Chrome tire
-  `net::ERR_FAILED` ("No se puede acceder a este sitio") en vez de
-  reintentar o mostrar algo entendible — reportado por el usuario
-  instalando la PWA en Android/Chrome desde cero. Ahora el fallback de red
-  fallida siempre devuelve un `Response` real (503 "Sin conexión"). El bug
-  solo afectaba a `/amet-radar.html` (la única ruta que este `fetch`
-  handler intercepta, por el chequeo `isAppShell`) — `/` nunca pasaba por
-  acá, por eso el error solo aparecía instalando la PWA (cuyo `start_url`
-  apuntaba a `/amet-radar.html`) y no navegando manualmente a la raíz.
-  Persistía incluso ya con el fix desplegado porque en Android "Agregar a
-  pantalla de inicio" crea un WebAPK — una app instalada de verdad,
-  separada del navegador — que sigue corriendo el service worker viejo
-  hasta que se desinstala la app (no alcanza con borrar el ícono) y se
-  borran los datos del sitio en Chrome. **v9.7**: además, por las dudas y
-  porque es más robusto en general, `start_url` pasa de
-  `"./amet-radar.html"` a `"./"` — la raíz nunca pasó por el `fetch`
-  handler del service worker (ver arriba), así que instalar desde ahí
-  esquiva esta clase de bug aunque vuelva a aparecer en el futuro;
-  `_worker.js` ya reescribe `/` → `/amet-radar.html` del lado del
-  servidor (ver "Despliegue" abajo), así que el contenido servido es
-  idéntico.
+  (rediseños, features nuevas).
+
+  **Bug del 307 (v9.8) — leer antes de tocar `wrangler.jsonc` o `sw.js`.**
+  Al migrar a Cloudflare, la PWA instalada en Android dejó de abrir:
+  `net::ERR_FAILED` en `/amet-radar.html`, mientras que `/` andaba bien.
+  Cadena completa, porque cada eslabón es contraintuitivo por separado:
+  1. Cloudflare Workers Static Assets trae `html_handling:
+     "auto-trailing-slash"` **por defecto**, y eso hace que
+     `/amet-radar.html` responda **307 → `/amet-radar`** (documentado en
+     developers.cloudflare.com/workers/static-assets/routing/advanced/html-handling).
+     Netlify no hacía esto, por eso el problema apareció recién con la
+     migración y no antes.
+  2. Una request de navegación tiene `redirect: "manual"`. El `fetch`
+     handler del service worker hacía `fetch(event.request)` y le pasaba
+     esa respuesta redirigida a `respondWith()` → Chrome lo trata como
+     error de red → `ERR_FAILED`. Por eso fallaba `/amet-radar.html`
+     (única ruta que intercepta, por el chequeo `isAppShell`) y no `/`.
+  3. Peor: `cache.addAll()` es **atómico**, y también se comía el 307. El
+     `install` del service worker nuevo fallaba entero → nunca se
+     instalaba → **el service worker viejo quedaba activo para siempre**,
+     sin poder tomar ninguna actualización. Por eso desplegar los fixes de
+     v9.6/v9.7 no cambió nada en el dispositivo ya afectado: literalmente
+     no había forma de que bajara código nuevo solo.
+  4. Además, en Android "Agregar a pantalla de inicio" crea un WebAPK (una
+     app instalada de verdad, separada del navegador): borrar el ícono no
+     la desinstala ni limpia su service worker.
+
+  **Arreglos aplicados** (los tres, no uno solo): `html_handling: "none"`
+  en `wrangler.jsonc` (mata el 307 en origen); `install` cachea de a un
+  archivo tolerando fallos en vez de `addAll` atómico (para que un archivo
+  roto nunca más pueda congelar las actualizaciones del service worker); y
+  el fallback de red fallida devuelve un `Response` real 503 en vez de
+  `undefined` (v9.6 — `respondWith(undefined)` también da `ERR_FAILED`).
+  **Recuperar un dispositivo ya congelado** exige mano: desinstalar la app
+  desde Ajustes → Apps (no alcanza con borrar el ícono), borrar los datos
+  del sitio en Chrome, y recién ahí reinstalar.
 - `icon-192.png`, `icon-512.png` — íconos de la PWA
 - `README.md` — cómo correr el proyecto localmente y qué mejoras de la
   lista ya están implementadas para la prueba local
@@ -554,7 +565,12 @@ mismo criterio "sin dependencias" del resto del proyecto.
   igual en producción y en cualquier preview deploy sin tocar código.
 - **`wrangler.jsonc`** — config mínima: `main: "./_worker.js"`,
   `assets.directory: "./"` (todo el repo, ya que el sitio vive en la raíz
-  sin carpeta `dist`/`public`), `binding: "ASSETS"`.
+  sin carpeta `dist`/`public`), `binding: "ASSETS"`, y
+  **`html_handling: "none"`** — no es opcional: el default
+  (`auto-trailing-slash`) responde un 307 de `/amet-radar.html` a
+  `/amet-radar` y eso rompe la PWA instalada de una forma que no se
+  recupera sola (ver "Bug del 307" en la entrada de `sw.js` arriba, en
+  "Archivos"). La raíz `/` no depende de esto: la reescribe `_worker.js`.
 - **`.assetsignore`** — **crítico**: a diferencia de Pages, Workers NO
   excluye `.git`/`node_modules` automáticamente del directorio de assets.
   Sin este archivo, `assets.directory: "./"` subiría el `.git` completo

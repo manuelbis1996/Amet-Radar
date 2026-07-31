@@ -1,4 +1,4 @@
-const CACHE_NAME = 'amet-radar-v9.7';
+const CACHE_NAME = 'amet-radar-v9.8';
 const APP_SHELL = [
   './amet-radar.html',
   './manifest.json',
@@ -8,7 +8,18 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) =>
+      // Cachear de a uno tolerando fallos, NO con addAll. addAll es atómico:
+      // si un solo archivo falla, todo el install falla, el service worker
+      // nuevo nunca llega a instalarse y el viejo se queda activo para
+      // siempre — deja de tomar cualquier actualización futura. Eso fue
+      // exactamente lo que pasó al migrar a Cloudflare (ver el bug de v9.8
+      // en CLAUDE.md): el 307 de /amet-radar.html rompía el addAll y los
+      // dispositivos ya instalados quedaron congelados en la versión vieja,
+      // sin forma de recuperarse solos. Con este patrón, un archivo que
+      // falle degrada el offline de ese archivo nomás, no bloquea el update.
+      Promise.all(APP_SHELL.map((path) => cache.add(path).catch(() => {})))
+    )
   );
   self.skipWaiting();
 });
