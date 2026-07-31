@@ -1,0 +1,26 @@
+# Wrangler sube todo lo que hay en assets.directory ("./", ver
+# wrangler.jsonc) como archivo público servible — esta lista excluye todo
+# lo que NO es parte del sitio (código fuente, docs internas, config de
+# despliegue, historial de git) para que no quede accesible por URL directa
+# en producción. A diferencia de Pages, Workers NO excluye .git/
+# node_modules automáticamente — hay que listarlos a mano acá.
+#
+# Sintaxis .gitignore, pero OJO: los patrones de directorio necesitan
+# **/ adelante (ej. "**/.git", no ".git/") para matchear de forma
+# recursiva — confirmado contra la doc oficial de Cloudflare y verificado
+# a mano con `wrangler deploy --dry-run` (ver CLAUDE.md).
+
+**/.git
+**/node_modules
+**/.DS_Store
+_worker.js
+wrangler.jsonc
+.assetsignore
+.gitignore
+CLAUDE.md
+README.md
+plan-mejora-amet-radar.md
+server.js
+netlify
+supabase
+functions

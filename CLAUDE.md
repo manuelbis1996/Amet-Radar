@@ -57,8 +57,14 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
 - `_redirects` — regla de Netlify (`/ → /amet-radar.html`, código 200,
   rewrite no redirect) para que la raíz del sitio sirva la app; sin esto
   Netlify devuelve 404 en `/` porque no hay `index.html`. Solo lo lee
-  Netlify; `server.js` ya maneja este mismo caso con su propia lógica
-  (`pathname === '/' → amet-radar.html`) así que en local no hace falta.
+  Netlify (bajo Cloudflare Workers esta reescritura la hace `_worker.js` a
+  mano, ver "Despliegue" abajo); `server.js` ya maneja este mismo caso con
+  su propia lógica (`pathname === '/' → amet-radar.html`) así que en local
+  no hace falta.
+- `_worker.js`, `wrangler.jsonc`, `.assetsignore` — despliegue en
+  Cloudflare Workers (reemplazo de Netlify en curso, ver "Despliegue"
+  abajo): sirve los assets estáticos y el preview dinámico por reporte
+  desde un solo Worker, sin build step.
 - `supabase/migrations/*.sql` — copia versionada de las migraciones
   aplicadas por MCP (tabla `push_subscriptions`, trigger de notificaciones,
   ver "Notificaciones push" abajo), más `20260729230000_reports_genesis.sql`
@@ -235,7 +241,12 @@ reusando `openReportById` — la misma función que usa el deep link `?r=`).
   (`updatePushCategories`) en vez de asumir "primera vez" — la hoja de
   onboarding solo se muestra si `localStorage` nunca tuvo la clave.
 
-## Preview dinámico por reporte (Netlify Edge Function)
+## Preview dinámico por reporte (Netlify Edge Function / Cloudflare Worker)
+**Nota (migración en curso, ver "Despliegue" más abajo)**: esta sección
+describe la versión Netlify, verificada en producción. La lógica está
+también portada a `_worker.js` en la raíz del repo (Cloudflare Workers) —
+mismo comportamiento, mismos casos, solo cambia el runtime/hosting.
+
 Cuando se comparte el link de un reporte puntual (`?r=<id>`) por WhatsApp,
 Twitter, Facebook, etc., el bot que arma la tarjeta de preview recibe meta
 tags específicos de ESE reporte (categoría, nota, hace cuánto se publicó)
@@ -495,73 +506,97 @@ exporta con el Table Editor de Supabase (Export as CSV) o `pg_dump`
 antes de migrar, no hace falta un mecanismo propio en el repo para algo
 que se usa una sola vez.
 
-## Despliegue — migración de Netlify a Cloudflare Pages (en curso)
+## Despliegue — migración de Netlify a Cloudflare Workers (en curso)
 El frontend estuvo publicado en **Netlify** (cuenta `manuelbis1996@gmail.com`,
 team `manuelbis1996`, plan Free) hasta que se agotó la franja gratuita
 (banda ancha/build minutes) y el sitio quedó caído. Se decidió migrar a
-**Cloudflare Pages** (plan Free, sin límite de banda ancha, a diferencia de
-Netlify) en vez de agregar un método de pago. El repo ya tiene preparado
-todo lo que se puede hacer desde código; falta el alta de la cuenta/proyecto
-en el dashboard de Cloudflare, que es un paso manual (no hay MCP de
-Cloudflare conectado a este proyecto ni credenciales en el entorno).
+**Cloudflare** (plan Free, sin límite de banda ancha, a diferencia de
+Netlify) en vez de agregar un método de pago.
+
+**Se eligió Workers + Static Assets, no Cloudflare Pages clásico.** El
+conector MCP de Cloudflare conectado a esta sesión solo trae herramientas
+de Workers/D1/KV/R2/Hyperdrive (nada de Pages) y trae una herramienta
+específica `migrate_pages_to_workers_guide` — señal directa de que
+Cloudflare está empujando Workers+Assets como el camino nuevo. Esto reusa
+igual el modelo de un solo archivo tipo Netlify Edge Function: `_worker.js`
+en la raíz sirve tanto los assets estáticos (`env.ASSETS.fetch`) como la
+lógica de preview dinámico, sin build step — mismo criterio "sin
+dependencias" del resto del proyecto.
 
 ### Lo que ya está listo en el repo
-- **`functions/_middleware.js`** — puerto del preview dinámico por reporte
-  (antes `netlify/edge-functions/report-preview.ts`) al modelo de Cloudflare
-  Pages Functions: un `_middleware.js` en la raíz de `/functions` corre
-  para toda request al sitio (en vez del `export const config = { path:
-  [...] }` de Netlify), con un `if` al principio que deja pasar
-  (`next()`) cualquier ruta que no sea `/` o `/amet-radar.html`. Misma
-  lógica de bots/Supabase que la versión Netlify, verificada con un test
-  funcional local (`node` + fetch mockeado) que confirma los 4 casos de
-  passthrough (`next()`); el caso "bot + reporte real" no se pudo probar
-  end-to-end en este sandbox (red bloqueada hacia Supabase), pero el
-  código es una traducción 1:1 de la versión que sí se verificó en
-  producción — igual conviene probarlo a mano con `curl -A "whatsapp"
-  https://amet-radar.pages.dev/?r=<id-real>` una vez desplegado. Mejora
-  sobre la versión Netlify: `SITE_URL` ya no está hardcodeado, se deriva
-  de `url.origin` de cada request — así funciona igual en el dominio de
-  producción y en cualquier preview deploy de Cloudflare (cada rama/PR
-  tiene su propia URL `*.pages.dev`) sin tocar código.
-- **`_redirects`**: Cloudflare Pages soporta el mismo formato que Netlify
-  (`/  /amet-radar.html  200` como rewrite) — no hizo falta cambiar nada,
-  el archivo ya sirve para ambos.
+- **`_worker.js`** (raíz del repo) — puerto del preview dinámico por
+  reporte (antes `netlify/edge-functions/report-preview.ts`, y antes de
+  eso un intento con `functions/_middleware.js` al estilo Pages Functions,
+  descartado): un único `export default { fetch(request, env) }` que (1)
+  reescribe `/` → `/amet-radar.html` a mano — Cloudflare NO aplica
+  `_redirects` automáticamente cuando hay un Worker con `main` propio — y
+  (2) intercepta bots de link-preview en `?r=<id>` igual que antes. Todo
+  lo demás cae a `env.ASSETS.fetch(request)`. Verificado con un test
+  funcional local (`node` + `env.ASSETS` mockeado) que confirma los 5
+  casos: passthrough de rutas normales, reescritura de `/`, `?r=` con UA
+  normal, y bot con fetch fallido cayendo a `ASSETS` — el caso "bot +
+  reporte real" no se pudo probar end-to-end en este sandbox (red
+  bloqueada hacia Supabase), pero el código es una traducción 1:1 de la
+  lógica que sí se verificó en producción bajo Netlify. Mejora sobre esa
+  versión: `SITE_URL` ya no está hardcodeado, se deriva de `url.origin`
+  por request — funciona igual en producción y en cualquier preview
+  deploy sin tocar código.
+- **`wrangler.jsonc`** — config mínima: `main: "./_worker.js"`,
+  `assets.directory: "./"` (todo el repo, ya que el sitio vive en la raíz
+  sin carpeta `dist`/`public`), `binding: "ASSETS"`.
+- **`.assetsignore`** — **crítico**: a diferencia de Pages, Workers NO
+  excluye `.git`/`node_modules` automáticamente del directorio de assets.
+  Sin este archivo, `assets.directory: "./"` subiría el `.git` completo
+  (historial entero del repo) como archivos públicos descargables. Ojo
+  con la sintaxis: los patrones de directorio necesitan `**/` adelante
+  (`**/.git`, no `.git/`) para matchear recursivamente — confirmado a
+  mano corriendo `wrangler deploy --dry-run` con `WRANGLER_LOG=debug` y
+  comparando la lista de "Ignoring asset" contra el árbol real del repo;
+  la primera versión del archivo (con `.git/`) NO excluía nada y hubiera
+  publicado el repo entero. Verificado que el resultado final sube
+  exactamente 6 archivos: `amet-radar.html`, `admin.html`,
+  `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`.
 - **`amet-radar.html`**: los meta tags OG/Twitter genéricos del `<head>`
   (`og:url`, `og:image`, `twitter:image`) ya apuntan a
-  `https://amet-radar.pages.dev/` — **asumiendo que el proyecto en
-  Cloudflare se crea con el nombre `amet-radar`** (los nombres de proyecto
-  en Cloudflare Pages son determinísticos: `<nombre-proyecto>.pages.dev`,
-  a diferencia de Netlify que generaba uno al azar). Si al crear el
-  proyecto ese nombre ya está tomado y Cloudflare asigna otro, hay que
-  actualizar esas 3 URLs a mano.
+  `https://amet-radar.pages.dev/` — sí, `.pages.dev` aunque ya no se use
+  Cloudflare Pages: los Workers con un dominio no personalizado también
+  reciben una URL en ese mismo dominio (`<nombre-proyecto>.pages.dev`),
+  asumiendo que el Worker se crea con el nombre `amet-radar` (ver
+  `wrangler.jsonc`). Si el nombre real terminó siendo otro, actualizar
+  esas 3 URLs a mano.
 - **`netlify/edge-functions/report-preview.ts`**: se dejó intacto (no se
   borró) porque Netlify puede seguir siendo el sitio en vivo hasta que se
   confirme el corte a Cloudflare — limpiarlo una vez confirmado que
-  Cloudflare Pages ya sirve producción.
+  Cloudflare ya sirve producción.
+- **`_redirects`**: quedó sin uso bajo esta arquitectura (`_worker.js` ya
+  hace la reescritura de `/` a mano) — se deja en el repo solo porque
+  Netlify lo sigue necesitando mientras dure la migración.
 
 ### Pasos manuales pendientes (dashboard de Cloudflare, no automatizables desde acá)
-1. Crear cuenta en Cloudflare (o usar una existente) → **Workers & Pages**
-   → **Create application** → **Pages** → **Connect to Git** →
-   `manuelbis1996/Amet-Radar`.
-2. Configuración de build: **Framework preset: None**, **Build command:
-   (vacío)**, **Build output directory: `/`** (el sitio es estático en la
-   raíz del repo, sin build step — mismo criterio que Netlify). Rama de
-   producción: `main`.
-3. Cloudflare detecta `/functions` solo (no requiere config extra tipo
-   `wrangler.toml` para Pages Functions básicas).
-4. Confirmar la URL asignada (`https://<nombre-proyecto>.pages.dev`) — si
-   no es `amet-radar.pages.dev`, actualizar los 3 meta tags de
-   `amet-radar.html` mencionados arriba.
-5. Nada que tocar en Supabase: RLS de `reports`/`app_config` ya es
+El conector MCP de Cloudflare de esta sesión da *visibilidad* (se confirmó
+con `workers_list` que la cuenta no tiene ningún Worker creado todavía) pero
+**no tiene ninguna herramienta para crear/desplegar un Worker nuevo ni para
+conectar un repo de Git** — y `wrangler` (probado localmente) no tiene
+credenciales en este entorno (`wrangler whoami` → no autenticado). El alta
+inicial es 100% manual:
+1. **Workers & Pages → Create application → Import a repository** →
+   conectar `manuelbis1996/Amet-Radar` (primera vez: autorizar la GitHub
+   App de Cloudflare).
+2. Cloudflare debería detectar `wrangler.jsonc` solo. Confirmar: build
+   command vacío, rama de producción `main`.
+3. Confirmar la URL asignada — si no es `amet-radar.pages.dev`, actualizar
+   los 3 meta tags de `amet-radar.html` mencionados arriba.
+4. Nada que tocar en Supabase: RLS de `reports`/`app_config` ya es
    abierta y el Edge Function `admin-login` ya manda
    `Access-Control-Allow-Origin: *`, así que `admin.html` funciona desde
    cualquier dominio sin cambios (ver "API de Supabase" y "Panel de
    administración" arriba).
-6. Una vez confirmado que Cloudflare Pages sirve todo correctamente
-   (mapa, reportes, notificaciones push, panel admin, preview dinámico):
-   borrar `netlify/edge-functions/`, actualizar esta sección para que
-   describa solo Cloudflare (no ambos), y considerar pausar/borrar el
-   sitio en Netlify.
+5. Una vez confirmado que el Worker sirve todo correctamente (mapa,
+   reportes, notificaciones push, panel admin, preview dinámico — probar
+   este último con `curl -A "whatsapp" https://<dominio>/?r=<id-real>`):
+   borrar `netlify/edge-functions/` y `_redirects`, actualizar esta
+   sección para que describa solo Cloudflare, y considerar pausar/borrar
+   el sitio en Netlify.
 
 ### Estado histórico de Netlify (referencia, hasta que se complete el corte)
 - **Site ID**: `8958378d-0be4-42bb-ab5c-4ba7e3181dd8` (nombre del sitio:

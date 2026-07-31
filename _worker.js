@@ -1,16 +1,17 @@
-// Cloudflare Pages Function — puerto de netlify/edge-functions/report-preview.ts
-// (mismo comportamiento, adaptado al modelo de Cloudflare Pages Functions:
-// _middleware.js en la raíz de /functions corre para toda request al sitio,
-// en vez del `export const config = { path: [...] }` de Netlify).
-//
-// Le muestra a los bots de link-preview (WhatsApp, Twitter/X, Facebook,
-// etc.) meta tags Open Graph específicos del reporte que se está
-// compartiendo (?r=<id>) en vez de la tarjeta genérica de la app. Los bots
-// no ejecutan JS, así que sin esto todo link compartido se ve igual sin
-// importar qué reporte sea. Los usuarios reales (y cualquier otra ruta que
-// no sea "/" o "/amet-radar.html") pasan de largo (next()) y reciben la
-// SPA estática normal, sin cambio de comportamiento ni latencia extra
-// perceptible.
+// Cloudflare Worker con Static Assets — sirve el sitio estático completo
+// (amet-radar.html, admin.html, manifest.json, sw.js, iconos, vía el
+// binding ASSETS declarado en wrangler.jsonc) y, antes de eso, intercepta
+// "/" y "/amet-radar.html" para dos cosas propias:
+//   1) reescribir "/" -> "/amet-radar.html" (Cloudflare no aplica _redirects
+//      automáticamente cuando hay un Worker con "main" propio, así que se
+//      hace acá a mano en vez de depender del archivo _redirects, que solo
+//      lo sigue leyendo Netlify mientras dure la migración — ver CLAUDE.md)
+//   2) mostrarle a los bots de link-preview (WhatsApp, Twitter/X, Facebook,
+//      etc.) meta tags Open Graph específicos del reporte compartido
+//      (?r=<id>) en vez de la tarjeta genérica de la app — mismo
+//      comportamiento que antes tenía netlify/edge-functions/report-preview.ts.
+// Los usuarios reales pasan de largo (ASSETS.fetch) sin cambio de
+// comportamiento ni latencia extra perceptible.
 
 const SUPABASE_URL = "https://nikexwjxxcxzhsuypsjn.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_p8U6gvvBwPVHdfmspjyCXA_g6clP58v";
@@ -74,32 +75,22 @@ function renderPreviewHtml(title, description, pageUrl, siteUrl) {
 </html>`;
 }
 
-export async function onRequest(context) {
-  const { request, next } = context;
-  const url = new URL(request.url);
-
-  if (url.pathname !== "/" && url.pathname !== "/amet-radar.html") {
-    return next();
-  }
-
+async function maybeReportPreview(request, url) {
   const reportId = url.searchParams.get("r");
   const userAgent = request.headers.get("user-agent") || "";
-
-  if (!reportId || !isBot(userAgent)) {
-    return next();
-  }
+  if (!reportId || !isBot(userAgent)) return null;
 
   try {
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/reports?id=eq.${encodeURIComponent(reportId)}&select=category,note,ts`,
       { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } },
     );
-    if (!res.ok) return next();
+    if (!res.ok) return null;
     const rows = await res.json();
     const report = rows[0];
-    // Reporte no existe (ya expiró/lo borró la comunidad) — dejar pasar a
-    // la SPA normal, que va a mostrar los meta tags genéricos del <head>.
-    if (!report) return next();
+    // Reporte no existe (ya expiró/lo borró la comunidad) — null, dejar
+    // pasar a la SPA normal, que muestra los meta tags genéricos del <head>.
+    if (!report) return null;
 
     const label = CATEGORY_LABELS[report.category] ?? "Reporte";
     const title = `${label} — AMET Radar`;
@@ -112,6 +103,22 @@ export async function onRequest(context) {
     });
   } catch (err) {
     console.error("report-preview error", err);
-    return next();
+    return null;
   }
 }
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/" || url.pathname === "/amet-radar.html") {
+      const preview = await maybeReportPreview(request, url);
+      if (preview) return preview;
+      if (url.pathname === "/") {
+        return env.ASSETS.fetch(new Request(new URL("/amet-radar.html", request.url), request));
+      }
+    }
+
+    return env.ASSETS.fetch(request);
+  },
+};
