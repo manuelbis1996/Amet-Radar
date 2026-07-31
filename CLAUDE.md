@@ -531,12 +531,18 @@ por medio.
     si la visita viene de un link compartido (`?r=`), porque ese reporte ya
     es el contexto y taparlo sería peor. Vive al final del `<script>` a
     propósito: necesita `overlay`/`renderSheet`/`closeOverlay` ya definidos.
-  - **Los chips de filtro son una grilla 2x2** (v10.3), no una fila con
-    scroll horizontal: con 4 categorías y etiquetas largas ("Control
-    tránsito") las últimas se salían de pantalla y había que arrastrar de
-    costado para descubrirlas — un filtro que no se ve es un filtro que
-    nadie usa. Verificado a 320/390/430px que las 4 entran en 2 filas sin
-    recortar texto ni desbordar.
+  - **Los filtros no están sueltos sobre el mapa** (v10.6): vivían como 4
+    chips fijos arriba y era fácil apagar una categoría sin querer al
+    arrastrar el mapa (reportado por el usuario), además de comerse ~90px
+    de alto en un teléfono. Ahora se abren desde `#filter-btn` (embudo, al
+    lado de la campana) en una hoja con los mismos chips en grilla 2x2 —
+    las etiquetas ("Control tránsito") son muy largas para meter las 4 en
+    una fila sin recortarlas. **El botón muestra un punto naranja
+    (`data-filtered="true"`) cuando hay alguna categoría apagada**: si no,
+    el mapa quedaría filtrado sin ninguna señal visible y faltarían
+    reportes sin que se entienda por qué. La hoja trae "Ver todas" para
+    restaurar de un toque. Verificado con Playwright que en la franja donde
+    estaban los chips ahora el toque llega directo al mapa.
   - **Categorías**: `CATEGORIES` tiene `hex` (color plano, lo aplican inline
     el marcador y el círculo de zona, y también los chips) e `ink` (color de texto
     legible encima de ese hex). Ya no existe el campo `color` con
