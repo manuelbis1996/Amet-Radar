@@ -408,7 +408,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v9.0';
+  const APP_VERSION = 'v9.1';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const APPROX_RADIUS_METERS = 150; // radio del círculo de zona aproximada (reporte rápido)
 
@@ -1236,6 +1236,7 @@
   // después — cuando eso pase, igual queremos centrar el mapa en el
   // usuario, no dejarlo silenciosamente en Santo Domingo.
   let firstFix = true;
+  let deniedShown = false; // evita repetir el aviso de permiso denegado en cada reintento
   // hashHandled evita abrir el deep link de un reporte compartido dos
   // veces (una vez al mostrar el error de "no ubicación" y otra al llegar
   // el fix tardío).
@@ -1279,10 +1280,27 @@
         }
       },
       err => {
-        // No marcamos firstFix = false aquí: si el GPS solo tardó más de
-        // lo esperado (frecuente al abrir la PWA con GPS frío), el fix
-        // puede llegar igual unos segundos después y sí queremos centrar
-        // el mapa en ese momento en vez de dejarlo trabado en Santo Domingo.
+        // PERMISSION_DENIED (código 1) es distinto a los otros dos: no es
+        // que "está tardando", es que no va a llegar nunca hasta que el
+        // usuario cambie el permiso a mano (en iOS/Safari en particular,
+        // el navegador no vuelve a preguntar solo). Mostrarle el mensaje
+        // genérico de "tardando" acá es engañoso — lo dejamos esperando
+        // algo que no va a pasar. Mostramos un aviso accionable una sola
+        // vez (deniedShown) para no repetirlo en cada reintento de
+        // watchPosition.
+        if(err.code === err.PERMISSION_DENIED){
+          hideLoader();
+          if(!deniedShown){
+            deniedShown = true;
+            showToast('Activa el permiso de ubicación para este sitio en los Ajustes de tu navegador.', true);
+          }
+          tryOpenHashOnce();
+          return;
+        }
+        // POSITION_UNAVAILABLE o TIMEOUT: no marcamos firstFix = false acá,
+        // porque el fix puede llegar igual unos segundos después (GPS frío
+        // al abrir la PWA) y sí queremos centrar el mapa en ese momento en
+        // vez de dejarlo trabado en Santo Domingo.
         if(!mapLoader.hidden){
           hideLoader();
           showToast('Tu ubicación está tardando en llegar. Se centrará el mapa apenas la tengamos.', true);

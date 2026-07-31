@@ -361,6 +361,12 @@ por medio.
   dentro del `bounds` actual del mapa (recalculado en `moveend`/`zoomend`).
 - **Mi ubicación**: `navigator.geolocation.watchPosition` centra el mapa en
   el primer fix y mantiene un marcador azul (`meMarker`) actualizado.
+  El callback de error distingue `PERMISSION_DENIED` (código 1) de
+  `POSITION_UNAVAILABLE`/`TIMEOUT`: el primero es permanente (el navegador
+  no vuelve a preguntar solo, sobre todo en iOS/Safari) y muestra un aviso
+  accionable ("activá el permiso en Ajustes") una sola vez (`deniedShown`);
+  los otros dos siguen mostrando "está tardando", porque el fix puede
+  llegar igual unos segundos después (GPS frío al abrir la PWA).
 - **Diseño (rediseño v9.0, mobile-first)**: el público es casi todo móvil,
   así que la pantalla se organiza alrededor del mapa en vez de alrededor
   de un header. Decisiones que conviene no deshacer sin pensarlo:
