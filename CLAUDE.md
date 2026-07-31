@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # AMET Radar — Contexto del proyecto
 
 ## Qué es
-App web (HTML/CSS/JS vanilla + Leaflet) de reportes comunitarios de retenes
+App web (HTML/CSS/JS vanilla + MapLibre GL) de reportes comunitarios de retenes
 de tránsito (AMET) en Santo Domingo. Los usuarios marcan en un mapa dónde
 hay un retén, categoría, foto obligatoria y nota opcional; otros usuarios
 pueden confirmar o desmentir el reporte.
@@ -396,6 +396,49 @@ por medio.
   borra automáticamente.
 - **Filtrado por zona visible**: los marcadores solo se dibujan si están
   dentro del `bounds` actual del mapa (recalculado en `moveend`/`zoomend`).
+- **Mapa: MapLibre GL + OpenFreeMap (v10.0, reemplazó a Leaflet)**: tiles
+  vectoriales en vez de raster — texto nítido en cualquier zoom y se ven
+  comercios/puntos de referencia. Librería `maplibre-gl@5.24.0` por CDN
+  (unpkg), **pineada a la última v5 a propósito**: la v6 salió días antes
+  y trae breaking changes, no vale el riesgo en un proyecto sin tests.
+  Estilo `https://tiles.openfreemap.org/styles/bright` — gratis, sin API
+  key ni límite de requests; los datos son de OpenStreetMap y OpenFreeMap
+  regenera el planeta **una vez por semana** (miércoles), así que un
+  negocio mapeado hoy puede tardar días en aparecer. Gotchas de la
+  migración, todos con su comentario en el código:
+  - **El zoom no es el mismo número que en Leaflet.** MapLibre usa tiles de
+    512px y Leaflet de 256px, así que para la misma escala el zoom de
+    MapLibre es **uno menos**. Toda conversión pasa por `zoomFromLeaflet()`
+    para no tener que acordarse del offset en cada llamada.
+  - **Los marcadores son elementos del DOM, no íconos.** No existe
+    `setIcon`: `paintPin()` repinta el div existente y guarda una firma en
+    `dataset.sig` para no reescribir el `innerHTML` en cada sondeo de 8s
+    (sin eso, cada pin parpadearía cada 8 segundos).
+  - **El círculo de zona aproximada ya no tiene radio en metros.** No hay
+    equivalente de `L.circle`: es un div circular al que
+    `sizeApproxCircle()` le calcula el diámetro **en píxeles** vía
+    `metersToPixels()`, y hay que recalcularlo en el evento `zoom`
+    (continuo, no `zoomend`) o el círculo "salta" mientras se hace pinch.
+  - `markersById[id]` ya no es un layer sino `{ kind, el, marker, lat }` —
+    hacen falta el elemento (para repintarlo) y la latitud (para el radio).
+  - `getBounds().pad(0.25)` no existe: el margen del 25% se calcula a mano
+    en `renderVisibleMarkers`.
+  - `moveend` ya cubre el fin de un zoom, y `on()` no acepta varios eventos
+    separados por espacio como sí hacía Leaflet.
+  - El click del mapa trae `e.lngLat`, no `e.latlng`; y `flyTo` recibe la
+    duración en **milisegundos**, no en segundos.
+  - Rotación e inclinación **deshabilitadas** a propósito
+    (`dragRotate:false`, `touchPitch:false`, `touchZoomRotate.disableRotation()`):
+    girar el mapa sin querer con dos dedos desorienta más de lo que aporta.
+  - **Atribución de OpenStreetMap: pendiente.** Se dejó
+    `attributionControl:false` para no cambiar la UI sin pedirlo (es lo que
+    ya hacía con CartoDB), pero la licencia ODbL de OSM la exige — conviene
+    resolverlo.
+  - Verificado con un stub de MapLibre + Playwright (16 chequeos: estilo,
+    zoom, pines, círculo y su re-escalado, hoja de detalle, seguimiento,
+    `dragstart`, flujo de "marca el lugar"), porque este sandbox bloquea
+    tanto el CDN como los tiles reales. **El render visual en sí no se pudo
+    verificar acá** — eso hay que mirarlo en el teléfono.
 - **Mi ubicación**: `navigator.geolocation.watchPosition` centra el mapa en
   el primer fix y mantiene un marcador azul (`meMarker`) actualizado.
   El callback de error distingue `PERMISSION_DENIED` (código 1) de
@@ -414,7 +457,7 @@ por medio.
   usuario en cada actualización de posición. Se autodesactiva con
   `map.on('dragstart', ...)` apenas el usuario arrastra el mapa a mano —
   mismo comportamiento que Waze/Google Maps. `panTo`/`setView`
-  programáticos no disparan `dragstart` en Leaflet, así que el propio
+  programáticos no disparan `dragstart` en MapLibre, así que el propio
   seguimiento no se autocancela. Sin este modo activado, el comportamiento
   es el de siempre: un solo centrado en el primer fix (`firstFix`).
 - **Diseño (rediseño v9.0, mobile-first)**: el público es casi todo móvil,
@@ -425,25 +468,22 @@ por medio.
     ~110px fijos de alto. `#top` tiene `pointer-events:none` y solo sus
     hijos reales lo reciben, para poder arrastrar el mapa por los huecos.
   - **El detalle de un reporte es una hoja inferior (`#detail`), no el
-    popup de Leaflet.** Un globito de ~216px era incómodo en táctil (foto
-    chica, botones apretados). Se eliminaron `bindPopup`/`setPopupContent`/
-    `openPopup`: el marcador tiene un listener de `click` que llama a
+    popup del mapa.** Un globito de ~216px era incómodo en táctil (foto
+    chica, botones apretados): el marcador tiene un listener de `click` que llama a
     `openDetail(id)`. La hoja NO se re-renderiza en el sondeo de 8s (te
     cortaría el scroll bajo el dedo); solo con `refreshDetail(id)` después
     de que vos mismo votás.
   - **Tema automático** (`prefers-color-scheme`): claro de día, oscuro de
     noche, para el resto de la UI (header, chips, hojas). El mapa en sí es
-    la excepción, a pedido: siempre usa tiles claros de CartoDB de día y de
-    noche. Estilo `voyager` (`rastertiles/voyager`, v9.3) en vez de
-    `light_all`: mismo proveedor sin API key, pero con calles, nombres de
-    lugares y más color — sigue siendo un fondo claro, solo más legible.
+    la excepción, a pedido: siempre usa un estilo claro de día y de noche
+    (ver "Mapa: MapLibre GL + OpenFreeMap" abajo).
   - **Ningún control primario mide menos de 44px** (`--tap`), y todo lo
     que flota respeta `env(safe-area-inset-*)`.
   - Se sacó `maximum-scale=1.0` del viewport: bloqueaba el pinch-zoom, que
     es un problema de accesibilidad real.
-  - `zoomControl:false` en el mapa: los botones +/- sobran en un teléfono.
-  - **Categorías**: `CATEGORIES` tiene `hex` (color plano, lo necesita el
-    renderer SVG de Leaflet y también los chips) e `ink` (color de texto
+  - Sin controles de zoom en el mapa: los botones +/- sobran en un teléfono.
+  - **Categorías**: `CATEGORIES` tiene `hex` (color plano, lo aplican inline
+    el marcador y el círculo de zona, y también los chips) e `ink` (color de texto
     legible encima de ese hex). Ya no existe el campo `color` con
     `var(--nombre)`. Los chips activos usan un tinte translúcido derivado
     del hex en JS (`hexTint`, expuesto como `--chip-tint`) en vez de
