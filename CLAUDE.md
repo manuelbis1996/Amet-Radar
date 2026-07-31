@@ -501,6 +501,12 @@ por medio.
   - Se sacó `maximum-scale=1.0` del viewport: bloqueaba el pinch-zoom, que
     es un problema de accesibilidad real.
   - Sin controles de zoom en el mapa: los botones +/- sobran en un teléfono.
+  - **Los chips de filtro son una grilla 2x2** (v10.3), no una fila con
+    scroll horizontal: con 4 categorías y etiquetas largas ("Control
+    tránsito") las últimas se salían de pantalla y había que arrastrar de
+    costado para descubrirlas — un filtro que no se ve es un filtro que
+    nadie usa. Verificado a 320/390/430px que las 4 entran en 2 filas sin
+    recortar texto ni desbordar.
   - **Categorías**: `CATEGORIES` tiene `hex` (color plano, lo aplican inline
     el marcador y el círculo de zona, y también los chips) e `ink` (color de texto
     legible encima de ese hex). Ya no existe el campo `color` con

@@ -160,15 +160,20 @@
   #push-toggle-btn[hidden]{ display:none; }
 
   /* ---- Chips de filtro ---- */
+  /* Grilla 2x2 en vez de una fila con scroll horizontal: las 4 categorías
+     quedan juntas y todas a la vista. Antes las últimas se salían de
+     pantalla y había que arrastrar de costado para descubrir que existían
+     — un filtro que no se ve es un filtro que nadie usa. Las etiquetas
+     ("Control tránsito") son muy largas para meter las 4 en una sola fila
+     sin recortarlas, así que 2x2 es lo que entra sin achicar el texto. */
   #filters{
-    display:flex; gap:8px; overflow-x:auto; padding:1px 0 5px;
-    -webkit-overflow-scrolling:touch; scrollbar-width:none;
+    display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;
+    padding:1px 0 5px;
   }
-  #filters::-webkit-scrollbar{ display:none; }
   .chip{
-    pointer-events:auto; flex-shrink:0;
-    display:inline-flex; align-items:center; gap:6px; min-height:40px;
-    padding:0 15px; border-radius:999px; border:none;
+    pointer-events:auto; min-width:0;
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    min-height:40px; padding:0 12px; border-radius:999px; border:none;
     background:var(--surface); color:var(--text); box-shadow:var(--shadow-1);
     font-size:13px; font-weight:600; white-space:nowrap; cursor:pointer;
     transition:transform .12s ease, opacity .15s ease;
@@ -431,7 +436,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v10.2';
+  const APP_VERSION = 'v10.3';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
