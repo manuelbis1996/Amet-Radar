@@ -1,4 +1,4 @@
-const CACHE_NAME = 'amet-radar-v9.5';
+const CACHE_NAME = 'amet-radar-v9.6';
 const APP_SHELL = [
   './amet-radar.html',
   './manifest.json',
@@ -28,9 +28,22 @@ self.addEventListener('fetch', (event) => {
   const isAppShell = APP_SHELL.some((path) => url.pathname.endsWith(path.replace('./', '')));
   if (!isAppShell) return;
 
+  // Si no hay nada en caché (ej. justo después de "Agregar a pantalla de
+  // inicio", antes de que termine el install) y el fetch a la red falla,
+  // NUNCA hay que resolver a `cached` (undefined en ese caso) — respondWith
+  // con un valor que no es un Response hace que Chrome tire net::ERR_FAILED
+  // ("No se puede acceder a este sitio") en vez de reintentar o mostrar un
+  // error entendible.
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).catch(() => cached);
+      if (cached) return cached;
+      return fetch(event.request).catch(
+        () => new Response('Sin conexión. Probá de nuevo cuando tengas señal.', {
+          status: 503,
+          statusText: 'Offline',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+        })
+      );
     })
   );
 });

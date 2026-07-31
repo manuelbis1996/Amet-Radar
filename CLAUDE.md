@@ -47,7 +47,15 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   confirmar a simple vista, sin devtools, que una PWA instalada ya tomó la
   versión nueva. Subir el decimal (`v4.0` → `v4.1`) para cambios chicos
   (ajustes, fixes) y el entero (`v4.1` → `v5.0`) para cambios grandes
-  (rediseños, features nuevas).
+  (rediseños, features nuevas). **Bug corregido en v9.6**: el handler de
+  `fetch` hacía `cached || fetch(...).catch(() => cached)` — si no había
+  nada en caché (típico justo después de "Agregar a pantalla de inicio",
+  antes de que termine el `install`) y el fetch de red fallaba, eso
+  resolvía a `undefined`; `respondWith(undefined)` hace que Chrome tire
+  `net::ERR_FAILED` ("No se puede acceder a este sitio") en vez de
+  reintentar o mostrar algo entendible — reportado por el usuario
+  instalando la PWA en Android/Chrome desde cero. Ahora el fallback de red
+  fallida siempre devuelve un `Response` real (503 "Sin conexión").
 - `icon-192.png`, `icon-512.png` — íconos de la PWA
 - `README.md` — cómo correr el proyecto localmente y qué mejoras de la
   lista ya están implementadas para la prueba local
