@@ -501,6 +501,27 @@ por medio.
   - Se sacó `maximum-scale=1.0` del viewport: bloqueaba el pinch-zoom, que
     es un problema de accesibilidad real.
   - Sin controles de zoom en el mapa: los botones +/- sobran en un teléfono.
+  - **Estado vacío** (v10.4): cuando no hay ningún reporte en la zona
+    visible se muestra `#empty-state` ("Todo tranquilo por aquí"). Sin eso
+    el usuario ve un mapa mudo y no sabe si la app falló, si no cargó o si
+    de verdad no hay nada — y al lanzar en una ciudad nueva ese es
+    literalmente el primer estado que ve todo el mundo. Va con
+    `pointer-events:none` para no bloquear el arrastre del mapa, y solo
+    aparece después del primer fetch que responde (`reportsLoadedOnce`),
+    porque si no saldría durante el arranque.
+  - **La versión NO se muestra en el header** (v10.4): a un usuario final
+    "v10.4" no le dice nada. Sigue siendo consultable **manteniendo
+    presionado el logo** (600ms → toast), que es como se confirma a simple
+    vista, sin devtools, que una PWA instalada ya tomó la versión nueva.
+  - **El botón Compartir del detalle va con el color de marca**
+    (`.mini-btn.primary` + ícono), no gris como Eliminar: compartir es la
+    palanca de crecimiento del proyecto (ver "Historial de decisiones") y
+    antes no se distinguía de una acción destructiva.
+  - **Hoja de bienvenida, una sola vez** (v10.4, `amet_onboarded_v1` en
+    `localStorage`): explica qué es la app y cómo reportar. No se muestra
+    si la visita viene de un link compartido (`?r=`), porque ese reporte ya
+    es el contexto y taparlo sería peor. Vive al final del `<script>` a
+    propósito: necesita `overlay`/`renderSheet`/`closeOverlay` ya definidos.
   - **Los chips de filtro son una grilla 2x2** (v10.3), no una fila con
     scroll horizontal: con 4 categorías y etiquetas largas ("Control
     tránsito") las últimas se salían de pantalla y había que arrastrar de

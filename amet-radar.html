@@ -136,7 +136,6 @@
     box-shadow:0 0 0 4px rgba(245,158,11,.18);
   }
   .brand-name{ font-size:15px; font-weight:700; letter-spacing:-.2px; white-space:nowrap; }
-  .version-tag{ font-size:10px; font-weight:500; color:var(--muted); margin-left:1px; }
   .brand-count{
     display:inline-flex; align-items:center; gap:4px; margin-left:2px;
     padding-left:10px; border-left:1px solid var(--line);
@@ -318,6 +317,36 @@
   }
   .mini-btn:active{ transform:scale(.97); }
   .mini-btn.danger{ color:var(--danger); border-color:rgba(217,45,32,.32); }
+  /* Compartir es la palanca de crecimiento del proyecto (ver CLAUDE.md):
+     se destaca con el color de marca en vez de verse igual que Eliminar. */
+  .mini-btn.primary{
+    background:var(--brand); color:var(--on-brand); border-color:transparent;
+    display:inline-flex; align-items:center; justify-content:center; gap:7px;
+  }
+  .mini-btn.primary svg{ width:16px; height:16px; flex-shrink:0; }
+
+  /* ---- Estado vacío (ningún reporte en la zona visible) ---- */
+  /* Sin esto el usuario ve un mapa mudo y no sabe si la app falló, si no
+     cargó, o si de verdad no hay nada. Al lanzar en una ciudad nueva ese
+     es literalmente el primer estado que ve todo el mundo. pointer-events
+     en none para que el mapa se siga pudiendo arrastrar por debajo. */
+  #empty-state{
+    position:absolute; inset:0; z-index:300; pointer-events:none;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  #empty-state[hidden]{ display:none; }
+  .empty-card{
+    background:var(--surface); border-radius:var(--r-lg);
+    box-shadow:var(--shadow-2); padding:20px 22px; max-width:290px; text-align:center;
+  }
+  .empty-emoji{ font-size:30px; line-height:1; margin-bottom:8px; }
+  .empty-card h3{ margin:0 0 6px; font-size:16px; font-weight:700; letter-spacing:-.2px; }
+  .empty-card p{ margin:0; font-size:13.5px; line-height:1.5; color:var(--muted); }
+
+  /* ---- Hoja de bienvenida (primera vez) ---- */
+  .welcome-list{ list-style:none; margin:0 0 16px; padding:0; display:flex; flex-direction:column; gap:11px; }
+  .welcome-list li{ font-size:13.5px; line-height:1.5; color:var(--muted); }
+  .welcome-list b{ color:var(--text); font-weight:700; }
 
   /* ---- Flujo de publicación ---- */
   .cat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
@@ -392,11 +421,19 @@
     <div id="map-loader"><div class="radar-sweep"></div><span>Buscando tu ubicación…</span></div>
   </div>
 
+  <div id="empty-state" hidden>
+    <div class="empty-card">
+      <div class="empty-emoji">🛣️</div>
+      <h3>Todo tranquilo por aquí</h3>
+      <p>No hay reportes activos en esta zona. Si ves un retén, sé el primero en avisar.</p>
+    </div>
+  </div>
+
   <div id="top">
     <div class="topbar">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span class="brand-name">AMET Radar<span class="version-tag" id="app-version"></span></span>
+        <span class="brand-name">AMET Radar</span>
         <span class="brand-count"><b id="stat-count">0</b>en vista</span>
       </div>
       <button id="push-toggle-btn" data-state="inactive" aria-label="Avisarme de retenes cerca" title="Avisarme de retenes cerca" hidden>
@@ -436,7 +473,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v10.3';
+  const APP_VERSION = 'v10.4';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -475,7 +512,21 @@
   };
   const activeCategories = new Set(Object.keys(CATEGORIES));
 
-  document.getElementById('app-version').textContent = APP_VERSION;
+  // La versión ya no se muestra fija en el header: al usuario final no le
+  // dice nada. Sigue siendo consultable manteniendo presionado el logo, que
+  // es como se confirma a simple vista (sin devtools) que una PWA instalada
+  // ya tomó la versión nueva.
+  (function enableVersionPeek(){
+    const brand = document.querySelector('.brand');
+    if(!brand) return;
+    let timer = null;
+    const cancel = () => { if(timer){ clearTimeout(timer); timer = null; } };
+    brand.addEventListener('pointerdown', () => {
+      cancel();
+      timer = setTimeout(() => showToast(`AMET Radar ${APP_VERSION}`), 600);
+    });
+    ['pointerup','pointerleave','pointercancel'].forEach(ev => brand.addEventListener(ev, cancel));
+  })();
 
   // ---- Backend compartido (Supabase) ----
   // Los reportes viven en la tabla `reports` de un proyecto Supabase (no en
@@ -553,6 +604,7 @@
           next[id] = record;
         }
         reportsCache = next;
+        reportsLoadedOnce = true;
       }
     }catch(e){ console.error('Error cargando reportes', e); }
     return reportsCache;
@@ -847,7 +899,7 @@
         </button>
       </div>
       <div class="mini-actions">
-        <button class="mini-btn" data-action="share" data-id="${id}">Compartir</button>
+        <button class="mini-btn primary" data-action="share" data-id="${id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>Compartir</button>
         ${mine ? `<button class="mini-btn danger" data-action="delete" data-id="${id}">Eliminar</button>` : ''}
       </div>`}`;
   }
@@ -938,8 +990,16 @@
     if(markersById[id]){ markersById[id].marker.remove(); delete markersById[id]; }
   }
 
+  // Solo se marca en true tras el primer fetch que responde: si no, el
+  // cartel de "no hay nada" aparecería durante el arranque, cuando todavía
+  // no se sabe si hay reportes o no.
+  let reportsLoadedOnce = false;
+  const emptyStateEl = document.getElementById('empty-state');
+
   function updateCount(){
-    document.getElementById('stat-count').textContent = Object.keys(markersById).length;
+    const n = Object.keys(markersById).length;
+    document.getElementById('stat-count').textContent = n;
+    emptyStateEl.hidden = !(reportsLoadedOnce && n === 0);
   }
 
   // ---- Filtros de categoría ----
@@ -1812,6 +1872,37 @@
       document.getElementById('retry-btn').addEventListener('click', publishReport);
     }
   }
+
+  // ---- Bienvenida, una sola vez ----
+  // Al abrir la app por primera vez no había nada que explicara para qué
+  // sirve: solo un mapa y dos botones. Va acá abajo del todo a propósito,
+  // porque necesita `overlay`/`renderSheet`/`closeOverlay` ya definidos.
+  const ONBOARDED_KEY = 'amet_onboarded_v1';
+  function maybeShowWelcome(){
+    let seen = false;
+    try{ seen = !!localStorage.getItem(ONBOARDED_KEY); }catch(e){}
+    if(seen) return;
+    // Si viene de un link compartido (?r=), ese reporte es el contexto y no
+    // hay que taparlo con la bienvenida.
+    const deepLink = new URLSearchParams(location.search).get('r')
+      || (location.hash.match(/r=([^&]+)/) || [])[1];
+    if(deepLink) return;
+    try{ localStorage.setItem(ONBOARDED_KEY, '1'); }catch(e){}
+    renderSheet(`
+      <h2>Bienvenido a AMET Radar</h2>
+      <p class="sub">Reportes de retenes de tránsito en La Vega, hechos por la comunidad.</p>
+      <ul class="welcome-list">
+        <li><b>👀 Mira el mapa</b> — cada punto es un reporte activo de otra persona.</li>
+        <li><b>📣 Reporta</b> — si ves un retén, avisa con un toque. Hay un modo rápido para cuando vas manejando.</li>
+        <li><b>👍 Confirma</b> — toca un reporte para decir si sigue ahí o si ya no está.</li>
+      </ul>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="welcome-ok" style="width:100%;">Entendido</button>
+      </div>
+    `);
+    document.getElementById('welcome-ok').addEventListener('click', closeOverlay);
+  }
+  maybeShowWelcome();
 
   // ---- PWA: service worker (requiere servir por http/https, no file://) ----
   if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
