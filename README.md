@@ -2,8 +2,10 @@
 
 ## En producción
 
-La app ya está publicada: **https://amet-radar.netlify.app**. Sirve
-directo desde ahí, con HTTPS (necesario para geolocalización en el
+La app ya está publicada: **https://amet-radar.manuelbis1996.workers.dev**
+(migrando de Netlify a Cloudflare Workers, ver
+[CLAUDE.md](CLAUDE.md#despliegue--migración-de-netlify-a-cloudflare-workers-en-curso)).
+Sirve directo desde ahí, con HTTPS (necesario para geolocalización en el
 celular) y sin depender de que ninguna PC esté prendida — los reportes
 viven en Supabase (ver más abajo). El resto de este README es para correr
 el proyecto en local (desarrollo/pruebas).
@@ -82,16 +84,9 @@ Function). Detalles completos en
 
 ## Redesplegar a producción
 
-El sitio de Netlify (`amet-radar`, site ID `8958378d-0be4-42bb-ab5c-4ba7e3181dd8`)
-está conectado al repo de GitHub — un push a la **rama de producción
-configurada en Netlify** redespliega solo (confirmar cuál es esa rama en
-`Project configuration → Continuous deployment` antes de asumir que es
-`main`). Si hace falta forzar un deploy fuera de ese flujo:
-
-```bash
-npx -y netlify-cli deploy --prod --site 8958378d-0be4-42bb-ab5c-4ba7e3181dd8 --dir .
-```
-
-(o con el MCP de Netlify si estás en una sesión de Claude Code con esa
-herramienta conectada). Detalles de la cuenta/config en
-[CLAUDE.md](CLAUDE.md#despliegue-netlify).
+El Worker de Cloudflare (`amet-radar`, cuenta `manuelbis1996`) está
+conectado al repo de GitHub — un push a `main` redespliega solo. El sitio
+de Netlify (`amet-radar`, site ID `8958378d-0be4-42bb-ab5c-4ba7e3181dd8`)
+sigue existiendo mientras dura el corte, también conectado al repo con
+el mismo criterio. Detalles de ambas cuentas/config en
+[CLAUDE.md](CLAUDE.md#despliegue--migración-de-netlify-a-cloudflare-workers-en-curso).

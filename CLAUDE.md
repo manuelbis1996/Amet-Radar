@@ -558,12 +558,10 @@ dependencias" del resto del proyecto.
   `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`.
 - **`amet-radar.html`**: los meta tags OG/Twitter genéricos del `<head>`
   (`og:url`, `og:image`, `twitter:image`) ya apuntan a
-  `https://amet-radar.pages.dev/` — sí, `.pages.dev` aunque ya no se use
-  Cloudflare Pages: los Workers con un dominio no personalizado también
-  reciben una URL en ese mismo dominio (`<nombre-proyecto>.pages.dev`),
-  asumiendo que el Worker se crea con el nombre `amet-radar` (ver
-  `wrangler.jsonc`). Si el nombre real terminó siendo otro, actualizar
-  esas 3 URLs a mano.
+  `https://amet-radar.manuelbis1996.workers.dev/` — la URL real del Worker
+  ya desplegado (no era `.pages.dev` como se había asumido antes de
+  desplegar: los Workers creados por "Import a repository" quedan en
+  `<nombre-worker>.<subdominio-de-la-cuenta>.workers.dev`).
 - **`netlify/edge-functions/report-preview.ts`**: se dejó intacto (no se
   borró) porque Netlify puede seguir siendo el sitio en vivo hasta que se
   confirme el corte a Cloudflare — limpiarlo una vez confirmado que
@@ -572,31 +570,21 @@ dependencias" del resto del proyecto.
   hace la reescritura de `/` a mano) — se deja en el repo solo porque
   Netlify lo sigue necesitando mientras dure la migración.
 
-### Pasos manuales pendientes (dashboard de Cloudflare, no automatizables desde acá)
-El conector MCP de Cloudflare de esta sesión da *visibilidad* (se confirmó
-con `workers_list` que la cuenta no tiene ningún Worker creado todavía) pero
-**no tiene ninguna herramienta para crear/desplegar un Worker nuevo ni para
-conectar un repo de Git** — y `wrangler` (probado localmente) no tiene
-credenciales en este entorno (`wrangler whoami` → no autenticado). El alta
-inicial es 100% manual:
-1. **Workers & Pages → Create application → Import a repository** →
-   conectar `manuelbis1996/Amet-Radar` (primera vez: autorizar la GitHub
-   App de Cloudflare).
-2. Cloudflare debería detectar `wrangler.jsonc` solo. Confirmar: build
-   command vacío, rama de producción `main`.
-3. Confirmar la URL asignada — si no es `amet-radar.pages.dev`, actualizar
-   los 3 meta tags de `amet-radar.html` mencionados arriba.
-4. Nada que tocar en Supabase: RLS de `reports`/`app_config` ya es
-   abierta y el Edge Function `admin-login` ya manda
-   `Access-Control-Allow-Origin: *`, así que `admin.html` funciona desde
-   cualquier dominio sin cambios (ver "API de Supabase" y "Panel de
-   administración" arriba).
-5. Una vez confirmado que el Worker sirve todo correctamente (mapa,
-   reportes, notificaciones push, panel admin, preview dinámico — probar
-   este último con `curl -A "whatsapp" https://<dominio>/?r=<id-real>`):
-   borrar `netlify/edge-functions/` y `_redirects`, actualizar esta
-   sección para que describa solo Cloudflare, y considerar pausar/borrar
-   el sitio en Netlify.
+### Estado del corte a Cloudflare
+**Ya desplegado**: el Worker `amet-radar` está creado y conectado al repo
+(`Workers & Pages → Create application → Import a repository`, con
+auto-deploy en cada push a `main`) — URL en vivo:
+`https://amet-radar.manuelbis1996.workers.dev/`. No se pudo verificar el
+resultado desde este sandbox (bloquea `*.workers.dev` a nivel de red, mismo
+problema que con `*.netlify.app`) — pendiente de confirmación manual por
+el usuario: que el mapa cargue, se puedan publicar/ver reportes, y que
+`https://amet-radar.manuelbis1996.workers.dev/?r=<id-real>` con
+`curl -A "whatsapp"` devuelva el preview dinámico en vez de la SPA.
+
+Una vez confirmado que el Worker sirve todo correctamente (mapa, reportes,
+notificaciones push, panel admin, preview dinámico): borrar
+`netlify/edge-functions/` y `_redirects`, actualizar esta sección para que
+describa solo Cloudflare, y considerar pausar/borrar el sitio en Netlify.
 
 ### Estado histórico de Netlify (referencia, hasta que se complete el corte)
 - **Site ID**: `8958378d-0be4-42bb-ab5c-4ba7e3181dd8` (nombre del sitio:
