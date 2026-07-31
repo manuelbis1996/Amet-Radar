@@ -5,15 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)">
-<meta name="description" content="Reportes comunitarios de retenes de tránsito en tiempo real en Santo Domingo.">
+<meta name="description" content="Reportes comunitarios de retenes de tránsito en tiempo real en La Vega.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="AMET Radar">
-<meta property="og:description" content="Reportes comunitarios de retenes de tránsito en tiempo real en Santo Domingo.">
+<meta property="og:description" content="Reportes comunitarios de retenes de tránsito en tiempo real en La Vega.">
 <meta property="og:url" content="https://amet-radar.manuelbis1996.workers.dev/">
 <meta property="og:image" content="https://amet-radar.manuelbis1996.workers.dev/icon-512.png">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="AMET Radar">
-<meta name="twitter:description" content="Reportes comunitarios de retenes de tránsito en tiempo real en Santo Domingo.">
+<meta name="twitter:description" content="Reportes comunitarios de retenes de tránsito en tiempo real en La Vega.">
 <meta name="twitter:image" content="https://amet-radar.manuelbis1996.workers.dev/icon-512.png">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
@@ -431,8 +431,16 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v10.1';
-  const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
+  const APP_VERSION = 'v10.2';
+  // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
+  // Es solo el punto de arranque mientras no hay señal de GPS: apenas
+  // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
+  const DEFAULT_CENTER = [19.2214, -70.5295]; // La Vega
+  // Caja que cubre República Dominicana entera (de la frontera con Haití
+  // hasta Punta Cana, y de la costa sur a la norte) con algo de margen.
+  // El mapa no deja arrastrar fuera de acá: la app es solo para RD, y así
+  // nadie termina perdido en el Atlántico sin entender qué pasó.
+  const RD_BOUNDS = [[-72.10, 17.30], [-68.20, 20.10]]; // [[oeste,sur],[este,norte]]
   const APPROX_RADIUS_METERS = 150; // radio del círculo de zona aproximada (reporte rápido)
 
   // Parámetros del sistema: valores por defecto, sobreescritos al arrancar
@@ -682,6 +690,17 @@
     center: [DEFAULT_CENTER[1], DEFAULT_CENTER[0]], // MapLibre usa [lng, lat]
     zoom: zoomFromLeaflet(13),
     maxZoom: zoomFromLeaflet(19),
+    // La app es solo para República Dominicana: no tiene sentido dejar
+    // arrastrar el mapa hasta Miami.
+    maxBounds: RD_BOUNDS,
+    // minZoom NO es cosmético, va de la mano de maxBounds: cuando el
+    // viewport se hace más grande que la caja, MapLibre deja de respetar
+    // el centro y lo clava en el medio de la caja — o sea, el mapa se te
+    // escapa solo al centro del país (zona La Vega/Bonao) al alejar. Con 8
+    // el alto de pantalla de un teléfono siempre entra dentro de RD, así
+    // que eso no llega a pasar. Si algún día se agranda RD_BOUNDS o se baja
+    // este número, revisar que el efecto no vuelva.
+    minZoom: 8,
     // Sin controles de zoom: en un teléfono los botones +/- sobran (se hace
     // pinch) y ocupan una esquina que preferimos dejar al mapa. Y sin
     // rotación ni inclinación: el mapa siempre al norte y plano, como con
@@ -1345,7 +1364,7 @@
   // firstFix: solo pasa a false con un fix exitoso. Un timeout de GPS no lo
   // toca, porque watchPosition sigue corriendo y puede resolver segundos
   // después — cuando eso pase, igual queremos centrar el mapa en el
-  // usuario, no dejarlo silenciosamente en Santo Domingo.
+  // usuario, no dejarlo silenciosamente en La Vega.
   let firstFix = true;
   let deniedShown = false; // evita repetir el aviso de permiso denegado en cada reintento
   // hashHandled evita abrir el deep link de un reporte compartido dos
@@ -1422,7 +1441,7 @@
         // POSITION_UNAVAILABLE o TIMEOUT: no marcamos firstFix = false acá,
         // porque el fix puede llegar igual unos segundos después (GPS frío
         // al abrir la PWA) y sí queremos centrar el mapa en ese momento en
-        // vez de dejarlo trabado en Santo Domingo.
+        // vez de dejarlo trabado en La Vega.
         if(!mapLoader.hidden){
           hideLoader();
           showToast('Tu ubicación está tardando en llegar. Se centrará el mapa apenas la tengamos.', true);

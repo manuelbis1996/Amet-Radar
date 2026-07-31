@@ -96,7 +96,7 @@ async function maybeReportPreview(request, url) {
     const title = `${label} — AMET Radar`;
     const description = report.note
       ? `Reportado ${timeAgo(report.ts)}. "${report.note}"`
-      : `Reportado ${timeAgo(report.ts)} en Santo Domingo.`;
+      : `Reportado ${timeAgo(report.ts)} en La Vega.`;
 
     return new Response(renderPreviewHtml(title, description, request.url, url.origin), {
       headers: { "Content-Type": "text/html; charset=utf-8" },

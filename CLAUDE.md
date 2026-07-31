@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Qué es
 App web (HTML/CSS/JS vanilla + MapLibre GL) de reportes comunitarios de retenes
-de tránsito (AMET) en Santo Domingo. Los usuarios marcan en un mapa dónde
+de tránsito (AMET) en República Dominicana. **Se lanza en La Vega**: el
+mapa arranca ahí y los textos de la app hablan de La Vega, aunque el mapa
+permite moverse por todo el país (ver `RD_BOUNDS`). Los usuarios marcan en un mapa dónde
 hay un retén, categoría, foto obligatoria y nota opcional; otros usuarios
 pueden confirmar o desmentir el reporte.
 
@@ -437,6 +439,20 @@ por medio.
     línea de texto fija. El CSS la sube 84px sobre el safe-area para que
     `#fab-row` no la tape, con `z-index:390` (debajo de `#fab-row`, para no
     robarle toques al botón de reportar).
+  - **Limitado a República Dominicana** (v10.2): `maxBounds: RD_BOUNDS` —
+    el mapa no deja arrastrar fuera del país. **`minZoom: 8` va de la mano
+    y no es cosmético**: cuando el viewport se hace más grande que
+    `maxBounds`, MapLibre deja de respetar el centro y lo clava en el medio
+    de la caja, o sea el mapa "se escapa" solo al centro del país al alejar
+    (se detectó probando, cae justo sobre la zona de La Vega/Bonao). Con 8,
+    el alto de pantalla de un teléfono siempre entra dentro de RD y no
+    llega a pasar. Si se agranda `RD_BOUNDS` o se baja `minZoom`, revisar
+    que no vuelva (en pantallas muy altas, tipo desktop, todavía puede
+    aparecer — no es el público objetivo).
+  - **`DEFAULT_CENTER` es La Vega**, no Santo Domingo: el proyecto se lanza
+    ahí. Es solo el punto de arranque mientras no hay GPS — apenas llega el
+    primer fix el mapa se centra en el usuario (`firstFix`). Ojo que
+    `DEFAULT_CENTER` está en `[lat, lng]` y MapLibre pide `[lng, lat]`.
   - Verificado con un stub de MapLibre + Playwright (16 chequeos: estilo,
     zoom, pines, círculo y su re-escalado, hoja de detalle, seguimiento,
     `dragstart`, flujo de "marca el lugar"), porque este sandbox bloquea
