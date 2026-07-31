@@ -61,8 +61,10 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   (`pathname === '/' → amet-radar.html`) así que en local no hace falta.
 - `supabase/migrations/*.sql` — copia versionada de las migraciones
   aplicadas por MCP (tabla `push_subscriptions`, trigger de notificaciones,
-  ver "Notificaciones push" abajo). El estado real de la base es el que
-  está en Supabase; estos archivos son documentación/histórico, no se
+  ver "Notificaciones push" abajo), más `20260729230000_reports_genesis.sql`
+  (la tabla `reports`, reconstruida retroactivamente — ver "Reconstruir la
+  base de datos desde cero" más abajo). El estado real de la base es el
+  que está en Supabase; estos archivos son documentación/histórico, no se
   vuelven a aplicar automáticamente.
 - `supabase/functions/notify-nearby/index.ts` — Edge Function que manda
   las notificaciones push (ver "Notificaciones push" abajo).
@@ -376,6 +378,71 @@ por medio.
   leyendo `#r=` también como fallback (por si queda algún link viejo
   compartido con el esquema anterior), pero todo lo que genera la app
   (botón compartir, `notificationclick` del service worker) ya usa `?r=`.
+
+## Reconstruir la base de datos desde cero (si hay que migrar de cuenta/proyecto)
+Todo el esquema de Supabase está versionado en `supabase/migrations/*.sql`
+y alcanza, en orden, para recrear la base entera en un proyecto nuevo —
+esto quedó completo recién en esta sesión: la tabla `reports` (la
+principal) predataba el versionado de migraciones y no estaba
+documentada; se agregó retroactivamente en
+`20260729230000_reports_genesis.sql` reconstruida a partir del esquema
+real (columnas, constraints, índices, políticas), justamente para que
+este paso no dependiera de memoria/algo sin documentar. Esto es
+documentación de **estructura**, no un backup de los datos que haya
+cargados en un momento dado — ver por qué al final de esta sección.
+
+**Orden de aplicación** (nombre de archivo = orden cronológico, ya
+ordena alfabéticamente bien):
+1. `20260729230000_reports_genesis.sql` — tabla `reports` (RLS abierta,
+   sin la que nada más tiene sentido)
+2. `20260730000000_push_subscriptions.sql` — tabla `push_subscriptions`,
+   extensión `pg_net`, función + trigger `notify_nearby_reports` sobre
+   `reports` (por eso va después del genesis)
+3. `20260730010000_push_subscriptions_categories.sql` — columna
+   `categories` en `push_subscriptions`
+4. `20260730180000_app_config.sql` — tabla `app_config` (parámetros del
+   panel admin)
+5. `20260730193000_admin_login_attempts.sql` — tabla
+   `admin_login_attempts` (rate-limit del login del panel admin)
+6. `20260730200000_report_photos_bucket.sql` — bucket de Storage
+   `report-photos` + políticas
+
+Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
+Editor del proyecto nuevo, en ese orden.
+
+**Lo que las migraciones NO cubren** (pasos manuales aparte, ya
+documentados donde corresponde pero listados acá juntos para no
+saltearse ninguno al migrar):
+- **Edge Functions**: `supabase/functions/notify-nearby/` y
+  `supabase/functions/admin-login/` hay que desplegarlas aparte
+  (`deploy_edge_function` o Supabase CLI) — el código fuente sí está en
+  el repo, solo el deploy es manual.
+- **Secrets de Edge Functions** (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+  `VAPID_SUBJECT`, `ADMIN_PASSWORD`): ninguna herramienta MCP conectada
+  permite setearlos, se cargan a mano en Project Settings → Edge
+  Functions → Secrets en el proyecto nuevo (ver "Notificaciones push" y
+  "Panel de administración" arriba).
+- **`SUPABASE_URL`/`SUPABASE_ANON_KEY` embebidos en el cliente**: están
+  hardcodeados en `amet-radar.html` y `admin.html` (buscar
+  `nikexwjxxcxzhsuypsjn` en ambos archivos) — al migrar a otro proyecto
+  hay que reemplazarlos ahí y volver a desplegar el frontend.
+- **`VAPID_PUBLIC_KEY`** también está embebido en `amet-radar.html`
+  (distinto de la privada, que solo va en el secret) — si se regeneran
+  las claves VAPID para el proyecto nuevo, hay que actualizarlo ahí
+  también.
+
+**Por qué esto es solo estructura y no backup de datos**: dado el perfil
+de esta app, casi ningún dato vale la pena preservar entre migraciones —
+`reports` se autoexpira a las `max_age_minutes` (6h por default) así que
+en cualquier momento dado son en su mayoría reportes recientes y
+efímeros; `app_config` son 5 números con default documentado acá mismo;
+`admin_login_attempts` es rate-limit transitorio. La única tabla con
+datos que un usuario real "perdería" al migrar sin exportar es
+`push_subscriptions` (la gente que ya se suscribió a notificaciones
+tendría que volver a activarlas) — si en algún momento eso importa, se
+exporta con el Table Editor de Supabase (Export as CSV) o `pg_dump`
+antes de migrar, no hace falta un mecanismo propio en el repo para algo
+que se usa una sola vez.
 
 ## Despliegue (Netlify)
 El frontend está publicado en **Netlify**, cuenta del dueño del proyecto
