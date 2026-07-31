@@ -318,6 +318,14 @@
   }
   .vote-btn b{ font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; }
   .vote-btn:active{ transform:scale(.96); }
+  /* Ya votaste: los dos botones quedan deshabilitados y el que elegiste se
+     marca con el color de marca. Antes se veían idénticos hubieras votado o
+     no, y solo te enterabas al tocarlos y recibir un "ya votaste" — el
+     estado existía en localStorage pero era invisible en pantalla. */
+  .vote-btn:disabled{ cursor:default; }
+  .vote-btn:disabled:not(.chosen){ opacity:.42; }
+  .vote-btn.chosen{ background:var(--surface); box-shadow: inset 0 0 0 2px var(--brand); }
+  .vote-btn.chosen span{ color:var(--brand); font-weight:700; }
   .mini-actions{ display:flex; gap:10px; margin-top:10px; }
   .mini-btn{
     flex:1; min-height:var(--tap); border-radius:var(--r-md);
@@ -364,9 +372,15 @@
 
   /* ---- Flujo de publicación ---- */
   .cat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
+  /* Cada opción lleva el color de su categoría: el mismo que ya usa en el
+     marcador del mapa, en el chip de filtro y en la etiqueta del detalle.
+     Antes las 4 eran cajas grises idénticas — el usuario aprendía los
+     colores en el mapa y al reportar no tenía ninguna pista visual, justo
+     en el momento en que más apura (a veces manejando). */
   .cat-option{
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px;
-    min-height:96px; background:var(--surface-2); border:1px solid var(--line);
+    min-height:96px; background:var(--cat-tint, var(--surface-2));
+    border:1.5px solid var(--cat-color, var(--line));
     border-radius:var(--r-lg); padding:14px 8px; cursor:pointer;
     color:var(--text); font-size:13.5px; font-weight:600; text-align:center;
     transition:transform .12s ease;
@@ -413,7 +427,16 @@
     animation: toast-in .22s ease;
   }
   .toast.warn{ background:var(--danger); color:#fff; }
+  /* Con una hoja abierta, el toast en su posición normal cae justo encima
+     del contenido de la hoja — al votar tapaba los propios botones de
+     votar, que es exactamente lo que acababa de cambiar. En ese caso se
+     muestra arriba, despejado. */
+  .toast.top{
+    bottom:auto; top: calc(env(safe-area-inset-top, 0px) + 92px);
+    animation: toast-in-top .22s ease;
+  }
   @keyframes toast-in{ from{ opacity:0; transform:translate(-50%, 8px); } to{ opacity:1; transform:translate(-50%, 0); } }
+  @keyframes toast-in-top{ from{ opacity:0; transform:translate(-50%, -8px); } to{ opacity:1; transform:translate(-50%, 0); } }
 
   #camera-input{ display:none; }
 
@@ -491,7 +514,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v10.6';
+  const APP_VERSION = 'v10.7';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -711,6 +734,17 @@
 
   function getVoted(){ try{ return new Set(JSON.parse(localStorage.getItem(VOTED_KEY)||'[]')); }catch(e){ return new Set(); } }
   function saveVoted(set){ localStorage.setItem(VOTED_KEY, JSON.stringify([...set])); }
+  // Además de "ya votó" (VOTED_KEY), se guarda EN QUÉ sentido, para poder
+  // mostrarlo en la hoja de detalle. Clave aparte y no un cambio de formato
+  // de VOTED_KEY, para no romper los votos ya guardados en los teléfonos
+  // que vienen usando la app (esos quedan sin dirección conocida, y ahí
+  // solo se deshabilitan los botones).
+  const VOTE_DIR_KEY = 'amet_vote_dir_v1';
+  function getVoteDirs(){ try{ return JSON.parse(localStorage.getItem(VOTE_DIR_KEY)||'{}'); }catch(e){ return {}; } }
+  function saveVoteDir(id, dir){
+    const m = getVoteDirs(); m[id] = dir;
+    try{ localStorage.setItem(VOTE_DIR_KEY, JSON.stringify(m)); }catch(e){}
+  }
   function getMine(){ try{ return new Set(JSON.parse(localStorage.getItem(MINE_KEY)||'[]')); }catch(e){ return new Set(); } }
   function saveMine(set){ localStorage.setItem(MINE_KEY, JSON.stringify([...set])); }
 
@@ -893,6 +927,8 @@
     const pending = pendingIds.has(id);
     const confirms = r.confirms || 0;
     const denies = r.denies || 0;
+    const yaVoto = getVoted().has(id);
+    const miVoto = getVoteDirs()[id] || null;
     return `
       <div class="grabber"></div>
       <div class="detail-head">
@@ -909,11 +945,11 @@
         <button class="mini-btn danger" data-action="cancel-pending" data-id="${id}">Cancelar reporte</button>
       </div>` : `
       <div class="votes">
-        <button class="vote-btn" data-action="confirm" data-id="${id}">
-          <b>👍 ${confirms}</b><span>Sigue ahí</span>
+        <button class="vote-btn${miVoto === 'confirm' ? ' chosen' : ''}" data-action="confirm" data-id="${id}"${yaVoto ? ' disabled' : ''}>
+          <b>👍 ${confirms}</b><span>${miVoto === 'confirm' ? 'Tu voto' : 'Sigue ahí'}</span>
         </button>
-        <button class="vote-btn" data-action="deny" data-id="${id}">
-          <b>👎 ${denies}</b><span>Ya no está</span>
+        <button class="vote-btn${miVoto === 'deny' ? ' chosen' : ''}" data-action="deny" data-id="${id}"${yaVoto ? ' disabled' : ''}>
+          <b>👎 ${denies}</b><span>${miVoto === 'deny' ? 'Tu voto' : 'Ya no está'}</span>
         </button>
       </div>
       <div class="mini-actions">
@@ -1456,7 +1492,7 @@
     if(action === 'confirm' || action === 'deny'){
       const voted = getVoted();
       if(voted.has(id)){ showToast('Ya votaste en este reporte'); return; }
-      voted.add(id); saveVoted(voted);
+      voted.add(id); saveVoted(voted); saveVoteDir(id, action);
       const confirms = (r.confirms||0) + (action === 'confirm' ? 1 : 0);
       const denies = (r.denies||0) + (action === 'deny' ? 1 : 0);
 
@@ -1636,7 +1672,10 @@
 
   function showToast(msg, warn){
     const t = document.createElement('div');
-    t.className = 'toast' + (warn ? ' warn' : '');
+    const detailEl2 = document.getElementById('detail');
+    const overlayEl2 = document.getElementById('flow-overlay');
+    const hojaAbierta = (detailEl2 && !detailEl2.hidden) || (overlayEl2 && !overlayEl2.hidden);
+    t.className = 'toast' + (warn ? ' warn' : '') + (hojaAbierta ? ' top' : '');
     t.textContent = msg;
     document.getElementById('app').appendChild(t);
     setTimeout(()=> t.remove(), 2600);
@@ -1707,7 +1746,7 @@
 
   function askForCategoryQuick(){
     const options = Object.entries(CATEGORIES).map(([key, cat]) => `
-      <button class="cat-option" data-cat="${key}">
+      <button class="cat-option" data-cat="${key}" style="--cat-color:${cat.hex};--cat-tint:${hexTint(cat.hex, 0.14)}">
         <span class="emoji">${cat.emoji}</span>
         <span>${cat.label}</span>
       </button>
@@ -1811,7 +1850,7 @@
   function askForCategory(){
     overlay.classList.remove('picking');
     const options = Object.entries(CATEGORIES).map(([key, cat]) => `
-      <button class="cat-option" data-cat="${key}">
+      <button class="cat-option" data-cat="${key}" style="--cat-color:${cat.hex};--cat-tint:${hexTint(cat.hex, 0.14)}">
         <span class="emoji">${cat.emoji}</span>
         <span>${cat.label}</span>
       </button>

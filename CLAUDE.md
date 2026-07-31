@@ -543,6 +543,26 @@ por medio.
     reportes sin que se entienda por qué. La hoja trae "Ver todas" para
     restaurar de un toque. Verificado con Playwright que en la franja donde
     estaban los chips ahora el toque llega directo al mapa.
+  - **El color de la categoría se usa también al reportar** (v10.7): las
+    opciones de `askForCategory`/`askForCategoryQuick` llevan el `hex` de
+    su categoría (borde + tinte de fondo), el mismo que ya usan el
+    marcador, el chip de filtro y la etiqueta del detalle. Antes eran 4
+    cajas grises idénticas: el usuario aprendía los colores en el mapa y al
+    reportar no tenía ninguna pista visual, justo en el momento en que más
+    apura (a veces manejando).
+  - **El voto emitido es visible** (v10.7): tras votar, los dos botones
+    quedan `disabled` y el elegido se marca ("Tu voto" + anillo de marca).
+    Antes se veían idénticos hubieras votado o no — el estado existía en
+    `localStorage` pero era invisible, y solo te enterabas al tocar y
+    recibir un "ya votaste". La dirección del voto va en una clave nueva
+    (`amet_vote_dir_v1`) y no cambiando el formato de `amet_voted_v1`, para
+    no romper los votos ya guardados en los teléfonos que vienen usando la
+    app (esos quedan sin dirección conocida: se deshabilitan los dos
+    botones y no se marca ninguno).
+  - **El toast se va arriba cuando hay una hoja abierta** (`.toast.top`,
+    v10.7): en su posición normal caía sobre el contenido de la hoja — al
+    votar tapaba los propios botones de votar, o sea justo lo que acababa
+    de cambiar.
   - **Categorías**: `CATEGORIES` tiene `hex` (color plano, lo aplican inline
     el marcador y el círculo de zona, y también los chips) e `ink` (color de texto
     legible encima de ese hex). Ya no existe el campo `color` con
