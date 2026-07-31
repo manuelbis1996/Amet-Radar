@@ -495,41 +495,84 @@ exporta con el Table Editor de Supabase (Export as CSV) o `pg_dump`
 antes de migrar, no hace falta un mecanismo propio en el repo para algo
 que se usa una sola vez.
 
-## Despliegue (Netlify)
-El frontend está publicado en **Netlify**, cuenta del dueño del proyecto
-(`manuelbis1996@gmail.com`, team `manuelbis1996`, plan Free).
-- **URL pública**: https://amet-radar.netlify.app
+## Despliegue — migración de Netlify a Cloudflare Pages (en curso)
+El frontend estuvo publicado en **Netlify** (cuenta `manuelbis1996@gmail.com`,
+team `manuelbis1996`, plan Free) hasta que se agotó la franja gratuita
+(banda ancha/build minutes) y el sitio quedó caído. Se decidió migrar a
+**Cloudflare Pages** (plan Free, sin límite de banda ancha, a diferencia de
+Netlify) en vez de agregar un método de pago. El repo ya tiene preparado
+todo lo que se puede hacer desde código; falta el alta de la cuenta/proyecto
+en el dashboard de Cloudflare, que es un paso manual (no hay MCP de
+Cloudflare conectado a este proyecto ni credenciales en el entorno).
+
+### Lo que ya está listo en el repo
+- **`functions/_middleware.js`** — puerto del preview dinámico por reporte
+  (antes `netlify/edge-functions/report-preview.ts`) al modelo de Cloudflare
+  Pages Functions: un `_middleware.js` en la raíz de `/functions` corre
+  para toda request al sitio (en vez del `export const config = { path:
+  [...] }` de Netlify), con un `if` al principio que deja pasar
+  (`next()`) cualquier ruta que no sea `/` o `/amet-radar.html`. Misma
+  lógica de bots/Supabase que la versión Netlify, verificada con un test
+  funcional local (`node` + fetch mockeado) que confirma los 4 casos de
+  passthrough (`next()`); el caso "bot + reporte real" no se pudo probar
+  end-to-end en este sandbox (red bloqueada hacia Supabase), pero el
+  código es una traducción 1:1 de la versión que sí se verificó en
+  producción — igual conviene probarlo a mano con `curl -A "whatsapp"
+  https://amet-radar.pages.dev/?r=<id-real>` una vez desplegado. Mejora
+  sobre la versión Netlify: `SITE_URL` ya no está hardcodeado, se deriva
+  de `url.origin` de cada request — así funciona igual en el dominio de
+  producción y en cualquier preview deploy de Cloudflare (cada rama/PR
+  tiene su propia URL `*.pages.dev`) sin tocar código.
+- **`_redirects`**: Cloudflare Pages soporta el mismo formato que Netlify
+  (`/  /amet-radar.html  200` como rewrite) — no hizo falta cambiar nada,
+  el archivo ya sirve para ambos.
+- **`amet-radar.html`**: los meta tags OG/Twitter genéricos del `<head>`
+  (`og:url`, `og:image`, `twitter:image`) ya apuntan a
+  `https://amet-radar.pages.dev/` — **asumiendo que el proyecto en
+  Cloudflare se crea con el nombre `amet-radar`** (los nombres de proyecto
+  en Cloudflare Pages son determinísticos: `<nombre-proyecto>.pages.dev`,
+  a diferencia de Netlify que generaba uno al azar). Si al crear el
+  proyecto ese nombre ya está tomado y Cloudflare asigna otro, hay que
+  actualizar esas 3 URLs a mano.
+- **`netlify/edge-functions/report-preview.ts`**: se dejó intacto (no se
+  borró) porque Netlify puede seguir siendo el sitio en vivo hasta que se
+  confirme el corte a Cloudflare — limpiarlo una vez confirmado que
+  Cloudflare Pages ya sirve producción.
+
+### Pasos manuales pendientes (dashboard de Cloudflare, no automatizables desde acá)
+1. Crear cuenta en Cloudflare (o usar una existente) → **Workers & Pages**
+   → **Create application** → **Pages** → **Connect to Git** →
+   `manuelbis1996/Amet-Radar`.
+2. Configuración de build: **Framework preset: None**, **Build command:
+   (vacío)**, **Build output directory: `/`** (el sitio es estático en la
+   raíz del repo, sin build step — mismo criterio que Netlify). Rama de
+   producción: `main`.
+3. Cloudflare detecta `/functions` solo (no requiere config extra tipo
+   `wrangler.toml` para Pages Functions básicas).
+4. Confirmar la URL asignada (`https://<nombre-proyecto>.pages.dev`) — si
+   no es `amet-radar.pages.dev`, actualizar los 3 meta tags de
+   `amet-radar.html` mencionados arriba.
+5. Nada que tocar en Supabase: RLS de `reports`/`app_config` ya es
+   abierta y el Edge Function `admin-login` ya manda
+   `Access-Control-Allow-Origin: *`, así que `admin.html` funciona desde
+   cualquier dominio sin cambios (ver "API de Supabase" y "Panel de
+   administración" arriba).
+6. Una vez confirmado que Cloudflare Pages sirve todo correctamente
+   (mapa, reportes, notificaciones push, panel admin, preview dinámico):
+   borrar `netlify/edge-functions/`, actualizar esta sección para que
+   describa solo Cloudflare (no ambos), y considerar pausar/borrar el
+   sitio en Netlify.
+
+### Estado histórico de Netlify (referencia, hasta que se complete el corte)
 - **Site ID**: `8958378d-0be4-42bb-ab5c-4ba7e3181dd8` (nombre del sitio:
-  `amet-radar`)
-- **Conectado al repo de GitHub** (`manuelbis1996/Amet-Radar`) con
-  auto-deploy: cada push a la **rama de producción configurada en Netlify**
-  dispara un build/deploy solo. Importante: por un rato quedó apuntando a
-  una rama de trabajo (`claude/project-analysis-g7rbe9`) en vez de `main`,
-  lo que hizo que el sitio en vivo perdiera temporalmente las
-  notificaciones push y el preview dinámico (ambos solo existían en
-  `main`) — confirmar en el dashboard (`Project configuration → Build &
-  deploy → Continuous deployment`) que la rama de producción sea `main`
-  antes de asumir que un merge a `main` se refleja solo.
-- **Deploy manual** (alternativa si hace falta forzar uno fuera del flujo
-  de git): usar el MCP de Netlify (herramienta
-  `netlify-deploy-services-updater`, operación `deploy-site` con ese
-  `siteId`) o, equivalente en CLI, `npx -y netlify-cli deploy --prod
-  --site 8958378d-0be4-42bb-ab5c-4ba7e3181dd8 --dir .` desde la raíz del
-  proyecto.
-- **Control de acceso**: los proyectos nuevos de Netlify vienen con
-  "team protection" (SSO login) activado por defecto, lo que bloquea a
-  cualquier visitante público — se desactivó explícitamente
-  (`requireSSOTeamLogin: false`) porque esta es una app pública sin
-  autenticación de usuarios.
-- **`_redirects`**: necesario para que `/` sirva `amet-radar.html` (ver
-  "Archivos" arriba) — sin este archivo Netlify tira 404 en la raíz.
+  `amet-radar`), conectado a `manuelbis1996/Amet-Radar` con auto-deploy
+  desde `main`.
 - **`ADMIN_PASSWORD` como env var de Netlify quedó sin uso**: se configuró
   durante un intento anterior de portar el panel admin a Netlify
   Functions + Blobs, arquitectura que se descartó (ver "Panel de
   administración" arriba). El `ADMIN_PASSWORD` que de verdad usa
-  `admin.html` hoy es un **secret de Supabase** (Project Settings → Edge
-  Functions → Secrets), no una env var de Netlify — son proyectos y
-  mecanismos distintos, no confundirlos.
+  `admin.html` es un **secret de Supabase** (Project Settings → Edge
+  Functions → Secrets), no una env var de Netlify.
 
 Mejoras posteriores, no bloqueantes: reemplazar las políticas RLS abiertas
 de Supabase por algo más restrictivo si se agrega autenticación, y mover

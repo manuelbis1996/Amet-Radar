@@ -20,9 +20,10 @@ const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 15 * 60 * 1000;
 const LOCK_MS = 15 * 60 * 1000;
 
-// admin.html corre en amet-radar.netlify.app y llama a este Edge Function
-// en *.supabase.co — origen distinto, a diferencia de notify-nearby (que
-// solo lo llama un trigger de Postgres, servidor a servidor, nunca un
+// admin.html corre en el hosting estático del proyecto (Netlify o
+// Cloudflare Pages, ver CLAUDE.md) y llama a este Edge Function en
+// *.supabase.co — origen distinto, a diferencia de notify-nearby (que solo
+// lo llama un trigger de Postgres, servidor a servidor, nunca un
 // navegador). PostgREST agrega CORS solo automáticamente; los Edge
 // Functions no, hay que manejar el preflight OPTIONS a mano.
 const CORS_HEADERS = {
