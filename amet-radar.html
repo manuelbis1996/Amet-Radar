@@ -2,8 +2,9 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#12141a">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)">
 <meta name="description" content="Reportes comunitarios de retenes de tránsito en tiempo real en Santo Domingo.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="AMET Radar">
@@ -21,338 +22,360 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   /*
-    Identidad: "instrumental de retén nocturno" — un tablero tipo HUD de
-    auto, no un mapa turístico. Fondo frío casi negro (para no deslumbrar
-    de noche) contra un ámbar de baliza como único acento cálido.
-    Display: Big Shoulders (condensado/industrial, letrero de carretera).
-    UI/cuerpo: IBM Plex Sans. Datos tabulares (hora, contador, votos):
-    IBM Plex Mono — números de instrumento, no de blog.
+    Diseño: el mapa ES la app. Todo lo demás flota encima en superficies
+    limpias, para no robarle alto a la pantalla en un teléfono — que es
+    donde se va a usar casi siempre, muchas veces con una sola mano y de
+    reojo mientras se maneja.
+
+    Tema automático (prefers-color-scheme): claro de día, para que se lea
+    con sol; oscuro de noche, para no encandilar. Los tiles del mapa
+    cambian con el tema también (ver applyTiles más abajo, en el JS).
+
+    Reglas que se respetan en todo el archivo:
+    - Ningún control primario mide menos de var(--tap) = 44px de alto.
+    - Todo lo que flota respeta las safe areas (muesca y barra de gestos).
+    - Un solo acento (--brand) para la acción principal; el resto del
+      color lo aportan las categorías de reporte, nunca la decoración.
   */
   :root{
-    --ink: #12141a;
-    --panel: #191d24;
-    --panel-2: #20252e;
-    --line: #2a303b;
-    --amber: #ffb020;
-    --amber-dim: #c98a1c;
-    --signal: #f4f1ea;
-    --muted: #8a92a1;
-    --teal: #34c9a8;
-    --alert: #ff5d3a;
-    --blue: #4f9bf0;
-    --font-display: 'Big Shoulders Display', sans-serif;
-    --font-body: 'IBM Plex Sans', sans-serif;
-    --font-mono: 'IBM Plex Mono', monospace;
+    --brand:#f59e0b;   --on-brand:#1b1206;
+    --bg:#e9ecef;
+    --surface:#ffffff;
+    --surface-2:#f2f4f7;
+    --text:#15171c;
+    --muted:#6b7280;
+    --line:#e3e6ea;
+    --danger:#d92d20;
+    --info:#2563eb;
+    --scrim:rgba(15,17,22,.45);
+    --shadow-1:0 1px 2px rgba(16,18,25,.07), 0 4px 14px rgba(16,18,25,.11);
+    --shadow-2:0 10px 34px rgba(16,18,25,.20);
+    --font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --r-md:14px; --r-lg:20px; --r-xl:26px;
+    --tap:44px;
   }
-  *{ box-sizing: border-box; }
-  html,body{ margin:0; padding:0; height:100%; background:var(--ink); font-family:var(--font-body); color:var(--signal); overflow:hidden; }
-  #app{ position:relative; width:100%; height:100vh; height:100dvh; display:flex; flex-direction:column; }
-  ::selection{ background:var(--amber); color:var(--ink); }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --brand:#ffb020; --on-brand:#14161a;
+      --bg:#0e1014;
+      --surface:#171a21;
+      --surface-2:#212630;
+      --text:#f2f3f5;
+      --muted:#9aa2ae;
+      --line:#2a2f3a;
+      --danger:#ff6b5e;
+      --info:#5b9cff;
+      --scrim:rgba(0,0,0,.58);
+      --shadow-1:0 1px 2px rgba(0,0,0,.42), 0 4px 16px rgba(0,0,0,.48);
+      --shadow-2:0 12px 36px rgba(0,0,0,.62);
+    }
+  }
 
-  /* Header: barra HUD translúcida flotando sobre el mapa, con una franja
-     de cinta de precaución (rayada) como remate en vez de un borde plano. */
-  header{
-    background: rgba(18,20,26,0.78);
-    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
-    padding: 14px 16px 15px;
-    display:flex; align-items:center; justify-content:space-between;
-    z-index: 500; flex-shrink:0; position:relative;
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{
+    margin:0; padding:0; height:100%; background:var(--bg);
+    font-family:var(--font); color:var(--text); overflow:hidden;
+    -webkit-font-smoothing:antialiased;
   }
-  header::after{
-    content:''; position:absolute; left:0; right:0; bottom:0; height:3px;
-    background: repeating-linear-gradient(135deg, var(--amber) 0 10px, transparent 10px 20px);
-  }
-  .brand{ display:flex; align-items:center; gap:11px; }
-  .brand-mark{
-    width:36px; height:36px; border-radius:9px; flex-shrink:0;
-    background: var(--panel-2); border:1px solid var(--line);
-    position:relative; overflow:hidden;
-  }
-  .brand-mark::before{
-    content:''; position:absolute; inset:0;
-    background: conic-gradient(from 0deg, transparent 0deg 270deg, var(--amber) 330deg, transparent 360deg);
-    animation: radar-spin 2.4s linear infinite;
-  }
-  .brand-mark::after{
-    content:''; position:absolute; top:50%; left:50%; width:5px; height:5px; margin:-2.5px 0 0 -2.5px;
-    border-radius:50%; background:var(--amber); box-shadow:0 0 6px 1px rgba(255,176,32,0.85);
-  }
-  @keyframes radar-spin{ to{ transform: rotate(360deg); } }
-  .brand h1{
-    font-family:var(--font-display); font-weight:700; letter-spacing:0.2px;
-    font-size:21px; margin:0; text-transform:uppercase; line-height:1;
-  }
-  .brand p{ margin:2px 0 0; font-size:11px; color:var(--muted); letter-spacing:0.2px; }
-  .version-tag{ font-family:var(--font-mono); font-size:9px; opacity:.65; margin-left:4px; }
-  .stat{
-    font-family:var(--font-mono); text-align:right; font-size:9.5px; color:var(--muted);
-    letter-spacing:0.5px; text-transform:uppercase;
-  }
-  .stat b{
-    color:var(--amber); font-size:21px; display:block; line-height:1.15;
-    font-variant-numeric:tabular-nums; font-weight:600;
-  }
-  .header-actions{ display:flex; align-items:center; gap:12px; }
-  #push-toggle-btn{
-    width:34px; height:34px; border-radius:50%; flex-shrink:0;
-    background: rgba(32,37,46,0.85); border:1px solid var(--line); color:var(--muted);
-    display:flex; align-items:center; justify-content:center;
-    cursor:pointer; transition: transform 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-  }
-  #push-toggle-btn svg{ width:16px; height:16px; }
-  #push-toggle-btn:active{ transform:scale(0.9); }
-  #push-toggle-btn[data-state="active"]{ color:var(--amber); border-color:var(--amber-dim); }
-  #push-toggle-btn[data-state="loading"]{ opacity:.55; cursor:default; }
-  #push-toggle-btn[hidden]{ display:none; }
+  #app{ position:fixed; inset:0; }
+  ::selection{ background:var(--brand); color:var(--on-brand); }
+  button{ font-family:inherit; }
 
-  /* Filter chips */
-  #filters{
-    display:flex; gap:8px; padding:11px 16px; overflow-x:auto;
-    background: linear-gradient(to bottom, rgba(18,20,26,0.6), rgba(18,20,26,0));
-    flex-shrink:0; -webkit-overflow-scrolling:touch; position:relative; z-index:490;
-  }
-  #filters::-webkit-scrollbar{ display:none; }
-  .chip{
-    display:flex; align-items:center; gap:6px; white-space:nowrap;
-    padding:8px 14px; border-radius:999px; border:1px solid var(--line);
-    background:rgba(32,37,46,0.85); color:var(--muted);
-    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-    font-family:var(--font-display); font-weight:600; font-size:12.5px; letter-spacing:0.3px; text-transform:uppercase;
-    cursor:pointer; user-select:none; transition:background .15s ease, color .15s ease, border-color .15s ease, transform .1s ease;
-  }
-  .chip:active{ transform:scale(0.96); }
-  .chip[aria-pressed="true"]{ background:var(--chip-color,var(--amber)); color:var(--ink); border-color:var(--chip-color,var(--amber)); }
-
-  /* Map */
-  #map{ flex:1; background:#e8e6e1; position:relative; }
-  .leaflet-container{ background:#e8e6e1; }
+  /* ---- Mapa: capa base, ocupa todo ---- */
+  #map{ position:absolute; inset:0; z-index:0; background:var(--bg); }
+  .leaflet-container{ background:var(--bg); font-family:var(--font); }
 
   #map-loader{
-    position:absolute; inset:0; z-index:450;
-    background: radial-gradient(circle at 50% 45%, rgba(24,27,34,0.4), rgba(12,14,18,0.9));
+    position:absolute; inset:0; z-index:450; background:var(--bg);
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
-    font-family:var(--font-display); font-weight:600; font-size:12px; color:var(--muted); letter-spacing:0.4px; text-transform:uppercase;
+    font-size:13.5px; font-weight:500; color:var(--muted);
   }
   #map-loader[hidden]{ display:none; }
 
-  /* Radar sweep: reemplaza el spinner genérico; el mismo motivo se usa en
-     el loader de pantalla completa y, en tamaño chico, dentro de las hojas
-     (compresión de foto, publicación) para que todo el "esperar" de la app
-     se sienta como una sola cosa reconocible. */
   .radar-sweep{
-    width:64px; height:64px; border-radius:50%; position:relative; flex-shrink:0;
-    border:1px solid rgba(255,176,32,0.22);
-    background: radial-gradient(circle, rgba(255,176,32,0.07) 0%, transparent 72%);
+    width:40px; height:40px; border-radius:50%; flex-shrink:0;
+    border:3px solid var(--line); border-top-color:var(--brand);
+    animation: spin .9s linear infinite;
   }
-  .radar-sweep::before{
-    content:''; position:absolute; inset:9px; border-radius:50%; border:1px solid rgba(255,176,32,0.18);
-  }
-  .radar-sweep::after{
-    content:''; position:absolute; inset:0; border-radius:50%;
-    background: conic-gradient(from 0deg, transparent 0deg, rgba(255,176,32,0.6) 40deg, transparent 95deg);
-    animation: radar-spin 1.5s linear infinite;
-  }
-  .radar-sweep.small{ width:22px; height:22px; margin:4px 0 0; }
-  .radar-sweep.small::before{ inset:3px; }
+  .radar-sweep.small{ width:22px; height:22px; border-width:2.5px; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
 
-  /* Marcador: rombo de señal de precaución en vez de pin genérico —
-     centrado sobre el punto, sin "cola" que apunte, como un ícono de
-     instrumento más que un alfiler de mapa turístico. */
-  .amet-pin{
-    width:34px; height:34px;
+  /* ---- Barra superior flotante ----
+     El contenedor no intercepta toques (pointer-events:none) para que se
+     pueda arrastrar el mapa por los huecos entre las píldoras; solo los
+     controles reales reciben el toque. */
+  #top{
+    position:absolute; top:0; left:0; right:0; z-index:500;
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 0;
+    display:flex; flex-direction:column; gap:9px;
+    pointer-events:none;
+  }
+  .topbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .brand{
+    pointer-events:auto;
+    display:flex; align-items:center; gap:9px; min-height:var(--tap);
+    background:var(--surface); border-radius:999px; padding:0 15px 0 11px;
+    box-shadow:var(--shadow-1);
+  }
+  .brand-dot{
+    width:9px; height:9px; border-radius:50%; background:var(--brand); flex-shrink:0;
+    box-shadow:0 0 0 4px rgba(245,158,11,.18);
+  }
+  .brand-name{ font-size:15px; font-weight:700; letter-spacing:-.2px; white-space:nowrap; }
+  .version-tag{ font-size:10px; font-weight:500; color:var(--muted); margin-left:1px; }
+  .brand-count{
+    display:inline-flex; align-items:center; gap:4px; margin-left:2px;
+    padding-left:10px; border-left:1px solid var(--line);
+    font-size:12px; color:var(--muted); white-space:nowrap;
+  }
+  .brand-count b{ font-size:14px; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
+
+  #push-toggle-btn{
+    pointer-events:auto; flex-shrink:0;
+    width:var(--tap); height:var(--tap); border-radius:50%;
+    background:var(--surface); border:none; color:var(--muted);
+    box-shadow:var(--shadow-1);
     display:flex; align-items:center; justify-content:center;
-    filter: drop-shadow(0 3px 7px rgba(0,0,0,0.55));
+    cursor:pointer; transition:transform .14s ease, color .14s ease;
+  }
+  #push-toggle-btn svg{ width:19px; height:19px; }
+  #push-toggle-btn:active{ transform:scale(.9); }
+  #push-toggle-btn[data-state="active"]{ color:var(--brand); }
+  #push-toggle-btn[data-state="loading"]{ opacity:.5; cursor:default; }
+  #push-toggle-btn[hidden]{ display:none; }
+
+  /* ---- Chips de filtro ---- */
+  #filters{
+    display:flex; gap:8px; overflow-x:auto; padding:1px 0 5px;
+    -webkit-overflow-scrolling:touch; scrollbar-width:none;
+  }
+  #filters::-webkit-scrollbar{ display:none; }
+  .chip{
+    pointer-events:auto; flex-shrink:0;
+    display:inline-flex; align-items:center; gap:6px; min-height:40px;
+    padding:0 15px; border-radius:999px; border:none;
+    background:var(--surface); color:var(--text); box-shadow:var(--shadow-1);
+    font-size:13px; font-weight:600; white-space:nowrap; cursor:pointer;
+    transition:transform .12s ease, opacity .15s ease;
+  }
+  .chip:active{ transform:scale(.95); }
+  /* Activo = tinte suave del color de la categoría + anillo de ese color.
+     Rellenarlos a full saturación se veía como una pared de color, porque
+     las 4 categorías arrancan activas. El tinte lo calcula el JS a partir
+     del hex (--chip-tint) porque en CSS haría falta color-mix(). */
+  .chip[aria-pressed="true"]{
+    background-image:linear-gradient(var(--chip-tint, transparent), var(--chip-tint, transparent));
+    box-shadow:var(--shadow-1), inset 0 0 0 1.5px var(--chip-color, var(--brand));
+  }
+  .chip[aria-pressed="false"]{ opacity:.5; }
+
+  /* ---- Marcadores ---- */
+  .amet-pin{
+    width:38px; height:38px; display:flex; align-items:center; justify-content:center;
+    filter: drop-shadow(0 3px 6px rgba(0,0,0,.32));
   }
   .amet-pin .badge{
-    width:25px; height:25px; border-radius:6px;
-    transform: rotate(45deg);
-    background: var(--amber);
-    border: 2px solid var(--ink);
-    display:flex; align-items:center; justify-content:center;
+    width:36px; height:36px; border-radius:50%;
+    border:3px solid var(--surface);
+    display:flex; align-items:center; justify-content:center; font-size:16px;
   }
-  .amet-pin .badge span{ transform: rotate(-45deg); font-size:13px; }
-  .amet-pin.stale .badge{ background: var(--muted); }
-  .amet-pin.pending .badge{ opacity:.55; border-style:dashed; }
+  .amet-pin.stale .badge{ filter:grayscale(1); opacity:.7; }
+  .amet-pin.pending .badge{ opacity:.6; border-style:dashed; }
 
-  /* "Me" marker */
   .me-marker{ width:22px; height:22px; }
   .me-dot{
-    width:16px; height:16px; border-radius:50%; background:var(--blue);
-    border:3px solid #fff; box-shadow:0 0 0 4px rgba(79,155,240,0.35);
+    width:16px; height:16px; border-radius:50%; background:var(--info);
+    border:3px solid #fff; box-shadow:0 0 0 4px rgba(37,99,235,.30);
     animation: me-pulse 2s ease-out infinite;
   }
   @keyframes me-pulse{
-    0%{ box-shadow:0 0 0 4px rgba(79,155,240,0.35); }
-    70%{ box-shadow:0 0 0 12px rgba(79,155,240,0); }
-    100%{ box-shadow:0 0 0 4px rgba(79,155,240,0); }
+    0%{ box-shadow:0 0 0 4px rgba(37,99,235,.30); }
+    70%{ box-shadow:0 0 0 13px rgba(37,99,235,0); }
+    100%{ box-shadow:0 0 0 4px rgba(37,99,235,0); }
   }
 
-  .leaflet-popup-content-wrapper{
-    background: var(--panel-2); color: var(--signal); border-radius: 14px;
-    box-shadow: 0 14px 32px rgba(0,0,0,0.5);
-  }
-  .leaflet-popup-tip{ background: var(--panel-2); }
-  .popup-card{ font-family:var(--font-body); width:216px; }
-  .popup-card img{ width:100%; border-radius:8px; display:block; margin-bottom:8px; aspect-ratio:4/3; object-fit:cover; }
-  .popup-card .cat-label{
-    display:inline-block; font-family:var(--font-display); font-weight:700; font-size:10.5px; letter-spacing:0.3px;
-    text-transform:uppercase; padding:3px 9px; border-radius:999px; color:var(--ink);
-    background:var(--amber); margin-bottom:8px;
-  }
-  .popup-card .time{
-    font-size:11px; color:var(--amber); font-family:var(--font-mono); letter-spacing:0.2px;
-    font-variant-numeric:tabular-nums;
-  }
-  .popup-card .note{ font-size:12.5px; color:var(--muted); margin-top:5px; line-height:1.4; }
-  .popup-card .votes{ display:flex; gap:6px; margin-top:11px; }
-  .vote-btn{
-    flex:1; display:flex; align-items:center; justify-content:center; gap:5px;
-    background:var(--panel); border:1px solid var(--line); color:var(--signal);
-    border-radius:10px; padding:7px 4px; font-size:11.5px; font-weight:500; cursor:pointer; font-family:var(--font-body);
-    transition: transform .1s ease;
-  }
-  .vote-btn:active{ transform:scale(0.95); }
-  .vote-btn.deny{ color:#ffab8f; }
-  .vote-btn.confirm{ color:#7fe4c9; }
-  .popup-card .mini-actions{ display:flex; gap:6px; margin-top:8px; }
-  .mini-btn{
-    flex:1; background:transparent; border:1px solid var(--line); color:var(--muted);
-    border-radius:10px; padding:7px 4px; font-size:10.5px; cursor:pointer; font-family:var(--font-display); font-weight:600;
-    text-transform:uppercase; letter-spacing:0.3px;
-  }
-  .mini-btn.danger{ color:var(--alert); border-color:rgba(255,93,58,0.4); }
-
-  /* FAB row: barra de vidrio flotante sobre el mapa */
+  /* ---- Botones flotantes inferiores ---- */
   #fab-row{
-    position:absolute; left:0; right:0; bottom:calc(20px + env(safe-area-inset-bottom, 0px));
-    display:flex; align-items:center; justify-content:center; gap:12px;
-    z-index:400; padding:0 16px;
+    position:absolute; left:0; right:0; z-index:400;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    display:flex; align-items:center; justify-content:center; gap:12px; padding:0 16px;
   }
   #locate-btn{
-    width:50px; height:50px; border-radius:50%; flex-shrink:0;
-    background: rgba(25,29,36,0.85); border:1px solid var(--line); color:var(--signal);
-    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    width:52px; height:52px; border-radius:50%; flex-shrink:0; border:none;
+    background:var(--surface); color:var(--text); box-shadow:var(--shadow-1);
     display:flex; align-items:center; justify-content:center;
-    cursor:pointer; box-shadow:0 6px 18px rgba(0,0,0,0.45);
-    transition: transform 0.15s ease;
+    cursor:pointer; transition:transform .14s ease;
   }
-  #locate-btn svg{ width:20px; height:20px; }
-  #locate-btn:active{ transform:scale(0.92); }
+  #locate-btn svg{ width:21px; height:21px; }
+  #locate-btn:active{ transform:scale(.92); }
   #report-btn{
-    background: linear-gradient(135deg, var(--amber), var(--amber-dim));
-    color: var(--ink);
-    border:none; border-radius: 999px;
-    padding: 14px 26px;
-    font-family:var(--font-display); font-weight:700; font-size:14.5px; letter-spacing:0.3px; text-transform:uppercase;
+    min-height:56px; padding:0 26px; border:none; border-radius:999px;
+    background:var(--brand); color:var(--on-brand);
+    font-size:15.5px; font-weight:700; letter-spacing:-.1px;
     display:flex; align-items:center; gap:9px;
-    box-shadow: 0 8px 22px rgba(255,176,32,0.28), 0 2px 6px rgba(0,0,0,0.4);
-    cursor:pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow:var(--shadow-2); cursor:pointer;
+    transition:transform .14s ease;
   }
-  #report-btn svg{ width:18px; height:18px; flex-shrink:0; }
-  #report-btn:active{ transform: scale(0.96); }
-  #report-btn:disabled{ background: var(--line); color: var(--muted); cursor:default; box-shadow:none; }
+  #report-btn svg{ width:19px; height:19px; flex-shrink:0; }
+  #report-btn:active{ transform:scale(.96); }
+  #report-btn:disabled{ background:var(--surface-2); color:var(--muted); box-shadow:none; cursor:default; }
 
-  /* Overlay flow */
-  #flow-overlay{
-    position:absolute; inset:0; background: rgba(10,12,16,0.78);
+  /* ---- Hojas inferiores (detalle de reporte y flujo de publicación) ---- */
+  #detail, #flow-overlay{
+    position:absolute; inset:0; z-index:1000;
     display:flex; align-items:flex-end; justify-content:center;
-    z-index:1000;
+    background:var(--scrim);
+    -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px);
   }
-  #flow-overlay[hidden]{ display:none; }
-  .sheet{
-    background: var(--panel-2); width:100%; max-width:480px;
-    border-radius: 20px 20px 0 0;
-    padding: 22px 20px calc(28px + env(safe-area-inset-bottom, 0px));
-    position:relative; overflow:hidden;
-    box-shadow: 0 -12px 40px rgba(0,0,0,0.5);
+  #detail[hidden], #flow-overlay[hidden]{ display:none; }
+  /* Mientras se elige el punto en el mapa ("Marca el lugar") el overlay
+     tiene que dejar ver Y tocar el mapa: sin scrim ni desenfoque, solo la
+     hoja de instrucciones abajo. */
+  #flow-overlay.picking{ background:transparent; -webkit-backdrop-filter:none; backdrop-filter:none; }
+  .detail-backdrop{ position:absolute; inset:0; }
+
+  .sheet, .detail-panel{
+    position:relative; background:var(--surface);
+    width:100%; max-width:520px;
+    border-radius:var(--r-xl) var(--r-xl) 0 0;
+    padding:9px 18px calc(env(safe-area-inset-bottom, 0px) + 18px);
+    max-height:86dvh; overflow-y:auto; -webkit-overflow-scrolling:touch;
+    box-shadow:var(--shadow-2);
+    animation: sheet-up .24s cubic-bezier(.22,1,.36,1);
   }
-  .sheet::before{
-    content:''; position:absolute; top:0; left:0; right:0; height:4px;
-    background: repeating-linear-gradient(135deg, var(--amber) 0 12px, var(--ink) 12px 24px);
-  }
-  .sheet h2{
-    font-family:var(--font-display); font-weight:700; font-size:19px; margin:0 0 4px; text-transform:uppercase; letter-spacing:0.2px;
-  }
-  .sheet p.sub{ margin:0 0 16px; font-size:13px; color:var(--muted); line-height:1.45; }
+  @keyframes sheet-up{ from{ transform:translateY(18px); opacity:.5; } to{ transform:none; opacity:1; } }
+  .grabber{ width:38px; height:4px; border-radius:999px; background:var(--line); margin:2px auto 14px; }
+
+  .sheet h2{ font-size:19px; font-weight:700; letter-spacing:-.3px; margin:0 0 5px; }
+  .sheet p.sub{ margin:0 0 16px; font-size:14px; color:var(--muted); line-height:1.45; }
   .row-center{ display:flex; align-items:center; gap:12px; }
 
+  /* ---- Detalle del reporte ---- */
+  .detail-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+  .cat-label{
+    display:inline-flex; align-items:center; gap:6px;
+    padding:7px 13px; border-radius:999px;
+    font-size:13px; font-weight:700; letter-spacing:-.1px;
+  }
+  .detail-close{
+    width:36px; height:36px; flex-shrink:0; border:none; border-radius:50%;
+    background:var(--surface-2); color:var(--muted);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .detail-close svg{ width:17px; height:17px; }
+  .detail-photo{
+    width:100%; display:block; margin-bottom:13px;
+    border-radius:var(--r-md); aspect-ratio:4/3; object-fit:cover; background:var(--surface-2);
+  }
+  .detail-meta{ font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .detail-note{ font-size:15.5px; line-height:1.45; margin-top:7px; }
+
+  .votes{ display:flex; gap:10px; margin-top:17px; }
+  .vote-btn{
+    flex:1; min-height:56px; border-radius:var(--r-md);
+    border:1px solid var(--line); background:var(--surface-2); color:var(--text);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+    font-size:12.5px; font-weight:600; cursor:pointer; transition:transform .12s ease;
+  }
+  .vote-btn b{ font-size:16px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .vote-btn:active{ transform:scale(.96); }
+  .mini-actions{ display:flex; gap:10px; margin-top:10px; }
+  .mini-btn{
+    flex:1; min-height:var(--tap); border-radius:var(--r-md);
+    border:1px solid var(--line); background:transparent; color:var(--muted);
+    font-size:13.5px; font-weight:600; cursor:pointer; transition:transform .12s ease;
+  }
+  .mini-btn:active{ transform:scale(.97); }
+  .mini-btn.danger{ color:var(--danger); border-color:rgba(217,45,32,.32); }
+
+  /* ---- Flujo de publicación ---- */
   .cat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
   .cat-option{
-    display:flex; flex-direction:column; align-items:center; gap:6px;
-    background:var(--panel); border:1px solid var(--line); border-radius:14px;
-    padding:16px 8px; cursor:pointer; color:var(--signal); font-size:12.5px; font-weight:500;
-    font-family:var(--font-body); text-align:center;
-    transition: background .15s ease, transform .1s ease;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px;
+    min-height:96px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:var(--r-lg); padding:14px 8px; cursor:pointer;
+    color:var(--text); font-size:13.5px; font-weight:600; text-align:center;
+    transition:transform .12s ease;
   }
-  .cat-option span.emoji{ font-size:24px; }
-  .cat-option:active{ transform:scale(0.96); background:var(--panel-2); }
+  .cat-option span.emoji{ font-size:26px; }
+  .cat-option:active{ transform:scale(.96); }
 
-  .preview-photo{ width:100%; border-radius:12px; margin-bottom:12px; aspect-ratio:4/3; object-fit:cover; }
-  textarea{
-    width:100%; background: var(--panel); border:1px solid var(--line); border-radius:10px;
-    color: var(--signal); padding:11px; font-family:var(--font-body); font-size:13px; resize:none;
-    margin-bottom:14px;
+  .preview-photo{
+    width:100%; border-radius:var(--r-md); margin-bottom:13px;
+    aspect-ratio:4/3; object-fit:cover; background:var(--surface-2);
   }
-  textarea::placeholder{ color: var(--muted); }
+  textarea{
+    width:100%; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:var(--r-md); color:var(--text); padding:13px;
+    font-family:var(--font); font-size:15px; resize:none; margin-bottom:14px;
+  }
+  textarea::placeholder{ color:var(--muted); }
+  textarea:focus{ outline:2px solid var(--brand); outline-offset:-1px; }
+
   .btn-row{ display:flex; gap:10px; }
   .btn{
-    flex:1; border:none; border-radius:12px; padding:14px; font-family:var(--font-display);
-    font-weight:700; font-size:13.5px; letter-spacing:0.3px; text-transform:uppercase; cursor:pointer;
-    transition: transform .15s ease;
+    flex:1; min-height:52px; border:none; border-radius:var(--r-md);
+    font-family:var(--font); font-size:15px; font-weight:700; letter-spacing:-.1px;
+    cursor:pointer; transition:transform .14s ease;
   }
-  .btn-primary{ background: linear-gradient(135deg, var(--amber), var(--amber-dim)); color: var(--ink); box-shadow:0 6px 16px rgba(255,176,32,0.22); }
-  .btn-primary:active{ transform:scale(0.97); }
-  .btn-ghost{ background: transparent; color: var(--muted); border:1px solid var(--line); }
-  .btn-ghost:active{ transform:scale(0.97); }
-  .btn:disabled{ opacity:.4; cursor:default; }
+  .btn-primary{ background:var(--brand); color:var(--on-brand); }
+  .btn-ghost{ background:var(--surface-2); color:var(--text); border:1px solid var(--line); }
+  .btn:active{ transform:scale(.97); }
+  .btn:disabled{ opacity:.45; cursor:default; }
+
   .error-box{
-    background: rgba(255,93,58,0.12); border:1px solid var(--alert); color:#ffab8f;
-    padding:10px 12px; border-radius:10px; font-size:12px; margin-bottom:14px;
+    background:rgba(217,45,32,.10); border:1px solid rgba(217,45,32,.35); color:var(--danger);
+    padding:12px 13px; border-radius:var(--r-md); font-size:13.5px; margin-bottom:14px; line-height:1.4;
   }
+
+  /* ---- Toast: abajo, cerca del pulgar ---- */
   .toast{
-    position:absolute; top:78px; left:50%; transform:translateX(-50%);
-    background: var(--teal); color:var(--ink); padding:11px 20px; border-radius:999px;
-    font-family:var(--font-display); font-weight:700; font-size:12.5px; letter-spacing:0.2px; z-index:1100;
-    box-shadow:0 8px 22px rgba(0,0,0,0.4);
-    animation: toast-in 0.25s ease;
-    max-width:80%; text-align:center;
+    position:absolute; left:50%; transform:translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 88px);
+    background:var(--text); color:var(--surface);
+    padding:12px 20px; border-radius:999px;
+    font-size:13.5px; font-weight:600; text-align:center; max-width:86%;
+    box-shadow:var(--shadow-2); z-index:1100;
+    animation: toast-in .22s ease;
   }
-  .toast.warn{ background:var(--alert); color:#fff; }
-  @keyframes toast-in{ from{ opacity:0; transform:translate(-50%,-8px);} to{opacity:1; transform:translate(-50%,0);} }
+  .toast.warn{ background:var(--danger); color:#fff; }
+  @keyframes toast-in{ from{ opacity:0; transform:translate(-50%, 8px); } to{ opacity:1; transform:translate(-50%, 0); } }
 
   #camera-input{ display:none; }
 
+  /* Pantallas muy angostas: que el botón principal no empuje al de ubicación */
+  @media (max-width: 359px){
+    #report-btn{ padding:0 18px; font-size:14.5px; }
+    .brand-count{ display:none; }
+  }
+
   @media (prefers-reduced-motion: reduce){
-    .me-dot, .toast, .brand-mark::before, .radar-sweep::after{ animation:none; }
+    .me-dot, .toast, .radar-sweep, .sheet, .detail-panel{ animation:none; }
+    *{ transition:none !important; }
   }
 </style>
 </head>
 <body>
 <div id="app">
-  <header>
-    <div class="brand">
-      <div class="brand-mark"></div>
-      <div>
-        <h1>AMET Radar</h1>
-        <p>Reportes de la comunidad<span class="version-tag" id="app-version"></span></p>
+  <div id="map">
+    <div id="map-loader"><div class="radar-sweep"></div><span>Buscando tu ubicación…</span></div>
+  </div>
+
+  <div id="top">
+    <div class="topbar">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">AMET Radar<span class="version-tag" id="app-version"></span></span>
+        <span class="brand-count"><b id="stat-count">0</b>en vista</span>
       </div>
-    </div>
-    <div class="header-actions">
-      <div class="stat"><b id="stat-count">0</b>en vista</div>
       <button id="push-toggle-btn" data-state="inactive" aria-label="Avisarme de retenes cerca" title="Avisarme de retenes cerca" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
       </button>
     </div>
-  </header>
-
-  <div id="filters" role="group" aria-label="Filtrar por categoría"></div>
-
-  <div id="map">
-    <div id="map-loader"><div class="radar-sweep"></div><span>Buscando tu ubicación…</span></div>
+    <div id="filters" role="group" aria-label="Filtrar por categoría"></div>
   </div>
 
   <div id="fab-row">
@@ -367,6 +390,14 @@
 
   <input type="file" id="camera-input" accept="image/*" capture="environment">
 
+  <!-- Detalle de un reporte: hoja inferior en vez del popup de Leaflet.
+       En un teléfono un globito de ~216px es incómodo (foto chica, botones
+       apretados); la hoja da lugar real y queda al alcance del pulgar. -->
+  <div id="detail" hidden>
+    <div class="detail-backdrop"></div>
+    <div class="detail-panel"></div>
+  </div>
+
   <div id="flow-overlay" hidden></div>
 </div>
 
@@ -377,7 +408,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v8.1';
+  const APP_VERSION = 'v9.0';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const APPROX_RADIUS_METERS = 150; // radio del círculo de zona aproximada (reporte rápido)
 
@@ -394,11 +425,16 @@
     reportWindowMin: 60
   };
 
+  // hex: color plano de la categoría — se usa igual en tema claro y oscuro
+  // (los círculos SVG de Leaflet necesitan un color literal, no var()).
+  // ink: color de texto legible ENCIMA de ese hex, para los chips activos
+  // y la etiqueta de categoría; elegido para que el contraste aguante en
+  // ambos temas sin tener dos paletas de categorías.
   const CATEGORIES = {
-    reten_fijo:  { label:'Retén fijo',      emoji:'👮', color:'var(--amber)',      hex:'#f5c518' },
-    reten_movil: { label:'Retén móvil',     emoji:'🚓', color:'var(--teal)',   hex:'#2fa089' },
-    accidente:   { label:'Accidente',       emoji:'⚠️', color:'var(--alert)',        hex:'#e4572e' },
-    control:     { label:'Control tránsito',emoji:'🚦', color:'var(--blue)', hex:'#4a90d9' }
+    reten_fijo:  { label:'Retén fijo',      emoji:'👮', hex:'#f59e0b', ink:'#1b1206' },
+    reten_movil: { label:'Retén móvil',     emoji:'🚓', hex:'#0f766e', ink:'#ffffff' },
+    accidente:   { label:'Accidente',       emoji:'⚠️', hex:'#d92d20', ink:'#ffffff' },
+    control:     { label:'Control tránsito',emoji:'🚦', hex:'#2563eb', ink:'#ffffff' }
   };
   const activeCategories = new Set(Object.keys(CATEGORIES));
 
@@ -604,10 +640,25 @@
     pendingIds.delete(id);
   }
 
-  const map = L.map('map', { zoomControl:true, attributionControl:false }).setView(DEFAULT_CENTER, 13);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    subdomains:'abcd', maxZoom:19
-  }).addTo(map);
+  // Sin zoomControl: en un teléfono los botones +/- sobran (se hace pinch)
+  // y ocupan una esquina que preferimos dejar al mapa.
+  const map = L.map('map', { zoomControl:false, attributionControl:false }).setView(DEFAULT_CENTER, 13);
+
+  // Los tiles siguen al tema del sistema, igual que el resto de la UI:
+  // claros de día (se leen con sol), oscuros de noche (no encandilan
+  // manejando, que es el uso principal de la app).
+  const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
+  let tileLayer = null;
+  function applyTiles(){
+    const variant = darkScheme.matches ? 'dark_all' : 'light_all';
+    const next = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${variant}/{z}/{x}/{y}{r}.png`, {
+      subdomains:'abcd', maxZoom:19
+    }).addTo(map);
+    if(tileLayer) map.removeLayer(tileLayer);
+    tileLayer = next;
+  }
+  applyTiles();
+  darkScheme.addEventListener('change', applyTiles);
 
   const markersById = {};
   let pendingLocation = null;
@@ -652,41 +703,93 @@
     const stale = ageMinutes > CONFIG.staleMinutes;
     return L.divIcon({
       className: '',
-      html: `<div class="amet-pin ${pending?'pending':''}"><div class="badge ${stale?'stale':''}" style="background:${stale?'var(--muted)':cat.color}"><span>${cat.emoji}</span></div></div>`,
-      iconSize:[34,34], iconAnchor:[17,17], popupAnchor:[0,-20]
+      html: `<div class="amet-pin ${pending?'pending':''} ${stale?'stale':''}"><div class="badge" style="background:${cat.hex}"><span>${cat.emoji}</span></div></div>`,
+      iconSize:[38,38], iconAnchor:[19,19]
     });
+  }
+
+  // Tinte translúcido a partir del hex de la categoría, para el fondo de
+  // los chips activos (CSS no puede derivarlo sin color-mix()).
+  function hexTint(hex, alpha){
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n>>16)&255}, ${(n>>8)&255}, ${n&255}, ${alpha})`;
   }
 
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  function popupHtml(id, r){
+  // ---- Hoja de detalle de un reporte (reemplaza el popup de Leaflet) ----
+  // Un reporte pendiente todavía no está en reportsCache (vive solo en la
+  // cola offline), así que se busca en los dos lados.
+  const detailEl = document.getElementById('detail');
+  const detailPanel = detailEl.querySelector('.detail-panel');
+  let detailId = null;
+
+  function findReport(id){
+    if(reportsCache[id]) return reportsCache[id];
+    const queued = pendingQueue.find(p => p.id === id);
+    return queued ? queued.record : null;
+  }
+
+  function detailHtml(id, r){
     const mine = getMine().has(id);
     const cat = CATEGORIES[r.category] || CATEGORIES.reten_fijo;
     const pending = pendingIds.has(id);
     const confirms = r.confirms || 0;
     const denies = r.denies || 0;
     return `
-      <div class="popup-card" data-id="${id}">
-        <span class="cat-label" style="background:${cat.color}">${cat.emoji} ${cat.label}</span>
-        ${r.photo ? `<img src="${r.photo}" alt="Foto del reporte">` : ''}
-        <div class="time">${pending ? 'Pendiente de sincronizar…' : timeAgo(r.ts)}${r.approx ? ` · Zona aproximada (~${APPROX_RADIUS_METERS} m)` : ''}</div>
-        ${r.note ? `<div class="note">${escapeHtml(r.note)}</div>` : ''}
-        ${pending ? `
-        <div class="mini-actions">
-          <button class="mini-btn danger" data-action="cancel-pending" data-id="${id}">Cancelar</button>
-        </div>` : `
-        <div class="votes">
-          <button class="vote-btn confirm" data-action="confirm" data-id="${id}">👍 Sigue ahí (${confirms})</button>
-          <button class="vote-btn deny" data-action="deny" data-id="${id}">👎 Ya no está (${denies})</button>
-        </div>
-        <div class="mini-actions">
-          <button class="mini-btn" data-action="share" data-id="${id}">Compartir</button>
-          ${mine ? `<button class="mini-btn danger" data-action="delete" data-id="${id}">Eliminar</button>` : ''}
-        </div>`}
-      </div>`;
+      <div class="grabber"></div>
+      <div class="detail-head">
+        <span class="cat-label" style="background:${cat.hex};color:${cat.ink}">${cat.emoji} ${cat.label}</span>
+        <button class="detail-close" aria-label="Cerrar detalle del reporte">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      ${r.photo ? `<img class="detail-photo" src="${r.photo}" alt="Foto del reporte">` : ''}
+      <div class="detail-meta">${pending ? 'Pendiente de sincronizar…' : timeAgo(r.ts)}${r.approx ? ` · Zona aproximada (~${APPROX_RADIUS_METERS} m)` : ''}</div>
+      ${r.note ? `<div class="detail-note">${escapeHtml(r.note)}</div>` : ''}
+      ${pending ? `
+      <div class="mini-actions">
+        <button class="mini-btn danger" data-action="cancel-pending" data-id="${id}">Cancelar reporte</button>
+      </div>` : `
+      <div class="votes">
+        <button class="vote-btn" data-action="confirm" data-id="${id}">
+          <b>👍 ${confirms}</b><span>Sigue ahí</span>
+        </button>
+        <button class="vote-btn" data-action="deny" data-id="${id}">
+          <b>👎 ${denies}</b><span>Ya no está</span>
+        </button>
+      </div>
+      <div class="mini-actions">
+        <button class="mini-btn" data-action="share" data-id="${id}">Compartir</button>
+        ${mine ? `<button class="mini-btn danger" data-action="delete" data-id="${id}">Eliminar</button>` : ''}
+      </div>`}`;
   }
+
+  function openDetail(id){
+    const r = findReport(id);
+    if(!r) return;
+    detailId = id;
+    detailPanel.innerHTML = detailHtml(id, r);
+    detailEl.hidden = false;
+  }
+  function closeDetail(){
+    detailEl.hidden = true;
+    detailPanel.innerHTML = '';
+    detailId = null;
+  }
+  // Vuelve a dibujar la hoja si está abierta para ese reporte (ej. después
+  // de votar). No se llama desde el sondeo de 8s a propósito: re-renderizar
+  // bajo el dedo del usuario cortaría el scroll de la hoja.
+  function refreshDetail(id){
+    if(detailId === id && findReport(id)) openDetail(id);
+  }
+
+  detailEl.querySelector('.detail-backdrop').addEventListener('click', closeDetail);
+  detailPanel.addEventListener('click', (e) => {
+    if(e.target.closest('.detail-close')) closeDetail();
+  });
 
   // Reportes rápidos (r.approx) se dibujan como un círculo de zona en vez
   // de un pin: comunica que la ubicación real está en algún punto dentro de
@@ -704,10 +807,9 @@
     if(markersById[id]){
       markersById[id].setLatLng([r.lat, r.lng]);
       markersById[id].setStyle(style);
-      markersById[id].setPopupContent(popupHtml(id, r));
     } else {
       const c = L.circle([r.lat, r.lng], style).addTo(map);
-      c.bindPopup(popupHtml(id, r));
+      c.on('click', () => openDetail(id));
       markersById[id] = c;
     }
   }
@@ -718,10 +820,9 @@
     const pending = pendingIds.has(id);
     if(markersById[id]){
       markersById[id].setIcon(makeIcon(ageMinutes, r.category, pending));
-      markersById[id].setPopupContent(popupHtml(id, r));
     } else {
       const m = L.marker([r.lat, r.lng], { icon: makeIcon(ageMinutes, r.category, pending) }).addTo(map);
-      m.bindPopup(popupHtml(id, r));
+      m.on('click', () => openDetail(id));
       markersById[id] = m;
     }
   }
@@ -740,7 +841,8 @@
     const chip = document.createElement('button');
     chip.className = 'chip';
     chip.type = 'button';
-    chip.style.setProperty('--chip-color', cat.color);
+    chip.style.setProperty('--chip-color', cat.hex);
+    chip.style.setProperty('--chip-tint', hexTint(cat.hex, 0.16));
     chip.setAttribute('aria-pressed', 'true');
     chip.textContent = `${cat.emoji} ${cat.label}`;
     chip.addEventListener('click', () => {
@@ -768,6 +870,11 @@
         delete reportsCache[id];
         removeMarker(id);
         deleteReportRemote(id);
+        // Si el usuario tenía abierta la hoja de este reporte, cerrarla:
+        // acaba de dejar de existir. (Solo pasa por expiración; el filtro
+        // por categoría o el paneo no llegan acá, y con la hoja abierta el
+        // scrim tapa el mapa igual.)
+        if(detailId === id) closeDetail();
         continue;
       }
       const inView = bounds.contains(L.latLng(r.lat, r.lng));
@@ -857,7 +964,7 @@
     map.setView([r.lat, r.lng], 16);
     setTimeout(() => {
       upsertMarker(id, r);
-      markersById[id] && markersById[id].openPopup();
+      openDetail(id);
     }, 300);
   }
 
@@ -1001,7 +1108,7 @@
     const current = getPushCategories() || Object.keys(CATEGORIES);
     const selected = new Set(current);
     const chips = Object.entries(CATEGORIES).map(([key, cat]) => `
-      <button type="button" class="chip" data-cat="${key}" aria-pressed="${selected.has(key)}" style="--chip-color:${cat.color}">${cat.emoji} ${cat.label}</button>
+      <button type="button" class="chip" data-cat="${key}" aria-pressed="${selected.has(key)}" style="--chip-color:${cat.hex};--chip-tint:${hexTint(cat.hex, 0.16)}">${cat.emoji} ${cat.label}</button>
     `).join('');
     renderSheet(`
       <h2>Avisos de retenes</h2>
@@ -1074,7 +1181,7 @@
       const mine = getMine(); mine.delete(id); saveMine(mine);
       removeMarker(id);
       updateCount();
-      map.closePopup();
+      closeDetail();
       showToast('Reporte pendiente cancelado');
       return;
     }
@@ -1097,7 +1204,7 @@
         return;
       }
       await updateReportVotes(id, confirms, denies);
-      if(markersById[id]) markersById[id].setPopupContent(popupHtml(id, reportsCache[id]));
+      refreshDetail(id);
       showToast(action === 'confirm' ? 'Gracias por confirmar' : 'Gracias por avisar');
     }
 
@@ -1124,7 +1231,7 @@
       mine.delete(id); saveMine(mine);
       removeMarker(id);
       updateCount();
-      map.closePopup();
+      closeDetail();
       showToast('Reporte eliminado');
     }
   });
@@ -1231,7 +1338,7 @@
     overlay.hidden = true;
     overlay.innerHTML = '';
     overlay.style.pointerEvents = '';
-    overlay.style.background = '';
+    overlay.classList.remove('picking');
     pendingLocation = null;
     pendingPhoto = null;
     pendingCategory = null;
@@ -1362,7 +1469,7 @@
     `);
     document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
     overlay.style.pointerEvents = 'none';
-    overlay.style.background = 'transparent';
+    overlay.classList.add('picking');
     overlay.querySelector('.sheet').style.pointerEvents = 'auto';
     map.getContainer().style.cursor = 'crosshair';
     if(map.getZoom() < PICK_ZOOM){
@@ -1380,7 +1487,7 @@
   }
 
   function askForCategory(){
-    overlay.style.background = '';
+    overlay.classList.remove('picking');
     const options = Object.entries(CATEGORIES).map(([key, cat]) => `
       <button class="cat-option" data-cat="${key}">
         <span class="emoji">${cat.emoji}</span>
@@ -1464,7 +1571,7 @@
     const cat = CATEGORIES[pendingCategory] || CATEGORIES.reten_fijo;
     renderSheet(`
       <h2>Confirmar reporte</h2>
-      <span class="cat-label" style="background:${cat.color}">${cat.emoji} ${cat.label}</span>
+      <span class="cat-label" style="background:${cat.hex};color:${cat.ink}">${cat.emoji} ${cat.label}</span>
       <img class="preview-photo" src="${pendingPhoto}" alt="Vista previa" style="margin-top:8px;">
       <textarea id="note-input" rows="2" placeholder="Nota opcional (ej: sentido, esquina, hora pico)"></textarea>
       <div class="btn-row">

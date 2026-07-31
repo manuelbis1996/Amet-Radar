@@ -341,11 +341,9 @@ por medio.
   La idea es comunicar "está en algún punto dentro de esta zona", no un
   punto marcado con precisión falsa. `markersById[id]` puede ser un
   `L.marker` o un `L.circle` según el reporte; ambos comparten la API que
-  usa el resto del código (`bindPopup`, `setPopupContent`, `setLatLng`,
-  `map.removeLayer`), así que `removeMarker`/`renderVisibleMarkers` no
-  necesitaron cambios. Los colores de categoría tienen ahora un campo
-  `hex` además de `color` (`var(--nombre)`) porque el renderer SVG de
-  Leaflet necesita un valor de color plano para el círculo.
+  usa el resto del código (`setLatLng`, `map.removeLayer`, el listener de
+  `click` que abre la hoja de detalle), así que
+  `removeMarker`/`renderVisibleMarkers` no necesitaron cambios.
 - **Persistencia**: los reportes viven en la tabla `reports` de Supabase
   (Postgres), no en `server.js` ni en un archivo. El cliente mantiene una
   copia en memoria (`reportsCache`) que refresca cada 8s vía `fetch` a la
@@ -363,9 +361,40 @@ por medio.
   dentro del `bounds` actual del mapa (recalculado en `moveend`/`zoomend`).
 - **Mi ubicación**: `navigator.geolocation.watchPosition` centra el mapa en
   el primer fix y mantiene un marcador azul (`meMarker`) actualizado.
-- **Mapa**: tiles claros de CartoDB Positron (`light_all`); antes eran los
-  oscuros (`dark_all`) a juego con el resto de la UI, se cambió a pedido.
-- **Compartir y SEO social**: el botón "Compartir" de cada popup usa
+- **Diseño (rediseño v9.0, mobile-first)**: el público es casi todo móvil,
+  así que la pantalla se organiza alrededor del mapa en vez de alrededor
+  de un header. Decisiones que conviene no deshacer sin pensarlo:
+  - **El mapa ocupa el 100% de la pantalla** y todo lo demás flota encima
+    (`#top` arriba, `#fab-row` abajo). Antes header + chips se comían
+    ~110px fijos de alto. `#top` tiene `pointer-events:none` y solo sus
+    hijos reales lo reciben, para poder arrastrar el mapa por los huecos.
+  - **El detalle de un reporte es una hoja inferior (`#detail`), no el
+    popup de Leaflet.** Un globito de ~216px era incómodo en táctil (foto
+    chica, botones apretados). Se eliminaron `bindPopup`/`setPopupContent`/
+    `openPopup`: el marcador tiene un listener de `click` que llama a
+    `openDetail(id)`. La hoja NO se re-renderiza en el sondeo de 8s (te
+    cortaría el scroll bajo el dedo); solo con `refreshDetail(id)` después
+    de que vos mismo votás.
+  - **Tema automático** (`prefers-color-scheme`): claro de día, oscuro de
+    noche. Los tiles del mapa lo siguen también (`applyTiles`,
+    `light_all`/`dark_all` de CartoDB) — antes estaban fijos en claros.
+  - **Ningún control primario mide menos de 44px** (`--tap`), y todo lo
+    que flota respeta `env(safe-area-inset-*)`.
+  - Se sacó `maximum-scale=1.0` del viewport: bloqueaba el pinch-zoom, que
+    es un problema de accesibilidad real.
+  - `zoomControl:false` en el mapa: los botones +/- sobran en un teléfono.
+  - **Categorías**: `CATEGORIES` tiene `hex` (color plano, lo necesita el
+    renderer SVG de Leaflet y también los chips) e `ink` (color de texto
+    legible encima de ese hex). Ya no existe el campo `color` con
+    `var(--nombre)`. Los chips activos usan un tinte translúcido derivado
+    del hex en JS (`hexTint`, expuesto como `--chip-tint`) en vez de
+    rellenarse a full saturación: como las 4 categorías arrancan activas,
+    el relleno sólido se veía como una pared de color.
+  - **`#flow-overlay.picking`**: durante "Marca el lugar" el overlay tiene
+    que dejar ver *y tocar* el mapa, así que esa clase le saca el scrim y
+    el `backdrop-filter`. Antes se hacía con `style.background` inline, que
+    ya no alcanza porque el overlay tiene desenfoque.
+- **Compartir y SEO social**: el botón "Compartir" del detalle usa
   `navigator.share()` (hoja nativa del sistema) con el clipboard-copy
   anterior como fallback si el navegador no lo soporta. El `<head>` tiene
   meta tags Open Graph/Twitter Card genéricos (título/descripción de la
