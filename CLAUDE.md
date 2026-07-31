@@ -430,10 +430,13 @@ por medio.
   - Rotación e inclinación **deshabilitadas** a propósito
     (`dragRotate:false`, `touchPitch:false`, `touchZoomRotate.disableRotation()`):
     girar el mapa sin querer con dos dedos desorienta más de lo que aporta.
-  - **Atribución de OpenStreetMap: pendiente.** Se dejó
-    `attributionControl:false` para no cambiar la UI sin pedirlo (es lo que
-    ya hacía con CartoDB), pero la licencia ODbL de OSM la exige — conviene
-    resolverlo.
+  - **Atribución de OpenStreetMap** (v10.1): la licencia ODbL de los datos
+    la exige. El mapa se crea con `attributionControl:false` y después se
+    agrega con `addControl(new maplibregl.AttributionControl({compact:true}))`
+    — así es un ⓘ chiquito que solo se despliega al tocarlo, en vez de una
+    línea de texto fija. El CSS la sube 84px sobre el safe-area para que
+    `#fab-row` no la tape, con `z-index:390` (debajo de `#fab-row`, para no
+    robarle toques al botón de reportar).
   - Verificado con un stub de MapLibre + Playwright (16 chequeos: estilo,
     zoom, pines, círculo y su re-escalado, hoja de detalle, seguimiento,
     `dragstart`, flujo de "marca el lugar"), porque este sandbox bloquea

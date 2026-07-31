@@ -88,6 +88,16 @@
   #map{ position:absolute; inset:0; z-index:0; background:var(--bg); }
   .maplibregl-map{ background:var(--bg); font-family:var(--font); }
   .maplibregl-canvas{ outline:none; }
+  /* Atribución de OpenStreetMap (la licencia ODbL de los datos la exige).
+     Se la sube por encima de #fab-row y del safe-area para que no quede
+     tapada por el botón de reportar, y con z-index por debajo de #fab-row
+     (400) para no robarle toques a los controles principales. */
+  .maplibregl-ctrl-bottom-right{
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    z-index:390;
+  }
+  .maplibregl-ctrl-attrib{ font-size:10px; opacity:.72; border-radius:6px; }
+  .maplibregl-ctrl-attrib a{ color:var(--muted); }
 
   #map-loader{
     position:absolute; inset:0; z-index:450; background:var(--bg);
@@ -421,7 +431,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v10.0';
+  const APP_VERSION = 'v10.1';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const APPROX_RADIUS_METERS = 150; // radio del círculo de zona aproximada (reporte rápido)
 
@@ -683,6 +693,13 @@
     touchPitch: false
   });
   map.touchZoomRotate.disableRotation();
+
+  // Atribución de OpenStreetMap: la licencia ODbL de los datos la exige.
+  // Va como control aparte (y no con attributionControl:true de arriba)
+  // para poder pedirla `compact`: así es un ⓘ chiquito que solo se
+  // despliega al tocarlo, en vez de una línea de texto fija comiéndose
+  // pantalla en un teléfono.
+  map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
 
   const markersById = {};
   let pendingLocation = null;
