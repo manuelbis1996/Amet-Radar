@@ -3,8 +3,7 @@
 ## En producción
 
 La app ya está publicada: **https://amet-radar.manuelbis1996.workers.dev**
-(migrando de Netlify a Cloudflare Workers, ver
-[CLAUDE.md](CLAUDE.md#despliegue--migración-de-netlify-a-cloudflare-workers-en-curso)).
+(Cloudflare Workers, ver [CLAUDE.md](CLAUDE.md#despliegue-cloudflare-workers)).
 Sirve directo desde ahí, con HTTPS (necesario para geolocalización en el
 celular) y sin depender de que ninguna PC esté prendida — los reportes
 viven en Supabase (ver más abajo). El resto de este README es para correr
@@ -85,8 +84,5 @@ Function). Detalles completos en
 ## Redesplegar a producción
 
 El Worker de Cloudflare (`amet-radar`, cuenta `manuelbis1996`) está
-conectado al repo de GitHub — un push a `main` redespliega solo. El sitio
-de Netlify (`amet-radar`, site ID `8958378d-0be4-42bb-ab5c-4ba7e3181dd8`)
-sigue existiendo mientras dura el corte, también conectado al repo con
-el mismo criterio. Detalles de ambas cuentas/config en
-[CLAUDE.md](CLAUDE.md#despliegue--migración-de-netlify-a-cloudflare-workers-en-curso).
+conectado al repo de GitHub — un push a `main` redespliega solo. Detalles
+en [CLAUDE.md](CLAUDE.md#despliegue-cloudflare-workers).

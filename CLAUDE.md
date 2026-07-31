@@ -28,7 +28,7 @@ y el fetch a Supabase no funcionan sobre `file://`); ya no tiene ninguna
 API de reportes ni toca `data/reports.json`.
 
 El frontend ya está publicado en internet, no solo corriendo local: ver
-"Despliegue (Netlify)" más abajo.
+"Despliegue (Cloudflare Workers)" más abajo.
 
 ## Archivos
 - `amet-radar.html` — toda la app (HTML + CSS + JS en un solo archivo);
@@ -54,17 +54,11 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
 - `plan-mejora-amet-radar.md` — plan de mejoras original (por prioridad
   🔴/🟡/🟢) que dio origen a las decisiones de arquitectura de abajo; incluye
   el orden sugerido de implementación y el estado de qué falta
-- `_redirects` — regla de Netlify (`/ → /amet-radar.html`, código 200,
-  rewrite no redirect) para que la raíz del sitio sirva la app; sin esto
-  Netlify devuelve 404 en `/` porque no hay `index.html`. Solo lo lee
-  Netlify (bajo Cloudflare Workers esta reescritura la hace `_worker.js` a
-  mano, ver "Despliegue" abajo); `server.js` ya maneja este mismo caso con
-  su propia lógica (`pathname === '/' → amet-radar.html`) así que en local
-  no hace falta.
 - `_worker.js`, `wrangler.jsonc`, `.assetsignore` — despliegue en
-  Cloudflare Workers (reemplazo de Netlify en curso, ver "Despliegue"
-  abajo): sirve los assets estáticos y el preview dinámico por reporte
-  desde un solo Worker, sin build step.
+  Cloudflare Workers (ver "Despliegue" abajo): sirve los assets estáticos
+  y el preview dinámico por reporte desde un solo Worker, sin build step.
+  `server.js` ya maneja el caso de `/` → `amet-radar.html` con su propia
+  lógica para correr en local, así que ahí no hace falta nada extra.
 - `supabase/migrations/*.sql` — copia versionada de las migraciones
   aplicadas por MCP (tabla `push_subscriptions`, trigger de notificaciones,
   ver "Notificaciones push" abajo), más `20260729230000_reports_genesis.sql`
@@ -76,9 +70,6 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   las notificaciones push (ver "Notificaciones push" abajo).
 - `supabase/functions/admin-login/index.ts` — Edge Function que valida el
   password del panel admin (ver "Panel de administración" abajo).
-- `netlify/edge-functions/report-preview.ts` — Edge Function (Netlify, no
-  Supabase) que arma el preview dinámico por reporte para bots de
-  WhatsApp/Twitter/etc. (ver "Preview dinámico por reporte" abajo).
 - `admin.html` — panel de administración (moderar reportes, ver
   estadísticas, editar parámetros del sistema), sin backend propio — le
   pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
@@ -241,46 +232,44 @@ reusando `openReportById` — la misma función que usa el deep link `?r=`).
   (`updatePushCategories`) en vez de asumir "primera vez" — la hoja de
   onboarding solo se muestra si `localStorage` nunca tuvo la clave.
 
-## Preview dinámico por reporte (Netlify Edge Function / Cloudflare Worker)
-**Nota (migración en curso, ver "Despliegue" más abajo)**: esta sección
-describe la versión Netlify, verificada en producción. La lógica está
-también portada a `_worker.js` en la raíz del repo (Cloudflare Workers) —
-mismo comportamiento, mismos casos, solo cambia el runtime/hosting.
-
+## Preview dinámico por reporte (Cloudflare Worker)
 Cuando se comparte el link de un reporte puntual (`?r=<id>`) por WhatsApp,
 Twitter, Facebook, etc., el bot que arma la tarjeta de preview recibe meta
 tags específicos de ESE reporte (categoría, nota, hace cuánto se publicó)
 en vez de la tarjeta genérica de la app — así el link se ve como algo real
 ("🚦 Control de tránsito — AMET Radar") y no como una URL pelada.
 
-- **Archivo**: `netlify/edge-functions/report-preview.ts`. Corre en el
-  runtime Deno de Netlify Edge Functions, no en Supabase — es
-  infraestructura separada de los Edge Functions de Supabase (que sí
-  corren en la sección "Notificaciones push" de arriba). El `path` que
-  intercepta (`/` y `/amet-radar.html`) se declara con un `export const
-  config` dentro del mismo archivo, no en un `netlify.toml` (Netlify
-  soporta ambas formas; esta evita un archivo de config extra).
+- **Archivo**: `_worker.js` (raíz del repo). Corre en el runtime de
+  Cloudflare Workers, no en Supabase — es infraestructura separada de los
+  Edge Functions de Supabase (que sí corren en la sección "Notificaciones
+  push" de arriba). Antes vivía en `netlify/edge-functions/report-preview.ts`
+  (Netlify Edge Functions, Deno) — se portó 1:1 a Workers al migrar el
+  hosting (ver "Despliegue" abajo), mismo comportamiento verificado.
 - **Cómo decide si mostrar el preview**: solo si la request tiene
   `?r=<id>` en la URL **y** el `User-Agent` matchea alguno de los bots de
   link-preview conocidos (`BOT_UA_PATTERNS` en el archivo — WhatsApp,
   Facebook, Twitter/X, LinkedIn, Slack, Telegram, Discord, Pinterest,
-  Reddit). Cualquier otro caso (`context.next()`) sigue de largo a la SPA
-  normal, sin latencia ni cambio de comportamiento para usuarios reales.
+  Reddit). Cualquier otro caso cae a `env.ASSETS.fetch(request)`, sigue de
+  largo a la SPA normal, sin latencia ni cambio de comportamiento para
+  usuarios reales.
 - **De dónde saca los datos**: llama directo a la REST API de Supabase
   (`{SUPABASE_URL}/rest/v1/reports?id=eq.<id>`) con la misma publishable
   key que usa el cliente — no hay backend propio, mismo patrón que el
   resto del proyecto.
 - **Reporte ya no existe** (expiró a las 6h, o lo borró la comunidad): cae
-  a `context.next()`, la SPA muestra los meta tags genéricos del `<head>`.
+  a `ASSETS.fetch`, la SPA muestra los meta tags genéricos del `<head>`.
   No hay error visible ni para el bot ni para un usuario real.
 - **Imagen OG**: reusa `icon-512.png` (card `summary`, no
   `summary_large_image`) — igual que el preview genérico. Generar una
   imagen dinámica por reporte (ej. thumbnail del mapa) quedó fuera de
   alcance a propósito, por simplicidad.
-- **Verificado con `curl -A "<user-agent>"` contra producción**, no es un
-  supuesto teórico: bot + reporte real → HTML con meta tags del reporte;
-  bot + id inexistente → 200, cae a la SPA; navegador normal → SPA
-  completa sin cambios.
+- **Verificado con `curl -A "<user-agent>"` contra producción bajo
+  Netlify** (bot + reporte real → HTML con meta tags del reporte; bot +
+  id inexistente → 200, cae a la SPA; navegador normal → SPA completa sin
+  cambios) y con un test funcional local (`node` + `env.ASSETS` mockeado)
+  para la versión Workers — no se pudo repetir la verificación end-to-end
+  contra Supabase real bajo Cloudflare por el bloqueo de red del sandbox,
+  pero el código es una traducción 1:1 de la lógica ya verificada.
 
 ## Panel de administración
 `admin.html` — moderar reportes (verlos todos, borrar cualquiera), ver
@@ -506,41 +495,37 @@ exporta con el Table Editor de Supabase (Export as CSV) o `pg_dump`
 antes de migrar, no hace falta un mecanismo propio en el repo para algo
 que se usa una sola vez.
 
-## Despliegue — migración de Netlify a Cloudflare Workers (en curso)
-El frontend estuvo publicado en **Netlify** (cuenta `manuelbis1996@gmail.com`,
-team `manuelbis1996`, plan Free) hasta que se agotó la franja gratuita
-(banda ancha/build minutes) y el sitio quedó caído. Se decidió migrar a
-**Cloudflare** (plan Free, sin límite de banda ancha, a diferencia de
-Netlify) en vez de agregar un método de pago.
+## Despliegue (Cloudflare Workers)
+El frontend está publicado en **Cloudflare Workers + Static Assets**
+(cuenta `manuelbis1996`), Worker `amet-radar`, URL en vivo:
+**https://amet-radar.manuelbis1996.workers.dev/** — verificado en
+producción por el usuario (mapa, reportes, panel admin funcionando).
+
+Antes estuvo en Netlify hasta que se agotó la franja gratuita (banda
+ancha/build minutes) y el sitio quedó caído; se migró a Cloudflare (plan
+Free, sin límite de banda ancha) en vez de agregar un método de pago —
+ver "Historial relevante de decisiones" al final de este archivo para
+más contexto de esa decisión.
 
 **Se eligió Workers + Static Assets, no Cloudflare Pages clásico.** El
-conector MCP de Cloudflare conectado a esta sesión solo trae herramientas
-de Workers/D1/KV/R2/Hyperdrive (nada de Pages) y trae una herramienta
-específica `migrate_pages_to_workers_guide` — señal directa de que
-Cloudflare está empujando Workers+Assets como el camino nuevo. Esto reusa
-igual el modelo de un solo archivo tipo Netlify Edge Function: `_worker.js`
-en la raíz sirve tanto los assets estáticos (`env.ASSETS.fetch`) como la
-lógica de preview dinámico, sin build step — mismo criterio "sin
-dependencias" del resto del proyecto.
+conector MCP de Cloudflare usado durante la migración solo traía
+herramientas de Workers/D1/KV/R2/Hyperdrive (nada de Pages) y traía una
+herramienta específica `migrate_pages_to_workers_guide` — señal directa
+de que Cloudflare empuja Workers+Assets como el camino nuevo. Esto reusa
+el mismo modelo de un solo archivo que tenía la Netlify Edge Function:
+`_worker.js` en la raíz sirve tanto los assets estáticos
+(`env.ASSETS.fetch`) como la lógica de preview dinámico, sin build step —
+mismo criterio "sin dependencias" del resto del proyecto.
 
-### Lo que ya está listo en el repo
-- **`_worker.js`** (raíz del repo) — puerto del preview dinámico por
-  reporte (antes `netlify/edge-functions/report-preview.ts`, y antes de
-  eso un intento con `functions/_middleware.js` al estilo Pages Functions,
-  descartado): un único `export default { fetch(request, env) }` que (1)
-  reescribe `/` → `/amet-radar.html` a mano — Cloudflare NO aplica
-  `_redirects` automáticamente cuando hay un Worker con `main` propio — y
-  (2) intercepta bots de link-preview en `?r=<id>` igual que antes. Todo
-  lo demás cae a `env.ASSETS.fetch(request)`. Verificado con un test
-  funcional local (`node` + `env.ASSETS` mockeado) que confirma los 5
-  casos: passthrough de rutas normales, reescritura de `/`, `?r=` con UA
-  normal, y bot con fetch fallido cayendo a `ASSETS` — el caso "bot +
-  reporte real" no se pudo probar end-to-end en este sandbox (red
-  bloqueada hacia Supabase), pero el código es una traducción 1:1 de la
-  lógica que sí se verificó en producción bajo Netlify. Mejora sobre esa
-  versión: `SITE_URL` ya no está hardcodeado, se deriva de `url.origin`
-  por request — funciona igual en producción y en cualquier preview
-  deploy sin tocar código.
+### Archivos de la configuración de despliegue
+- **`_worker.js`** (raíz del repo) — sirve el preview dinámico por
+  reporte: un único `export default { fetch(request, env) }` que (1)
+  reescribe `/` → `/amet-radar.html` a mano — Cloudflare no aplica
+  `_redirects` cuando hay un Worker con `main` propio — y (2) intercepta
+  bots de link-preview en `?r=<id>` con meta tags OG específicas del
+  reporte. Todo lo demás cae a `env.ASSETS.fetch(request)`. `SITE_URL` se
+  deriva de `url.origin` por request, no está hardcodeado — funciona
+  igual en producción y en cualquier preview deploy sin tocar código.
 - **`wrangler.jsonc`** — config mínima: `main: "./_worker.js"`,
   `assets.directory: "./"` (todo el repo, ya que el sitio vive en la raíz
   sin carpeta `dist`/`public`), `binding: "ASSETS"`.
@@ -557,45 +542,11 @@ dependencias" del resto del proyecto.
   exactamente 6 archivos: `amet-radar.html`, `admin.html`,
   `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`.
 - **`amet-radar.html`**: los meta tags OG/Twitter genéricos del `<head>`
-  (`og:url`, `og:image`, `twitter:image`) ya apuntan a
-  `https://amet-radar.manuelbis1996.workers.dev/` — la URL real del Worker
-  ya desplegado (no era `.pages.dev` como se había asumido antes de
-  desplegar: los Workers creados por "Import a repository" quedan en
-  `<nombre-worker>.<subdominio-de-la-cuenta>.workers.dev`).
-- **`netlify/edge-functions/report-preview.ts`**: se dejó intacto (no se
-  borró) porque Netlify puede seguir siendo el sitio en vivo hasta que se
-  confirme el corte a Cloudflare — limpiarlo una vez confirmado que
-  Cloudflare ya sirve producción.
-- **`_redirects`**: quedó sin uso bajo esta arquitectura (`_worker.js` ya
-  hace la reescritura de `/` a mano) — se deja en el repo solo porque
-  Netlify lo sigue necesitando mientras dure la migración.
-
-### Estado del corte a Cloudflare
-**Ya desplegado**: el Worker `amet-radar` está creado y conectado al repo
-(`Workers & Pages → Create application → Import a repository`, con
-auto-deploy en cada push a `main`) — URL en vivo:
-`https://amet-radar.manuelbis1996.workers.dev/`. No se pudo verificar el
-resultado desde este sandbox (bloquea `*.workers.dev` a nivel de red, mismo
-problema que con `*.netlify.app`) — pendiente de confirmación manual por
-el usuario: que el mapa cargue, se puedan publicar/ver reportes, y que
-`https://amet-radar.manuelbis1996.workers.dev/?r=<id-real>` con
-`curl -A "whatsapp"` devuelva el preview dinámico en vez de la SPA.
-
-Una vez confirmado que el Worker sirve todo correctamente (mapa, reportes,
-notificaciones push, panel admin, preview dinámico): borrar
-`netlify/edge-functions/` y `_redirects`, actualizar esta sección para que
-describa solo Cloudflare, y considerar pausar/borrar el sitio en Netlify.
-
-### Estado histórico de Netlify (referencia, hasta que se complete el corte)
-- **Site ID**: `8958378d-0be4-42bb-ab5c-4ba7e3181dd8` (nombre del sitio:
-  `amet-radar`), conectado a `manuelbis1996/Amet-Radar` con auto-deploy
-  desde `main`.
-- **`ADMIN_PASSWORD` como env var de Netlify quedó sin uso**: se configuró
-  durante un intento anterior de portar el panel admin a Netlify
-  Functions + Blobs, arquitectura que se descartó (ver "Panel de
-  administración" arriba). El `ADMIN_PASSWORD` que de verdad usa
-  `admin.html` es un **secret de Supabase** (Project Settings → Edge
-  Functions → Secrets), no una env var de Netlify.
+  (`og:url`, `og:image`, `twitter:image`) apuntan a
+  `https://amet-radar.manuelbis1996.workers.dev/`.
+- **Conectado al repo de GitHub** (`manuelbis1996/Amet-Radar`) vía
+  `Workers & Pages → Create application → Import a repository`, con
+  auto-deploy en cada push a `main`.
 
 Mejoras posteriores, no bloqueantes: reemplazar las políticas RLS abiertas
 de Supabase por algo más restrictivo si se agrega autenticación, y mover
@@ -635,3 +586,11 @@ tamaño de las filas se vuelve un problema.
   compartidos, mientras que el filtro habría resuelto un problema
   hipotético (todavía no hay volumen real de suscriptores para que el
   "ruido" de notificaciones sea un dolor real).
+- Se migró el hosting de Netlify a Cloudflare Workers cuando Netlify
+  agotó la franja gratuita (banda ancha/build minutes) y el sitio quedó
+  caído — se prefirió migrar de proveedor antes que agregar un método de
+  pago, ya que Cloudflare Workers (plan Free) no tiene límite de banda
+  ancha. Dentro de Cloudflare se eligió Workers + Static Assets en vez de
+  Pages clásico porque las herramientas disponibles apuntaban claramente
+  a ese camino (ver "Despliegue" arriba) — verificado en producción por
+  el usuario tras el corte.
