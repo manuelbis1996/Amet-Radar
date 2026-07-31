@@ -376,8 +376,9 @@ por medio.
     cortaría el scroll bajo el dedo); solo con `refreshDetail(id)` después
     de que vos mismo votás.
   - **Tema automático** (`prefers-color-scheme`): claro de día, oscuro de
-    noche. Los tiles del mapa lo siguen también (`applyTiles`,
-    `light_all`/`dark_all` de CartoDB) — antes estaban fijos en claros.
+    noche, para el resto de la UI (header, chips, hojas). El mapa en sí es
+    la excepción, a pedido: siempre usa tiles claros de CartoDB
+    (`light_all`) de día y de noche.
   - **Ningún control primario mide menos de 44px** (`--tap`), y todo lo
     que flota respeta `env(safe-area-inset-*)`.
   - Se sacó `maximum-scale=1.0` del viewport: bloqueaba el pinch-zoom, que

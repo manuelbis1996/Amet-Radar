@@ -31,8 +31,8 @@
     reojo mientras se maneja.
 
     Tema automático (prefers-color-scheme): claro de día, para que se lea
-    con sol; oscuro de noche, para no encandilar. Los tiles del mapa
-    cambian con el tema también (ver applyTiles más abajo, en el JS).
+    con sol; oscuro de noche, para no encandilar. El mapa en sí es la
+    excepción: siempre usa tiles claros (a pedido), de día y de noche.
 
     Reglas que se respetan en todo el archivo:
     - Ningún control primario mide menos de var(--tap) = 44px de alto.
@@ -644,21 +644,12 @@
   // y ocupan una esquina que preferimos dejar al mapa.
   const map = L.map('map', { zoomControl:false, attributionControl:false }).setView(DEFAULT_CENTER, 13);
 
-  // Los tiles siguen al tema del sistema, igual que el resto de la UI:
-  // claros de día (se leen con sol), oscuros de noche (no encandilan
-  // manejando, que es el uso principal de la app).
-  const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
-  let tileLayer = null;
-  function applyTiles(){
-    const variant = darkScheme.matches ? 'dark_all' : 'light_all';
-    const next = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${variant}/{z}/{x}/{y}{r}.png`, {
-      subdomains:'abcd', maxZoom:19
-    }).addTo(map);
-    if(tileLayer) map.removeLayer(tileLayer);
-    tileLayer = next;
-  }
-  applyTiles();
-  darkScheme.addEventListener('change', applyTiles);
+  // El mapa en sí siempre usa tiles claros, a pedido — el resto de la UI
+  // (header, chips, hojas) sigue el tema automático del sistema, pero el
+  // mapa se queda en 'light_all' de día y de noche.
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    subdomains:'abcd', maxZoom:19
+  }).addTo(map);
 
   const markersById = {};
   let pendingLocation = null;
