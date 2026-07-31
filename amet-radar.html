@@ -409,7 +409,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v9.2';
+  const APP_VERSION = 'v9.3';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const APPROX_RADIUS_METERS = 150; // radio del círculo de zona aproximada (reporte rápido)
 
@@ -647,8 +647,10 @@
 
   // El mapa en sí siempre usa tiles claros, a pedido — el resto de la UI
   // (header, chips, hojas) sigue el tema automático del sistema, pero el
-  // mapa se queda en 'light_all' de día y de noche.
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  // mapa se queda claro de día y de noche. 'voyager' (en vez de
+  // 'light_all') agrega calles, nombres de lugares y más color sin dejar
+  // de ser un fondo claro — mismo proveedor CartoDB, sin API key.
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     subdomains:'abcd', maxZoom:19
   }).addTo(map);
 

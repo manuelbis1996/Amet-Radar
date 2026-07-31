@@ -396,8 +396,10 @@ por medio.
     de que vos mismo votás.
   - **Tema automático** (`prefers-color-scheme`): claro de día, oscuro de
     noche, para el resto de la UI (header, chips, hojas). El mapa en sí es
-    la excepción, a pedido: siempre usa tiles claros de CartoDB
-    (`light_all`) de día y de noche.
+    la excepción, a pedido: siempre usa tiles claros de CartoDB de día y de
+    noche. Estilo `voyager` (`rastertiles/voyager`, v9.3) en vez de
+    `light_all`: mismo proveedor sin API key, pero con calles, nombres de
+    lugares y más color — sigue siendo un fondo claro, solo más legible.
   - **Ningún control primario mide menos de 44px** (`--tap`), y todo lo
     que flota respeta `env(safe-area-inset-*)`.
   - Se sacó `maximum-scale=1.0` del viewport: bloqueaba el pinch-zoom, que
