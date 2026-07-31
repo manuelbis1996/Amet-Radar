@@ -367,6 +367,19 @@ por medio.
   accionable ("activá el permiso en Ajustes") una sola vez (`deniedShown`);
   los otros dos siguen mostrando "está tardando", porque el fix puede
   llegar igual unos segundos después (GPS frío al abrir la PWA).
+- **Modo "seguir mi ubicación"** (v9.2, activación manual, no automática):
+  tocar el botón de ubicación (`#locate-btn`) alterna la variable
+  `following` — al activarse centra una vez con `setView` (preservando el
+  zoom si ya es mayor a 16) y pone `data-state="active"` en el botón
+  (mismo patrón visual que `#push-toggle-btn[data-state="active"]`, color
+  `--brand`); mientras está activo, cada fix nuevo de `watchPosition` hace
+  `map.panTo(latlng)` en vez de `setView`, para no resetearle el zoom al
+  usuario en cada actualización de posición. Se autodesactiva con
+  `map.on('dragstart', ...)` apenas el usuario arrastra el mapa a mano —
+  mismo comportamiento que Waze/Google Maps. `panTo`/`setView`
+  programáticos no disparan `dragstart` en Leaflet, así que el propio
+  seguimiento no se autocancela. Sin este modo activado, el comportamiento
+  es el de siempre: un solo centrado en el primer fix (`firstFix`).
 - **Diseño (rediseño v9.0, mobile-first)**: el público es casi todo móvil,
   así que la pantalla se organiza alrededor del mapa en vez de alrededor
   de un header. Decisiones que conviene no deshacer sin pensarlo:

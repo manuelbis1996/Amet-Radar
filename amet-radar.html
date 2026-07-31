@@ -145,6 +145,7 @@
   #push-toggle-btn:active{ transform:scale(.9); }
   #push-toggle-btn[data-state="active"]{ color:var(--brand); }
   #push-toggle-btn[data-state="loading"]{ opacity:.5; cursor:default; }
+  #locate-btn[data-state="active"]{ color:var(--brand); }
   #push-toggle-btn[hidden]{ display:none; }
 
   /* ---- Chips de filtro ---- */
@@ -408,7 +409,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v9.1';
+  const APP_VERSION = 'v9.2';
   const DEFAULT_CENTER = [18.4861, -69.9312]; // Santo Domingo
   const APPROX_RADIUS_METERS = 150; // radio del círculo de zona aproximada (reporte rápido)
 
@@ -1242,6 +1243,11 @@
   // el fix tardío).
   let hashHandled = false;
   let lastKnownLatLng = null;
+  // following: modo "seguir mi ubicación" (como Waze/Google Maps),
+  // activado a mano con el botón de ubicación. Mientras está activo, cada
+  // fix nuevo de watchPosition hace panTo (no setView, para no resetear el
+  // zoom) y se autodesactiva si el usuario arrastra el mapa a mano.
+  let following = false;
 
   const meIcon = L.divIcon({
     className: '',
@@ -1277,6 +1283,8 @@
           firstFix = false;
           hideLoader();
           tryOpenHashOnce();
+        } else if(following){
+          map.panTo(latlng);
         }
       },
       err => {
@@ -1317,10 +1325,26 @@
   }
 
   locateBtn.addEventListener('click', () => {
-    if(lastKnownLatLng){
-      map.setView(lastKnownLatLng, 16);
-    } else {
+    if(!lastKnownLatLng){
       showToast('Aún buscando tu ubicación…');
+      return;
+    }
+    if(following){
+      following = false;
+      locateBtn.removeAttribute('data-state');
+      return;
+    }
+    following = true;
+    locateBtn.dataset.state = 'active';
+    map.setView(lastKnownLatLng, Math.max(map.getZoom(), 16));
+  });
+
+  // Arrastrar el mapa a mano desactiva el seguimiento — panTo/setView
+  // programáticos no disparan dragstart, así que esto no se autocancela.
+  map.on('dragstart', () => {
+    if(following){
+      following = false;
+      locateBtn.removeAttribute('data-state');
     }
   });
 
