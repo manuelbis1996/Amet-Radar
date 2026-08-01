@@ -48,6 +48,11 @@ security definer
 set search_path = public, storage, extensions
 as $$
 begin
+  -- Toca storage.objects, que tiene RLS: funciona porque el dueño de esta
+  -- función es `postgres` (quien aplica la migración) y ese rol tiene
+  -- BYPASSRLS en Supabase. Si alguna vez esto empieza a fallar con "new row
+  -- violates row-level security policy", el problema es el dueño de la
+  -- función, no la lógica de acá.
   delete from storage.objects
    where bucket_id = 'report-photos' and name = p_id || '.jpg';
   delete from public.reports where id = p_id;
@@ -85,11 +90,15 @@ begin
   select deny_threshold into v_threshold from public.app_config where id;
   v_threshold := coalesce(v_threshold, 2);
 
-  update public.reports
-     set confirms = coalesce(confirms, 0) + (case when p_dir = 'confirm' then 1 else 0 end),
-         denies   = coalesce(denies, 0)   + (case when p_dir = 'deny'    then 1 else 0 end)
-   where id = p_id
-   returning reports.confirms, reports.denies into v_confirms, v_denies;
+  -- OJO con el alias `r`: los nombres de salida de un `returns table(...)`
+  -- son variables de plpgsql dentro de la función, así que un
+  -- `coalesce(confirms, 0)` suelto choca con la columna y Postgres corta con
+  -- "column reference is ambiguous". Todo lo que lea la fila va calificado.
+  update public.reports r
+     set confirms = coalesce(r.confirms, 0) + (case when p_dir = 'confirm' then 1 else 0 end),
+         denies   = coalesce(r.denies, 0)   + (case when p_dir = 'deny'    then 1 else 0 end)
+   where r.id = p_id
+   returning r.confirms, r.denies into v_confirms, v_denies;
 
   if not found then
     raise exception 'reporte inexistente';
