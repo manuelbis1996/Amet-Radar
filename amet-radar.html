@@ -401,6 +401,13 @@
   }
   .cat-option span.emoji{ font-size:26px; }
   .cat-option:active{ transform:scale(.96); }
+  .link-btn{
+    display:block; width:100%; margin-top:10px; padding:10px;
+    border:none; background:transparent; color:var(--muted);
+    font:inherit; font-size:13px; font-weight:600; cursor:pointer;
+    text-decoration:underline; text-underline-offset:3px;
+  }
+  .link-btn:active{ opacity:.55; }
 
   textarea{
     width:100%; background:var(--surface-2); border:1px solid var(--line);
@@ -531,7 +538,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v11.2';
+  const APP_VERSION = 'v11.3';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1874,9 +1881,14 @@
   function startManualPick(){
     // Arranca donde está el usuario (o en el centro del mapa si todavía no
     // hay GPS), no en un punto vacío: casi siempre el retén está cerca.
-    const inicio = lastKnownLatLng
-      ? { lng: lastKnownLatLng[1], lat: lastKnownLatLng[0] }
-      : map.getCenter();
+    // Si ya hay un punto elegido (el del GPS, o uno ajustado antes), el pin
+    // arranca ahí: al venir de "Ajustar ubicación" sería raro que volviera
+    // al GPS y perdiera la corrección.
+    const inicio = pendingLocation
+      ? { lng: pendingLocation.lng, lat: pendingLocation.lat }
+      : (lastKnownLatLng
+          ? { lng: lastKnownLatLng[1], lat: lastKnownLatLng[0] }
+          : map.getCenter());
 
     renderSheet(`
       <h2>Ahora marca el lugar</h2>
@@ -1941,11 +1953,17 @@
       <h2>¿Qué estás reportando?</h2>
       <p class="sub">Elige la categoría que mejor describe la situación.</p>
       <div class="cat-grid">${options}</div>
+      <button type="button" class="link-btn" id="adjust-loc">📍 Ajustar ubicación en el mapa</button>
       <div class="btn-row">
         <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
       </div>
     `);
     document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
+    // Escape hatch del atajo por GPS: si el punto automático no es exacto,
+    // desde acá se abre el pin arrastrable. Al confirmarlo se vuelve a esta
+    // misma hoja. Va solo en el flujo detallado: el rápido usa zona
+    // aproximada a propósito (ver "Reporte rápido"), ahí no aplica.
+    document.getElementById('adjust-loc').addEventListener('click', startManualPick);
     overlay.querySelectorAll('.cat-option').forEach(btn => {
       btn.addEventListener('click', () => {
         pendingCategory = btn.dataset.cat;
@@ -1980,7 +1998,16 @@
     `, { dismissible: false });
     try{
       pendingPhoto = await compressImage(file);
-      startManualPick();
+      // Con GPS disponible se usa esa ubicación y se salta el paso de
+      // marcar: es lo rápido por defecto. El ajuste fino sigue disponible
+      // desde el enlace "Ajustar ubicación" de la hoja de categoría.
+      // Sin GPS no hay alternativa: hay que marcarlo a mano.
+      if(lastKnownLatLng){
+        pendingLocation = { lat: lastKnownLatLng[0], lng: lastKnownLatLng[1] };
+        askForCategory();
+      } else {
+        startManualPick();
+      }
     }catch(err){
       renderSheet(`
         <h2>Error con la foto</h2>

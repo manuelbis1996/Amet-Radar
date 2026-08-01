@@ -559,6 +559,18 @@ por medio.
     no romper los votos ya guardados en los teléfonos que vienen usando la
     app (esos quedan sin dirección conocida: se deshabilitan los dos
     botones y no se marca ninguno).
+  - **Con GPS, el paso de marcar se saltea** (v11.3): tras la foto, si hay
+    `lastKnownLatLng` se usa esa ubicación y se va directo a la categoría.
+    El pin arrastrable sigue disponible desde el enlace **"Ajustar
+    ubicación en el mapa"** (`#adjust-loc`) de la hoja de categoría, y al
+    confirmarlo se vuelve a esa misma hoja con el punto corregido. Sin GPS
+    no hay atajo posible: ahí sí se pide marcar a mano. `startManualPick()`
+    arranca el pin en `pendingLocation` si ya existe, para que "Ajustar" no
+    descarte una corrección previa volviendo al GPS. **El enlace va solo en
+    `askForCategory` (flujo detallado), NO en `askForCategoryQuick`**: el
+    modo rápido usa zona aproximada a propósito (ver "Reporte rápido"), un
+    ajuste fino ahí sería contradictorio. Ojo al editar: las dos hojas de
+    categoría tienen markup casi idéntico y es fácil tocar la equivocada.
   - **El flujo detallado arranca por la foto** (v11.2): el orden es
     **foto → marcar el lugar → categoría → publica**. Antes era lugar →
     categoría → foto. El motivo es que la foto es lo urgente (el retén está
