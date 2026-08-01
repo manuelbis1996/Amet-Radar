@@ -502,7 +502,12 @@ por medio.
     es un problema de accesibilidad real.
   - Sin controles de zoom en el mapa: los botones +/- sobran en un teléfono.
   - **Estado vacío** (v10.4): cuando no hay ningún reporte en la zona
-    visible se muestra `#empty-state` ("Todo tranquilo por aquí"). Sin eso
+    visible se muestra `#empty-state` ("Todo tranquilo por aquí"). **Es una
+    píldora chica debajo del header, no una tarjeta en el medio del mapa**
+    (v11.4): aun autoocultándose, un cartel grande y centrado tapaba justo
+    lo que el usuario vino a mirar y molestaba — reportado dos veces. El
+    texto se mantiene corto a propósito para que entre en una línea hasta
+    en 320px (verificado por medición, no a ojo). Sin eso
     el usuario ve un mapa mudo y no sabe si la app falló, si no cargó o si
     de verdad no hay nada — y al lanzar en una ciudad nueva ese es
     literalmente el primer estado que ve todo el mundo. El contenedor va

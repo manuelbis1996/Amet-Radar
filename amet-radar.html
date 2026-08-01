@@ -361,23 +361,27 @@
      cargó, o si de verdad no hay nada. Al lanzar en una ciudad nueva ese
      es literalmente el primer estado que ve todo el mundo. pointer-events
      en none para que el mapa se siga pudiendo arrastrar por debajo. */
+  /* Píldora discreta debajo del header, NO una tarjeta en el medio del
+     mapa: aun autoocultándose a los 7s, un cartel grande y centrado
+     tapaba justo lo que el usuario vino a mirar y molestaba (reportado).
+     Acá informa sin robar el centro de la pantalla ni el mapa. */
   #empty-state{
-    position:absolute; inset:0; z-index:300; pointer-events:none;
-    display:flex; align-items:center; justify-content:center; padding:24px;
+    position:absolute; left:0; right:0; z-index:300; pointer-events:none;
+    top: calc(env(safe-area-inset-top, 0px) + 74px);
+    display:flex; justify-content:center; padding:0 16px;
   }
   #empty-state[hidden]{ display:none; }
-  /* La tarjeta sí recibe toques (el contenedor no), para poder cerrarla
+  /* La píldora sí recibe toques (el contenedor no), para poder cerrarla
      antes de que se vaya sola a los 7s. */
   .empty-card{
     pointer-events:auto; cursor:pointer;
-    background:var(--surface); border-radius:var(--r-lg);
-    box-shadow:var(--shadow-2); padding:20px 22px; max-width:290px; text-align:center;
+    background:var(--surface); border-radius:999px;
+    box-shadow:var(--shadow-1); padding:9px 16px;
+    font-size:12.5px; font-weight:600; color:var(--muted);
+    text-align:center; max-width:100%;
     animation: empty-in .28s ease both;
   }
-  @keyframes empty-in{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:none; } }
-  .empty-emoji{ font-size:30px; line-height:1; margin-bottom:8px; }
-  .empty-card h3{ margin:0 0 6px; font-size:16px; font-weight:700; letter-spacing:-.2px; }
-  .empty-card p{ margin:0; font-size:13.5px; line-height:1.5; color:var(--muted); }
+  @keyframes empty-in{ from{ opacity:0; transform:translateY(-6px); } to{ opacity:1; transform:none; } }
 
   /* ---- Hoja de bienvenida (primera vez) ---- */
   .welcome-list{ list-style:none; margin:0 0 16px; padding:0; display:flex; flex-direction:column; gap:11px; }
@@ -483,11 +487,7 @@
   </div>
 
   <div id="empty-state" hidden>
-    <div class="empty-card">
-      <div class="empty-emoji">🛣️</div>
-      <h3>Todo tranquilo por aquí</h3>
-      <p>No hay reportes activos en esta zona. Si ves un retén, sé el primero en avisar.</p>
-    </div>
+    <div class="empty-card">🛣️ Todo tranquilo por aquí</div>
   </div>
 
   <div id="top">
@@ -538,7 +538,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v11.3';
+  const APP_VERSION = 'v11.4';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
