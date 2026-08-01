@@ -559,6 +559,21 @@ por medio.
     no romper los votos ya guardados en los teléfonos que vienen usando la
     app (esos quedan sin dirección conocida: se deshabilitan los dos
     botones y no se marca ninguno).
+  - **La foto publica de una, sin confirmación** (v11.1): el flujo
+    detallado era marcar lugar → categoría → foto → **hoja de confirmación
+    con vista previa y nota** → Publicar. A pedido, ahora la foto publica
+    directo: reportar suele hacerse con apuro (a veces manejando) y ese
+    paso extra costaba tiempo justo al final. **Consecuencias asumidas**:
+    (1) se perdió la nota opcional — ningún flujo la escribe ya, aunque la
+    columna sigue en la base y el detalle la renderiza si existe, así que
+    los reportes viejos con nota se siguen viendo bien; (2) ya no se ve la
+    foto antes de mandarla. La red de seguridad de (2) es `showUndoToast()`:
+    un toast con botón **Deshacer** que dura 6s (`UNDO_MS`, más que los
+    2.6s de un toast normal, porque acá hay que dar tiempo real a
+    reaccionar) y que borra el reporte del servidor, quita el marcador y
+    **devuelve el cupo del anti-spam** (`unregisterLastReportTime`) — si la
+    foto salió movida, repetirla no debería gastar uno de los 3 reportes
+    por hora.
   - **`map.setView()` NO existe en MapLibre** (bug corregido en v11.0):
     quedaron 3 llamadas de Leaflet vivas tras la migración a MapLibre
     (v10.0), y cada una lanzaba `TypeError` en tiempo de ejecución:

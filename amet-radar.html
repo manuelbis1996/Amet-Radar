@@ -402,10 +402,6 @@
   .cat-option span.emoji{ font-size:26px; }
   .cat-option:active{ transform:scale(.96); }
 
-  .preview-photo{
-    width:100%; border-radius:var(--r-md); margin-bottom:13px;
-    aspect-ratio:4/3; object-fit:cover; background:var(--surface-2);
-  }
   textarea{
     width:100%; background:var(--surface-2); border:1px solid var(--line);
     border-radius:var(--r-md); color:var(--text); padding:13px;
@@ -441,6 +437,13 @@
     animation: toast-in .22s ease;
   }
   .toast.warn{ background:var(--danger); color:#fff; }
+  .toast-action{ display:flex; align-items:center; gap:12px; padding:9px 10px 9px 18px; }
+  .toast-btn{
+    border:none; background:transparent; color:var(--brand);
+    font:inherit; font-size:13.5px; font-weight:700; cursor:pointer;
+    padding:7px 12px; border-radius:999px; white-space:nowrap;
+  }
+  .toast-btn:active{ opacity:.6; }
   /* Con una hoja abierta, el toast en su posición normal cae justo encima
      del contenido de la hoja — al votar tapaba los propios botones de
      votar, que es exactamente lo que acababa de cambiar. En ese caso se
@@ -528,7 +531,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v11.0';
+  const APP_VERSION = 'v11.1';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -766,6 +769,13 @@
     const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]').filter(t => (Date.now()-t) < CONFIG.reportWindowMin*60000);
     localStorage.setItem(TIMES_KEY, JSON.stringify(times));
     return times.length < CONFIG.reportLimit;
+  }
+  function unregisterLastReportTime(){
+    try{
+      const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]');
+      times.pop();
+      localStorage.setItem(TIMES_KEY, JSON.stringify(times));
+    }catch(e){}
   }
   function registerReportTime(){
     const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]');
@@ -1964,7 +1974,10 @@
     `, { dismissible: false });
     try{
       pendingPhoto = await compressImage(file);
-      askForConfirmation();
+      // Publicar de una: el paso de confirmación se sacó a pedido, para que
+      // reportar sea lo más rápido posible (a veces se hace manejando). La
+      // red de seguridad es el "Deshacer" del toast, ver showUndoToast.
+      publishReport();
     }catch(err){
       renderSheet(`
         <h2>Error con la foto</h2>
@@ -1997,27 +2010,42 @@
     });
   }
 
-  function askForConfirmation(){
-    const cat = CATEGORIES[pendingCategory] || CATEGORIES.reten_fijo;
-    renderSheet(`
-      <h2>Confirmar reporte</h2>
-      <span class="cat-label" style="background:${cat.hex};color:${cat.ink}">${cat.emoji} ${cat.label}</span>
-      <img class="preview-photo" src="${pendingPhoto}" alt="Vista previa" style="margin-top:8px;">
-      <textarea id="note-input" rows="2" placeholder="Nota opcional (ej: sentido, esquina, hora pico)"></textarea>
-      <div class="btn-row">
-        <button class="btn btn-ghost" id="cancel-btn">Descartar</button>
-        <button class="btn btn-primary" id="publish-btn">Publicar</button>
-      </div>
-    `);
-    document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
-    document.getElementById('publish-btn').addEventListener('click', publishReport);
+  // Toast con acción "Deshacer". Como el reporte se publica apenas se saca
+  // la foto, sin pantalla de confirmación, esta es la única oportunidad de
+  // arrepentirse si la foto salió movida o del piso. Dura más que un toast
+  // normal (2.6s) porque acá hay que darle tiempo real a reaccionar.
+  const UNDO_MS = 6000;
+  function showUndoToast(id){
+    const t = document.createElement('div');
+    t.className = 'toast toast-action';
+    t.innerHTML = `<span>Reporte publicado</span><button type="button" class="toast-btn">Deshacer</button>`;
+    document.getElementById('app').appendChild(t);
+    const quitar = () => t.remove();
+    const timer = setTimeout(quitar, UNDO_MS);
+    t.querySelector('.toast-btn').addEventListener('click', async () => {
+      clearTimeout(timer);
+      quitar();
+      removeMarker(id);
+      delete reportsCache[id];
+      const mine = getMine(); mine.delete(id); saveMine(mine);
+      // El intento no debería gastarle un cupo del anti-spam a alguien que
+      // solo quiere repetir la foto.
+      unregisterLastReportTime();
+      updateCount();
+      await deleteReportRemote(id);
+      showToast('Reporte deshecho');
+    });
   }
 
   async function publishReport(){
-    const publishBtn = document.getElementById('publish-btn');
-    publishBtn.disabled = true;
-    publishBtn.textContent = 'Publicando…';
-    const note = document.getElementById('note-input').value.trim().slice(0, 140);
+    renderSheet(`
+      <h2>Publicando…</h2>
+      <div class="row-center"><div class="radar-sweep small"></div><span style="font-size:13px;color:var(--muted)">Enviando reporte…</span></div>
+    `, { dismissible: false });
+    // Sin pantalla de confirmación ya no hay dónde escribir una nota: el
+    // reporte detallado se apoya en la foto, que es lo que de verdad
+    // comunica el retén.
+    const note = '';
     const id = `report_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     const record = {
       lat: pendingLocation.lat, lng: pendingLocation.lng,
@@ -2034,7 +2062,7 @@
       map.easeTo({ center: [record.lng, record.lat], zoom: zoomFromLeaflet(15), duration: 400 });
       closeOverlay();
       registerReportTime();
-      showToast('Reporte publicado. Gracias por avisar.');
+      showUndoToast(id);
     }catch(err){
       if(err instanceof NetworkError){
         // Si uploadPhoto falló antes de terminar, record.photo sigue
