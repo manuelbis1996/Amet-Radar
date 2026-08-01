@@ -538,7 +538,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v11.4';
+  const APP_VERSION = 'v12.0';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -608,6 +608,11 @@
   const CONFIG_URL = `${SUPABASE_URL}/rest/v1/app_config`;
   const PHOTOS_BUCKET_URL = `${SUPABASE_URL}/storage/v1/object/report-photos`;
   const PHOTOS_PUBLIC_URL = `${SUPABASE_URL}/storage/v1/object/public/report-photos`;
+  // Las operaciones destructivas (borrar, votar) ya no van por REST directo:
+  // pasan por funciones de Postgres con reglas adentro, porque la anon key es
+  // pública y con RLS abierta cualquiera podía vaciar la tabla. Ver la
+  // migración 20260801120000_lock_down_writes.sql.
+  const RPC_URL = `${SUPABASE_URL}/rest/v1/rpc`;
   const SUPABASE_HEADERS = {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -681,7 +686,7 @@
   // Storage y devuelve la URL pública — reemplaza guardar el base64
   // completo en reports.photo (ver "Datos y escalabilidad" en
   // plan-mejora-amet-radar.md). El nombre del archivo es <id>.jpg, así
-  // deletePhoto() puede borrar la foto de un reporte por el mismo id.
+  // _delete_report() (en la base) puede borrar la foto por el mismo id.
   async function uploadPhoto(id, dataUrl){
     const blob = await (await fetch(dataUrl)).blob();
     let res;
@@ -702,17 +707,10 @@
     return `${PHOTOS_PUBLIC_URL}/${id}.jpg`;
   }
 
-  // Best-effort: no bloquea el borrado del reporte si falla (ej. reporte
-  // rápido sin foto, o filas viejas con foto en base64 que nunca tuvieron
-  // un objeto en Storage para empezar).
-  async function deletePhoto(id){
-    try{
-      await fetch(`${PHOTOS_BUCKET_URL}/${id}.jpg`, {
-        method: 'DELETE',
-        headers: SUPABASE_HEADERS
-      });
-    }catch(e){ /* no-op */ }
-  }
+  // La foto ya no se borra desde el cliente: lo hace _delete_report() del
+  // lado de la base, junto con la fila. anon perdió el delete sobre el
+  // bucket en la migración 20260801120000 — si no, cualquiera con la anon
+  // key (que es pública) podía vaciar el bucket entero.
 
   async function insertReport(id, record){
     let res;
@@ -729,26 +727,54 @@
     reportsCache[id] = record;
   }
 
-  async function updateReportVotes(id, confirms, denies){
+  // El voto ya no es un PATCH con los totales calculados en el cliente (así,
+  // cualquiera podía mandar confirms:99999): la RPC suma de a 1 y decide
+  // ella misma si el reporte se retira por la comunidad. Devuelve
+  // { confirms, denies, removed } — hay que obedecer eso, no recalcularlo.
+  async function voteReport(id, dir){
+    let out = null;
     try{
-      await fetch(`${REPORTS_URL}?id=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ confirms, denies })
-      });
-    }catch(e){ console.error('Error actualizando votos', e); }
-    if(reportsCache[id]){ reportsCache[id].confirms = confirms; reportsCache[id].denies = denies; }
+      const rows = await callRpc('vote_report', { p_id: id, p_dir: dir });
+      out = Array.isArray(rows) ? rows[0] : rows;
+    }catch(e){ console.error('Error votando', e); }
+    if(!out) return null;
+    if(out.removed){
+      delete reportsCache[id];
+      dropToken(id);
+    } else if(reportsCache[id]){
+      reportsCache[id].confirms = out.confirms;
+      reportsCache[id].denies = out.denies;
+    }
+    return out;
   }
 
+  // Borrar el propio reporte exige presentar el token guardado en este
+  // dispositivo (la base solo tiene su hash). Devuelve false si el servidor
+  // no lo aceptó — ahí el reporte sigue existiendo y no hay que sacarlo de
+  // la vista, o volvería en el próximo sondeo de 8s como un fantasma.
   async function deleteReportRemote(id){
+    const token = getTokens()[id];
+    if(!token) return false;
+    let ok = false;
     try{
-      await fetch(`${REPORTS_URL}?id=eq.${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: SUPABASE_HEADERS
-      });
+      ok = await callRpc('delete_own_report', { p_id: id, p_token: token }) === true;
     }catch(e){ console.error('Error eliminando reporte', e); }
-    deletePhoto(id);
-    delete reportsCache[id];
+    if(ok){ delete reportsCache[id]; dropToken(id); }
+    return ok;
+  }
+
+  // Limpieza de vencidos: antes el cliente mandaba un DELETE por cada
+  // reporte viejo que veía (o sea, cualquiera podía borrar cualquier cosa).
+  // Ahora se lo pide a la base, que solo borra lo que ya pasó
+  // max_age_minutes. Throttleado: no tiene sentido pedirlo en cada
+  // renderVisibleMarkers (se dispara en cada paneo del mapa).
+  const PURGE_EVERY_MS = 10 * 60 * 1000;
+  let lastPurge = 0;
+  function purgeExpiredRemote(){
+    const now = Date.now();
+    if(now - lastPurge < PURGE_EVERY_MS) return;
+    lastPurge = now;
+    callRpc('purge_expired_reports').catch(e => console.error('Error limpiando vencidos', e));
   }
 
   // ---- Preferencias de este dispositivo (siguen siendo locales) ----
@@ -764,6 +790,46 @@
   // que vienen usando la app (esos quedan sin dirección conocida, y ahí
   // solo se deshabilitan los botones).
   const VOTE_DIR_KEY = 'amet_vote_dir_v1';
+
+  // Token de propiedad por reporte. Sin cuentas de usuario, esta es la forma
+  // de que el servidor pueda verificar quién puede borrar qué: el texto
+  // plano vive solo en este dispositivo y la base guarda únicamente su hash
+  // SHA-256, que no sirve para borrar. Antes "es mío" se validaba solo con
+  // MINE_KEY del lado del cliente, o sea que no validaba nada.
+  const TOKENS_KEY = 'amet_report_tokens_v1';
+  function getTokens(){ try{ return JSON.parse(localStorage.getItem(TOKENS_KEY)||'{}'); }catch(e){ return {}; } }
+  function saveToken(id, token){
+    try{ const m = getTokens(); m[id] = token; localStorage.setItem(TOKENS_KEY, JSON.stringify(m)); }catch(e){}
+  }
+  function dropToken(id){
+    try{ const m = getTokens(); delete m[id]; localStorage.setItem(TOKENS_KEY, JSON.stringify(m)); }catch(e){}
+  }
+  function newOwnerToken(){
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    return [...b].map(x => x.toString(16).padStart(2,'0')).join('');
+  }
+  async function sha256Hex(text){
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2,'0')).join('');
+  }
+  // Devuelve el record con owner_hash puesto y deja el token guardado. Se
+  // llama al crear el reporte, antes de encolarlo o publicarlo, para que el
+  // hash viaje solo también por la cola offline.
+  async function stampOwnership(id, record){
+    const token = newOwnerToken();
+    saveToken(id, token);
+    record.owner_hash = await sha256Hex(token);
+    return record;
+  }
+  async function callRpc(fn, args){
+    const res = await fetch(`${RPC_URL}/${fn}`, {
+      method: 'POST', headers: SUPABASE_HEADERS, body: JSON.stringify(args || {})
+    });
+    if(!res.ok) throw new Error(`RPC ${fn} falló (${res.status})`);
+    const txt = await res.text();
+    return txt ? JSON.parse(txt) : null;
+  }
   function getVoteDirs(){ try{ return JSON.parse(localStorage.getItem(VOTE_DIR_KEY)||'{}'); }catch(e){ return {}; } }
   function saveVoteDir(id, dir){
     const m = getVoteDirs(); m[id] = dir;
@@ -1187,8 +1253,9 @@
       const ageMinutes = (now - r.ts) / 60000;
       if(ageMinutes > CONFIG.maxAgeMinutes){
         delete reportsCache[id];
+        dropToken(id);
         removeMarker(id);
-        deleteReportRemote(id);
+        purgeExpiredRemote();
         // Si el usuario tenía abierta la hoja de este reporte, cerrarla:
         // acaba de dejar de existir. (Solo pasa por expiración; el filtro
         // por categoría o el paneo no llegan acá, y con la hoja abierta el
@@ -1512,6 +1579,7 @@
 
     if(action === 'cancel-pending'){
       dequeuePending(id);
+      dropToken(id);
       const mine = getMine(); mine.delete(id); saveMine(mine);
       removeMarker(id);
       updateCount();
@@ -1527,17 +1595,18 @@
       const voted = getVoted();
       if(voted.has(id)){ showToast('Ya votaste en este reporte'); return; }
       voted.add(id); saveVoted(voted); saveVoteDir(id, action);
-      const confirms = (r.confirms||0) + (action === 'confirm' ? 1 : 0);
-      const denies = (r.denies||0) + (action === 'deny' ? 1 : 0);
 
-      if(denies - confirms >= CONFIG.denyThreshold){
-        await deleteReportRemote(id);
+      // El retiro comunitario lo decide el servidor (vote_report mira
+      // deny_threshold de app_config y borra la fila): el cliente ya no
+      // puede borrar reportes ajenos, así que solo obedece la respuesta.
+      const out = await voteReport(id, action);
+      if(out && out.removed){
         removeMarker(id);
+        closeDetail();
         updateCount();
         showToast('Reporte retirado por la comunidad');
         return;
       }
-      await updateReportVotes(id, confirms, denies);
       refreshDetail(id);
       showToast(action === 'confirm' ? 'Gracias por confirmar' : 'Gracias por avisar');
     }
@@ -1561,7 +1630,14 @@
     if(action === 'delete'){
       const mine = getMine();
       if(!mine.has(id)){ showToast('Solo puedes eliminar tus propios reportes'); return; }
-      await deleteReportRemote(id);
+      const ok = await deleteReportRemote(id);
+      if(!ok){
+        // Los reportes publicados antes de la migración de seguridad no
+        // tienen owner_hash, así que su autor ya no puede borrarlos: se van
+        // solos al vencer. Vale para cualquier otro rechazo del servidor.
+        showToast('No se pudo eliminar este reporte. Se retirará solo al vencer.', true);
+        return;
+      }
       mine.delete(id); saveMine(mine);
       removeMarker(id);
       updateCount();
@@ -1844,6 +1920,7 @@
       category: pendingCategory || 'reten_fijo',
       confirms: 0, denies: 0, approx: true
     };
+    await stampOwnership(id, record);
     try{
       await insertReport(id, record);
       const mine = getMine(); mine.add(id); saveMine(mine);
@@ -1863,6 +1940,9 @@
         showToast('Sin conexión: se publicará cuando vuelvas a tener internet.', true);
         return;
       }
+      // El reintento genera un id (y un token) nuevo, así que este queda
+      // huérfano en localStorage si no se lo saca acá.
+      dropToken(id);
       renderSheet(`
         <h2>No se pudo publicar</h2>
         <div class="error-box">Hubo un problema guardando el reporte. Intenta de nuevo.</div>
@@ -2062,8 +2142,8 @@
       // solo quiere repetir la foto.
       unregisterLastReportTime();
       updateCount();
-      await deleteReportRemote(id);
-      showToast('Reporte deshecho');
+      const ok = await deleteReportRemote(id);
+      showToast(ok ? 'Reporte deshecho' : 'No se pudo deshacer el reporte.', !ok);
     });
   }
 
@@ -2083,6 +2163,9 @@
       category: pendingCategory || 'reten_fijo',
       confirms: 0, denies: 0
     };
+    // Sella la propiedad ANTES de cualquier envío: si se cae la red y el
+    // record se va a la cola offline, el owner_hash tiene que viajar con él.
+    await stampOwnership(id, record);
     try{
       record.photo = await uploadPhoto(id, record.photo);
       await insertReport(id, record);
@@ -2108,6 +2191,9 @@
         showToast('Sin conexión: el reporte se publicará solo cuando vuelvas a tener internet.', true);
         return;
       }
+      // El reintento genera un id (y un token) nuevo, así que este queda
+      // huérfano en localStorage si no se lo saca acá.
+      dropToken(id);
       renderSheet(`
         <h2>No se pudo publicar</h2>
         <div class="error-box">Hubo un problema guardando el reporte. Intenta de nuevo.</div>

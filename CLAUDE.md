@@ -109,6 +109,9 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   las notificaciones push (ver "Notificaciones push" abajo).
 - `supabase/functions/admin-login/index.ts` — Edge Function que valida el
   password del panel admin (ver "Panel de administración" abajo).
+- `supabase/functions/admin-delete-report/index.ts` — Edge Function que
+  borra un reporte desde el panel admin, con la `service_role` key detrás
+  del mismo `ADMIN_PASSWORD` (ver "Seguridad de escritura" abajo).
 - `admin.html` — panel de administración (moderar reportes, ver
   estadísticas, editar parámetros del sistema), sin backend propio — le
   pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
@@ -143,19 +146,22 @@ key embebida en el `<script>` — no hay backend propio de por medio.
 - `GET  {SUPABASE_URL}/rest/v1/reports?select=*` — todas las filas.
 - `POST {SUPABASE_URL}/rest/v1/reports` — body `{ id, ...record }`, inserta
   una fila.
-- `PATCH {SUPABASE_URL}/rest/v1/reports?id=eq.<id>` — body con campos a
-  mezclar (`confirms`/`denies`).
-- `DELETE {SUPABASE_URL}/rest/v1/reports?id=eq.<id>` — borra la fila.
+- **No hay `PATCH` ni `DELETE` contra `/rest/v1/reports`** desde v12.0: esas
+  políticas RLS se eliminaron (ver "Seguridad de escritura" abajo). Todo lo
+  destructivo pasa por `POST {SUPABASE_URL}/rest/v1/rpc/<funcion>`
+  (`vote_report`, `delete_own_report`, `purge_expired_reports`).
 - Headers en todas las llamadas: `apikey` y `Authorization: Bearer
   <SUPABASE_ANON_KEY>`.
 - Esquema de `reports`: `id text PK`, `lat/lng double precision`,
   `photo text` (nullable), `note text`, `ts bigint` (epoch ms), `category
   text` (check contra las 4 categorías), `confirms/denies integer`, `approx
-  boolean`, `created_at timestamptz`.
-- RLS habilitado con políticas abiertas (`USING (true)`) para
-  select/insert/update/delete — no hay autenticación de usuarios en la app,
-  así que es equivalente al CORS abierto que tenía antes `server.js`; el
-  linter de Supabase marca esto como warning esperado, no como bug.
+  boolean`, `created_at timestamptz`, `owner_hash text` (nullable, ver
+  "Seguridad de escritura").
+- RLS habilitado. `select` e `insert` siguen abiertos (`USING (true)`): leer
+  y publicar son anónimos por diseño, no hay cuentas de usuario. `update` y
+  `delete` **ya no tienen política** — ver "Seguridad de escritura" abajo.
+  El linter de Supabase marca las dos políticas abiertas que quedan como
+  warning esperado, no como bug.
 - `server.js` ya no expone ninguna ruta `/api/*`.
 - **`photo` guarda una URL, no base64**: bucket público `report-photos` en
   Supabase Storage, archivo `<id-del-reporte>.jpg`. `uploadPhoto()` en
@@ -164,11 +170,11 @@ key embebida en el `<script>` — no hay backend propio de por medio.
   (`{SUPABASE_URL}/storage/v1/object/public/report-photos/<id>.jpg`) en
   vez del base64 completo — antes cada fila cargaba la imagen entera y
   `GET .../reports?select=*` la traía completa en cada refresh de 8s, para
-  todos los reportes activos. `deleteReportRemote()`
-  (`amet-radar.html`)/`deleteReport()` (`admin.html`) borran la foto del
-  bucket al borrar el reporte (best-effort, `deletePhoto()`, no bloquea el
-  borrado si falla). Bucket con políticas abiertas de insert/delete para
-  `anon` en `storage.objects` (mismo criterio que `reports`), sin política
+  todos los reportes activos. La foto se borra junto con la fila, del lado
+  de la base (`_delete_report()`), no desde el cliente: `anon` perdió el
+  `delete` sobre `storage.objects` en v12.0, si no cualquiera con la anon
+  key podía vaciar el bucket entero. Queda abierto solo el `insert` (sin
+  eso no se puede publicar una foto) y no hay política
   de select — un bucket `public` sirve sus objetos vía
   `/object/public/<bucket>/<path>` sin pasar por RLS. Las filas existentes
   con foto en base64 (de antes de esta migración) no se reprocesaron —
@@ -338,14 +344,24 @@ por medio.
   key (la misma que ya está en `amet-radar.html`, pública por diseño), este
   login **no protege ningún dato real** — es solo un gate de conveniencia
   para que no cualquiera encuentre la pantalla de moderación, mismo
-  espíritu que "no hay autenticación de usuarios en la app". Por eso no
-  hay tokens de sesión: tras un login exitoso, `admin.html` solo guarda un
-  flag en `sessionStorage` y a partir de ahí llama a Supabase igual que
-  cualquier visitante.
-- **Borrado de reportes desde el panel**: usa el mismo `DELETE
-  .../reports?id=eq.<id>` que ya podía hacer cualquiera con la anon key
-  desde antes del panel (RLS abierta) — no se introdujo una superficie de
-  ataque nueva, solo una forma cómoda de hacer lo que ya era posible.
+  espíritu que "no hay autenticación de usuarios en la app". Eso **sigue
+  siendo cierto para leer y para editar `app_config`** (esas políticas RLS
+  siguen abiertas), pero ya **no** para borrar reportes — ver el punto
+  siguiente.
+- **Borrado de reportes desde el panel** (v12.0): pasa por el Edge Function
+  `admin-delete-report`, que revalida el `ADMIN_PASSWORD` y borra con la
+  `service_role` key (llamando a `_delete_report` en la base, para no
+  duplicar la lógica de borrar la fila + su foto). Antes usaba el mismo
+  `DELETE .../reports?id=eq.<id>` que podía hacer cualquiera con la anon
+  key; al cerrar esa política RLS (ver "Seguridad de escritura"), el panel
+  se quedaba sin forma de borrar y necesitaba una vía propia.
+  Consecuencia: `admin.html` guarda el **password** en `sessionStorage`
+  (clave `amet_admin_pw_v1`) y lo reenvía en cada borrado, en vez de un
+  flag `'1'`. No es ideal, pero cualquiera con XSS en esa página podría
+  llamar al endpoint igual, y montar una tabla de sesiones para un panel
+  que ya se describe como "gate de conveniencia" era desproporcionado. Si
+  el endpoint responde 401 (el password cambió con la pestaña abierta), el
+  panel limpia la sesión y vuelve al login.
 - **Por qué no quedó en Netlify Functions + Blobs**: la primera versión de
   este panel (antes de este commit) se construyó sobre un backend propio en
   Netlify Functions con Netlify Blobs como reemplazo de un `data/*.json` —
@@ -353,6 +369,70 @@ por medio.
   proyecto desde que se migró a Supabase. Se descartó esa rama entera y se
   reconstruyó el panel contra Supabase directo, coherente con cómo ya
   funciona el resto de la app.
+
+## Seguridad de escritura (v12.0) — leer antes de tocar RLS o los flujos de borrado
+
+**El problema que cierra.** `public.reports` tenía políticas RLS abiertas
+para `update` y `delete`, y la `SUPABASE_ANON_KEY` está pública dentro de
+`amet-radar.html` (por diseño: es una publishable key). La combinación
+significaba que cualquiera que mirara el código fuente de la página podía
+vaciar la base entera con una sola petición:
+
+```
+DELETE /rest/v1/reports?id=neq.x
+```
+
+y también poner `confirms: 99999` en cualquier reporte, o vaciar el bucket
+de fotos. Mientras el proyecto era una prueba entre conocidos daba igual;
+al lanzarlo en La Vega por WhatsApp, alcanzaba una persona molesta para
+tumbarlo. Migración: `20260801120000_lock_down_writes.sql`.
+
+**Cómo se resuelve la "propiedad" sin cuentas de usuario.** Con un secreto
+por reporte: al publicar, el cliente genera un token al azar, guarda el
+**texto plano en `localStorage`** (`amet_report_tokens_v1`) y manda a la
+base solo su **hash SHA-256** (columna `reports.owner_hash`). Para borrar
+hay que presentar el token; leer la tabla solo expone el hash, que no sirve
+para nada. Es el mismo espíritu que `amet_my_reports_v1` ("mis reportes"),
+pero **verificable del lado del servidor** — antes "es mío" se validaba
+solo en el cliente, o sea que no validaba nada.
+
+**Las funciones de la base** (todas `SECURITY DEFINER` con `search_path`
+fijo). `grant execute` a `anon` **solo** en las tres públicas:
+
+| Función | Quién la llama | Qué hace |
+|---|---|---|
+| `vote_report(p_id, p_dir)` | cliente (`voteReport`) | suma **1** al contador de `confirm`/`deny` y decide ella el retiro comunitario (lee `deny_threshold` de `app_config`). Devuelve `{confirms, denies, removed}` |
+| `delete_own_report(p_id, p_token)` | cliente (`deleteReportRemote`) | compara `encode(digest(p_token,'sha256'),'hex')` contra `owner_hash`. `false` si no coincide, sin decir por qué |
+| `purge_expired_reports()` | cliente (`purgeExpiredRemote`) | borra solo filas con `ts` vencido. Es seguro exponerla: no puede borrar nada que no fuera a desaparecer igual |
+| `_delete_report(p_id)` | **nadie desde el cliente** | borra la fila + su foto de `storage.objects`. Sin grant a `anon`; sí a `service_role`, porque el Edge Function `admin-delete-report` la usa |
+
+**Gotcha del grant a `service_role`**: `revoke all ... from public` también
+se lo saca a `service_role`, que no es dueño de la función. Hay que
+devolvérselo explícitamente o el panel admin falla al borrar.
+
+**Del lado del cliente** (`amet-radar.html`):
+- El voto ya no calcula ni manda los totales — solo `(id, dirección)` — y
+  **obedece** el `removed` que responde el servidor en vez de decidirlo
+  con `CONFIG.denyThreshold`.
+- La limpieza de vencidos ya no manda un `DELETE` por cada reporte viejo:
+  los saca de la vista y llama a `purge_expired_reports()` throttleada
+  (`PURGE_EVERY_MS`, 10 min — `renderVisibleMarkers` se dispara en cada
+  paneo del mapa).
+- `stampOwnership()` se llama **antes** de cualquier envío, para que el
+  `owner_hash` viaje también si el reporte se va a la cola offline.
+- `deletePhoto()` **ya no existe en el cliente**, ni en `amet-radar.html`
+  ni en `admin.html`.
+
+**Lo que se rompe, asumido**: los reportes creados antes de la migración no
+tienen `owner_hash`, así que sus autores no pueden borrarlos (la app avisa
+"Se retirará solo al vencer"). Se van solos a las `max_age_minutes`. No se
+hace backfill porque no hay forma de saber de quién era cada uno.
+
+**Lo que este cambio NO cubre** (bloqueantes conocidos, quedan para
+después): el anti-spam sigue siendo del lado del cliente (`canReport()`
+mira `localStorage`, se resetea borrando los datos del sitio), y subir
+fotos sigue abierto a cualquiera con la anon key — no hay moderación
+automática ni forma de reportar abuso.
 
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
@@ -699,6 +779,10 @@ ordena alfabéticamente bien):
    `admin_login_attempts` (rate-limit del login del panel admin)
 6. `20260730200000_report_photos_bucket.sql` — bucket de Storage
    `report-photos` + políticas
+7. `20260801120000_lock_down_writes.sql` — cierra `update`/`delete` de
+   `reports` y el `delete` del bucket, agrega `owner_hash` y las funciones
+   `vote_report` / `delete_own_report` / `purge_expired_reports` /
+   `_delete_report` (ver "Seguridad de escritura")
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
@@ -706,8 +790,9 @@ Editor del proyecto nuevo, en ese orden.
 **Lo que las migraciones NO cubren** (pasos manuales aparte, ya
 documentados donde corresponde pero listados acá juntos para no
 saltearse ninguno al migrar):
-- **Edge Functions**: `supabase/functions/notify-nearby/` y
-  `supabase/functions/admin-login/` hay que desplegarlas aparte
+- **Edge Functions**: `supabase/functions/notify-nearby/`,
+  `supabase/functions/admin-login/` y
+  `supabase/functions/admin-delete-report/` hay que desplegarlas aparte
   (`deploy_edge_function` o Supabase CLI) — el código fuente sí está en
   el repo, solo el deploy es manual.
 - **Secrets de Edge Functions** (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
@@ -795,10 +880,10 @@ mismo criterio "sin dependencias" del resto del proyecto.
   `Workers & Pages → Create application → Import a repository`, con
   auto-deploy en cada push a `main`.
 
-Mejoras posteriores, no bloqueantes: reemplazar las políticas RLS abiertas
-de Supabase por algo más restrictivo si se agrega autenticación, y mover
-las fotos (hoy base64 en la columna `photo`) a Supabase Storage si el
-tamaño de las filas se vuelve un problema.
+Mejoras posteriores, no bloqueantes: mover el anti-spam al servidor (hoy
+`canReport()` mira solo `localStorage`) y agregar moderación/reporte de
+abuso para las fotos — son los dos bloqueantes conocidos que quedaron fuera
+del cierre de escritura de v12.0 (ver "Seguridad de escritura").
 
 ## Historial relevante de decisiones (por si se pregunta "por qué así")
 - Se partió de una versión anterior que usaba `window.storage` (API propia
@@ -833,6 +918,15 @@ tamaño de las filas se vuelve un problema.
   compartidos, mientras que el filtro habría resuelto un problema
   hipotético (todavía no hay volumen real de suscriptores para que el
   "ruido" de notificaciones sea un dolor real).
+- Al analizar qué faltaba para lanzar en La Vega apareció el agujero de
+  borrado (RLS abierta + anon key pública = cualquiera vacía la base) y se
+  priorizó cerrarlo por encima de las otras dos cosas que faltaban
+  (anti-spam del lado del servidor, moderación de fotos): esas dos son
+  degradaciones graduales, mientras que un `DELETE ?id=neq.x` es la app
+  entera caída de un golpe, y sin forma de recuperarla. Se eligió el
+  esquema de token por reporte en vez de agregar autenticación de usuarios
+  porque el anonimato es parte del producto (nadie se registra para avisar
+  de un retén) y una cuenta sería justo la fricción que mata el uso.
 - Se migró el hosting de Netlify a Cloudflare Workers cuando Netlify
   agotó la franja gratuita (banda ancha/build minutes) y el sitio quedó
   caído — se prefirió migrar de proveedor antes que agregar un método de

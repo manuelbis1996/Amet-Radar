@@ -168,7 +168,10 @@
   const REPORTS_URL = `${SUPABASE_URL}/rest/v1/reports`;
   const CONFIG_URL = `${SUPABASE_URL}/rest/v1/app_config`;
   const ADMIN_LOGIN_URL = `${SUPABASE_URL}/functions/v1/admin-login`;
-  const PHOTOS_BUCKET_URL = `${SUPABASE_URL}/storage/v1/object/report-photos`;
+  // Borrar ya no se puede con la publishable key (ver la migración
+  // 20260801120000_lock_down_writes.sql): pasa por un Edge Function que
+  // valida el password de admin y borra con la service_role key.
+  const ADMIN_DELETE_URL = `${SUPABASE_URL}/functions/v1/admin-delete-report`;
   const SUPABASE_HEADERS = {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -182,12 +185,18 @@
     control:     { label:'Control tránsito',emoji:'🚦', hex:'#4f9bf0' }
   };
 
-  // El login solo es un gate de conveniencia (ver admin-login/index.ts):
-  // no hay token que validar en cada llamada porque no hay nada más que
-  // proteger — reports/app_config ya tienen RLS abierta para cualquiera
-  // con la anon key, la misma que ya está embebida en amet-radar.html.
-  const SESSION_KEY = 'amet_admin_ok_v1';
-  let authed = sessionStorage.getItem(SESSION_KEY) === '1';
+  // El password se guarda en sessionStorage y se reenvía en cada borrado:
+  // el Edge Function admin-delete-report lo revalida, porque desde la
+  // migración de seguridad el borrado ya no lo puede hacer la anon key.
+  // No es ideal tener el password ahí, pero cualquiera con XSS en esta
+  // página podría llamar al endpoint igual — y montar una tabla de sesiones
+  // para un panel que la documentación describe como "gate de conveniencia"
+  // era desproporcionado. Se va solo al cerrar la pestaña.
+  // Leer y editar app_config siguen abiertas con la anon key (RLS), así que
+  // para eso el login sigue siendo solo un gate de conveniencia.
+  const SESSION_KEY = 'amet_admin_pw_v1';
+  function getAdminPassword(){ return sessionStorage.getItem(SESSION_KEY) || ''; }
+  let authed = !!getAdminPassword();
 
   const loginScreen = document.getElementById('login-screen');
   const dashboard = document.getElementById('dashboard');
@@ -233,7 +242,7 @@
         return;
       }
       authed = true;
-      sessionStorage.setItem(SESSION_KEY, '1');
+      sessionStorage.setItem(SESSION_KEY, password);
       document.getElementById('password-input').value = '';
       showEntry();
     }catch(err){
@@ -321,27 +330,30 @@
     });
   }
 
-  // Best-effort: no bloquea el borrado del reporte si falla (ej. reporte
-  // rápido sin foto, o filas viejas con foto en base64 sin objeto en
-  // Storage). Mismo nombre de archivo <id>.jpg que usa uploadPhoto() en
-  // amet-radar.html.
-  async function deletePhoto(id){
-    try{
-      await fetch(`${PHOTOS_BUCKET_URL}/${id}.jpg`, {
-        method: 'DELETE',
-        headers: SUPABASE_HEADERS
-      });
-    }catch(e){ /* no-op */ }
-  }
-
+  // La foto la borra la función _delete_report de la base, junto con la
+  // fila (mismo nombre de archivo <id>.jpg que usa uploadPhoto() en
+  // amet-radar.html) — el panel ya no toca el bucket directo.
   async function deleteReport(id){
     if(!confirm('¿Eliminar este reporte?')) return;
     try{
-      await fetch(`${REPORTS_URL}?id=eq.${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' }
+      const res = await fetch(ADMIN_DELETE_URL, {
+        method: 'POST',
+        headers: SUPABASE_HEADERS,
+        body: JSON.stringify({ password: getAdminPassword(), id })
       });
-      deletePhoto(id);
+      if(res.status === 401){
+        // El password de admin cambió mientras la pestaña seguía abierta.
+        sessionStorage.removeItem(SESSION_KEY);
+        authed = false;
+        showEntry();
+        showToast('Tu sesión venció. Entra de nuevo.', true);
+        return;
+      }
+      if(!res.ok){
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || 'No se pudo eliminar el reporte', true);
+        return;
+      }
       showToast('Reporte eliminado');
       await fetchReports();
       renderReportsTable();
