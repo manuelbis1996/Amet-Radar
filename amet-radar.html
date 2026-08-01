@@ -531,7 +531,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v11.1';
+  const APP_VERSION = 'v11.2';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1776,7 +1776,7 @@
       <p class="sub">Elige la opción que mejor se ajuste al momento.</p>
       <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px;">
         <button class="btn btn-primary" id="quick-btn" style="width:100%;">⚡ Reporte rápido — voy manejando</button>
-        <button class="btn btn-ghost" id="detailed-btn" style="width:100%;">📍 Marcar en el mapa + foto</button>
+        <button class="btn btn-ghost" id="detailed-btn" style="width:100%;">📸 Foto + marcar en el mapa</button>
       </div>
       <div class="btn-row">
         <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
@@ -1784,7 +1784,10 @@
     `);
     document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
     document.getElementById('quick-btn').addEventListener('click', startQuickReport);
-    document.getElementById('detailed-btn').addEventListener('click', startManualPick);
+    // La foto va PRIMERO: es lo urgente (el retén está ahí en ese momento y
+    // hay que capturarlo ya). Marcar el lugar y elegir la categoría se
+    // pueden hacer después, con el vehículo detenido y sin apuro.
+    document.getElementById('detailed-btn').addEventListener('click', askForPhoto);
   }
 
   // ---- Reporte rápido: sin foto, ubicación aproximada a partir del GPS ----
@@ -1876,7 +1879,7 @@
       : map.getCenter();
 
     renderSheet(`
-      <h2>Marca el lugar</h2>
+      <h2>Ahora marca el lugar</h2>
       <p class="sub">Arrastra el pin al punto exacto, o toca el mapa para moverlo ahí.</p>
       <div class="btn-row">
         <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
@@ -1946,15 +1949,18 @@
     overlay.querySelectorAll('.cat-option').forEach(btn => {
       btn.addEventListener('click', () => {
         pendingCategory = btn.dataset.cat;
-        askForPhoto();
+        // Último paso del flujo detallado: publica de una, sin pantalla de
+        // confirmación (ver el historial de decisiones). La red de
+        // seguridad si algo salió mal es el "Deshacer" del toast.
+        publishReport();
       });
     });
   }
 
   function askForPhoto(){
     renderSheet(`
-      <h2>Foto obligatoria</h2>
-      <p class="sub">Toma una foto en el lugar. Cada reporte necesita una imagen como comprobante.</p>
+      <h2>Primero la foto</h2>
+      <p class="sub">Sácala ahora que estás en el lugar. Después marcas el punto en el mapa y eliges la categoría.</p>
       <div class="btn-row">
         <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
         <button class="btn btn-primary" id="open-camera-btn">Abrir cámara</button>
@@ -1974,10 +1980,7 @@
     `, { dismissible: false });
     try{
       pendingPhoto = await compressImage(file);
-      // Publicar de una: el paso de confirmación se sacó a pedido, para que
-      // reportar sea lo más rápido posible (a veces se hace manejando). La
-      // red de seguridad es el "Deshacer" del toast, ver showUndoToast.
-      publishReport();
+      startManualPick();
     }catch(err){
       renderSheet(`
         <h2>Error con la foto</h2>

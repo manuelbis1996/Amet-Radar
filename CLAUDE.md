@@ -559,7 +559,14 @@ por medio.
     no romper los votos ya guardados en los teléfonos que vienen usando la
     app (esos quedan sin dirección conocida: se deshabilitan los dos
     botones y no se marca ninguno).
-  - **La foto publica de una, sin confirmación** (v11.1): el flujo
+  - **El flujo detallado arranca por la foto** (v11.2): el orden es
+    **foto → marcar el lugar → categoría → publica**. Antes era lugar →
+    categoría → foto. El motivo es que la foto es lo urgente (el retén está
+    ahí en ese momento y hay que capturarlo ya); marcar el punto y elegir
+    la categoría se pueden hacer después, con el vehículo detenido. El
+    botón del selector de modo dice "📸 Foto + marcar en el mapa" para que
+    el orden quede claro antes de entrar.
+  - **La foto ya no abre una pantalla de confirmación** (v11.1): el flujo
     detallado era marcar lugar → categoría → foto → **hoja de confirmación
     con vista previa y nota** → Publicar. A pedido, ahora la foto publica
     directo: reportar suele hacerse con apuro (a veces manejando) y ese
