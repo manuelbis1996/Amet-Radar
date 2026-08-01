@@ -528,7 +528,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v10.9';
+  const APP_VERSION = 'v11.0';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1275,7 +1275,10 @@
   function openReportById(id){
     const r = reportsCache[id];
     if(!r) return;
-    map.setView([r.lat, r.lng], 16);
+    // OJO: map.setView es de Leaflet y NO existe en MapLibre — tenerlo acá
+    // hacía que abrir un reporte por link compartido o por notificación
+    // lanzara excepción. Además el orden es [lng, lat], al revés que Leaflet.
+    map.easeTo({ center: [r.lng, r.lat], zoom: zoomFromLeaflet(16), duration: 300 });
     setTimeout(() => {
       upsertMarker(id, r);
       openDetail(id);
@@ -2028,7 +2031,7 @@
       const mine = getMine(); mine.add(id); saveMine(mine);
       upsertMarker(id, record);
       updateCount();
-      map.setView([record.lat, record.lng], 15);
+      map.easeTo({ center: [record.lng, record.lat], zoom: zoomFromLeaflet(15), duration: 400 });
       closeOverlay();
       registerReportTime();
       showToast('Reporte publicado. Gracias por avisar.');
@@ -2041,7 +2044,7 @@
         const mine = getMine(); mine.add(id); saveMine(mine);
         upsertMarker(id, record);
         updateCount();
-        map.setView([record.lat, record.lng], 15);
+        map.easeTo({ center: [record.lng, record.lat], zoom: zoomFromLeaflet(15), duration: 400 });
         closeOverlay();
         registerReportTime();
         showToast('Sin conexión: el reporte se publicará solo cuando vuelvas a tener internet.', true);

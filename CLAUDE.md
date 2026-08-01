@@ -559,6 +559,22 @@ por medio.
     no romper los votos ya guardados en los teléfonos que vienen usando la
     app (esos quedan sin dirección conocida: se deshabilitan los dos
     botones y no se marca ninguno).
+  - **`map.setView()` NO existe en MapLibre** (bug corregido en v11.0):
+    quedaron 3 llamadas de Leaflet vivas tras la migración a MapLibre
+    (v10.0), y cada una lanzaba `TypeError` en tiempo de ejecución:
+    `publishReport()` (dos veces) y `openReportById()`. La de publicar era
+    especialmente confusa: el reporte **sí se guardaba** (el `insert` ya
+    había pasado) y recién después reventaba el `setView`, así que el catch
+    mostraba "Hubo un problema guardando el reporte" sobre un reporte que
+    estaba perfectamente guardado — reportado por el usuario. La de
+    `openReportById` rompía abrir un reporte por link compartido o desde
+    una notificación push. Reemplazadas por `map.easeTo({center:[lng,lat],
+    zoom})` — ojo también con el orden, Leaflet usa `[lat,lng]` y MapLibre
+    `[lng,lat]`. **Por qué no lo agarraron los tests**: ninguna suite
+    ejercitaba una publicación completa ni el deep link; el stub tampoco
+    tiene `setView`, así que habría fallado de haberse ejecutado. Se agregó
+    `check-publicar.js`, que publica un reporte con foto de punta a punta
+    (incluye `setInputFiles` para la cámara) y abre un `?r=`.
   - **Elegir el lugar es un pin arrastrable** (v10.9): antes había que
     acertar el punto exacto de un solo toque, con el dedo tapando justo lo
     que se quería marcar y sin poder corregir. Ahora `startManualPick()`
