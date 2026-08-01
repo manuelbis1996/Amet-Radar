@@ -559,6 +559,24 @@ por medio.
     no romper los votos ya guardados en los teléfonos que vienen usando la
     app (esos quedan sin dirección conocida: se deshabilitan los dos
     botones y no se marca ninguno).
+  - **Elegir el lugar es un pin arrastrable** (v10.9): antes había que
+    acertar el punto exacto de un solo toque, con el dedo tapando justo lo
+    que se quería marcar y sin poder corregir. Ahora `startManualPick()`
+    coloca un `maplibregl.Marker({ draggable:true, anchor:'bottom' })` en la
+    ubicación del usuario (o el centro del mapa si no hay GPS): se arrastra
+    para afinar, se puede tocar el mapa para saltos grandes, y recién
+    "Confirmar lugar" avanza a la categoría. `anchor:'bottom'` importa — la
+    punta del pin es el punto real, así el dedo nunca lo tapa. **Ojo con el
+    CSS**: MapLibre posiciona el marcador escribiendo `transform` en el
+    elemento que se le pasa, así que la animación de entrada va en un hijo
+    (`.pick-inner`); animar `transform` en `.pick-marker` pelearía con el
+    posicionamiento. `closeOverlay()` y el confirmar llaman a
+    `removePickMarker()` para que no quede un pin huérfano.
+  - **`renderSheet()` oculta el estado vacío** (v10.9): la tarjeta "Todo
+    tranquilo por aquí" tiene `pointer-events:auto` (para poder cerrarla), y
+    en modo "Marca el lugar" —donde el overlay deja pasar los toques al
+    mapa— se comía el toque justo en el centro de la pantalla, que es donde
+    uno naturalmente marca.
   - **Tocar fuera de una hoja la cierra** (v10.8): un listener de `click`
     en `#flow-overlay` que cierra cuando `e.target === overlay` (o sea, el
     toque cayó en el fondo oscurecido y no dentro de `.sheet`). El detalle

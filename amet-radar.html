@@ -197,6 +197,20 @@
   }
   .chip[aria-pressed="false"]{ opacity:.5; }
 
+  /* ---- Pin arrastrable para elegir el lugar del reporte ---- */
+  /* OJO: MapLibre posiciona el marcador escribiendo `transform` en ESTE
+     elemento, así que acá no se puede animar transform ni ponerle uno —
+     se pelearía con el posicionamiento y el pin quedaría en el lugar
+     equivocado. Por eso la animación de entrada va en el hijo. */
+  .pick-marker{
+    color:var(--brand); cursor:grab; touch-action:none;
+    filter: drop-shadow(0 5px 8px rgba(0,0,0,.4));
+  }
+  .pick-marker:active{ cursor:grabbing; }
+  .pick-inner{ animation: pick-drop .3s cubic-bezier(.2,.9,.3,1.2) both; }
+  .pick-marker svg{ width:34px; height:47px; display:block; }
+  @keyframes pick-drop{ from{ opacity:0; transform:translateY(-14px); } to{ opacity:1; transform:none; } }
+
   /* ---- Marcadores ---- */
   .amet-pin{
     width:38px; height:38px; display:flex; align-items:center; justify-content:center;
@@ -514,7 +528,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v10.8';
+  const APP_VERSION = 'v10.9';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1685,6 +1699,12 @@
   // comprimiendo la foto): ahí no hay nada que cancelar y cerrarlas dejaría
   // la operación corriendo por detrás con la UI ya cerrada.
   function renderSheet(html, opts){
+    // Con una hoja abierta el cartel de estado vacío estorba: en el modo
+    // "Marca el lugar" (donde el overlay deja pasar los toques al mapa) la
+    // tarjeta se comía el toque justo en el centro de la pantalla, que es
+    // donde uno naturalmente marca. En el resto de las hojas quedaría
+    // tapado por el scrim igual.
+    hideEmptyState();
     const dismissible = !opts || opts.dismissible !== false;
     overlay.innerHTML = `<div class="sheet">${html}</div>`;
     overlay.dataset.dismissible = dismissible ? 'true' : 'false';
@@ -1715,6 +1735,7 @@
       map.getContainer().style.cursor = '';
       manualPickHandler = null;
     }
+    removePickMarker();
     // Reevaluar el estado vacío ahora que no hay una hoja tapando: mientras
     // el overlay está abierto se difiere (ver maybeShowEmptyState), y sin
     // esto habría que esperar hasta 8s al próximo sondeo para verlo.
@@ -1722,6 +1743,10 @@
   }
 
   let manualPickHandler = null;
+  let pickMarker = null;
+  function removePickMarker(){
+    if(pickMarker){ pickMarker.remove(); pickMarker = null; }
+  }
 
   reportBtn.addEventListener('click', () => {
     if(!canReport()){
@@ -1831,36 +1856,61 @@
   const PICK_ZOOM = 18;
 
   function startManualPick(){
+    // Arranca donde está el usuario (o en el centro del mapa si todavía no
+    // hay GPS), no en un punto vacío: casi siempre el retén está cerca.
+    const inicio = lastKnownLatLng
+      ? { lng: lastKnownLatLng[1], lat: lastKnownLatLng[0] }
+      : map.getCenter();
+
     renderSheet(`
       <h2>Marca el lugar</h2>
-      <p class="sub">Toca el punto exacto en el mapa donde está el agente.</p>
+      <p class="sub">Arrastra el pin al punto exacto, o toca el mapa para moverlo ahí.</p>
       <div class="btn-row">
         <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
+        <button class="btn btn-primary" id="pick-confirm">Confirmar lugar</button>
       </div>
     `);
     document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
     overlay.style.pointerEvents = 'none';
     overlay.classList.add('picking');
     overlay.querySelector('.sheet').style.pointerEvents = 'auto';
-    map.getContainer().style.cursor = 'crosshair';
     if(map.getZoom() < zoomFromLeaflet(PICK_ZOOM)){
       // Ojo: la duración de flyTo en MapLibre va en milisegundos, en
       // Leaflet iba en segundos.
       map.flyTo({
-        center: lastKnownLatLng ? [lastKnownLatLng[1], lastKnownLatLng[0]] : map.getCenter(),
+        center: [inicio.lng, inicio.lat],
         zoom: zoomFromLeaflet(PICK_ZOOM),
         duration: 500
       });
     }
-    manualPickHandler = (e) => {
-      pendingLocation = { lat: e.lngLat.lat, lng: e.lngLat.lng };
-      map.getContainer().style.cursor = '';
+
+    // Pin arrastrable en vez de "acertá de un toque": antes había que
+    // clavar el punto exacto con el dedo tapando justo el lugar que se
+    // quería marcar, y no se podía corregir. `anchor:'bottom'` hace que la
+    // punta del pin sea el punto real, así el dedo nunca lo tapa.
+    removePickMarker();
+    const el = document.createElement('div');
+    el.className = 'pick-marker';
+    el.innerHTML = `<div class="pick-inner"><svg viewBox="0 0 24 34" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 22 12 22s12-13 12-22c0-6.63-5.37-12-12-12z" fill="currentColor"/><circle cx="12" cy="12" r="4.6" fill="#fff"/></svg></div>`;
+    pickMarker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
+      .setLngLat([inicio.lng, inicio.lat])
+      .addTo(map);
+
+    // Tocar el mapa también mueve el pin: para saltos grandes es más rápido
+    // que arrastrarlo.
+    manualPickHandler = (e) => { if(pickMarker) pickMarker.setLngLat(e.lngLat); };
+    map.on('click', manualPickHandler);
+
+    document.getElementById('pick-confirm').addEventListener('click', () => {
+      if(!pickMarker) return;
+      const ll = pickMarker.getLngLat();
+      pendingLocation = { lat: ll.lat, lng: ll.lng };
       map.off('click', manualPickHandler);
       manualPickHandler = null;
+      removePickMarker();
       overlay.style.pointerEvents = '';
       askForCategory();
-    };
-    map.on('click', manualPickHandler);
+    });
   }
 
   function askForCategory(){
