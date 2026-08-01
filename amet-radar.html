@@ -514,7 +514,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v10.7';
+  const APP_VERSION = 'v10.8';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1681,10 +1681,26 @@
     setTimeout(()=> t.remove(), 2600);
   }
 
-  function renderSheet(html){
+  // dismissible:false para las hojas que están procesando algo (publicando,
+  // comprimiendo la foto): ahí no hay nada que cancelar y cerrarlas dejaría
+  // la operación corriendo por detrás con la UI ya cerrada.
+  function renderSheet(html, opts){
+    const dismissible = !opts || opts.dismissible !== false;
     overlay.innerHTML = `<div class="sheet">${html}</div>`;
+    overlay.dataset.dismissible = dismissible ? 'true' : 'false';
     overlay.hidden = false;
   }
+
+  // Tocar fuera de la hoja (sobre el mapa oscurecido) la cierra, igual que
+  // el botón Cancelar. e.target === overlay significa que el toque cayó en
+  // el fondo y no dentro de la hoja. En modo "Marca el lugar" el overlay
+  // tiene pointer-events:none, así que el toque va al mapa y no llega acá
+  // — que es justo lo que se quiere ahí.
+  overlay.addEventListener('click', (e) => {
+    if(e.target !== overlay) return;
+    if(overlay.dataset.dismissible === 'false') return;
+    closeOverlay();
+  });
   function closeOverlay(){
     overlay.hidden = true;
     overlay.innerHTML = '';
@@ -1772,7 +1788,7 @@
     renderSheet(`
       <h2>Publicando…</h2>
       <div class="row-center"><div class="radar-sweep small"></div><span style="font-size:13px;color:var(--muted)">Enviando reporte rápido…</span></div>
-    `);
+    `, { dismissible: false });
     const id = `report_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     const record = {
       lat: pendingLocation.lat, lng: pendingLocation.lng,
@@ -1892,7 +1908,7 @@
     renderSheet(`
       <h2>Procesando foto</h2>
       <div class="row-center"><div class="radar-sweep small"></div><span style="font-size:13px;color:var(--muted)">Comprimiendo imagen…</span></div>
-    `);
+    `, { dismissible: false });
     try{
       pendingPhoto = await compressImage(file);
       askForConfirmation();

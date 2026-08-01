@@ -559,6 +559,17 @@ por medio.
     no romper los votos ya guardados en los teléfonos que vienen usando la
     app (esos quedan sin dirección conocida: se deshabilitan los dos
     botones y no se marca ninguno).
+  - **Tocar fuera de una hoja la cierra** (v10.8): un listener de `click`
+    en `#flow-overlay` que cierra cuando `e.target === overlay` (o sea, el
+    toque cayó en el fondo oscurecido y no dentro de `.sheet`). El detalle
+    ya lo hacía con `.detail-backdrop`; ahora también las hojas del flujo.
+    Dos casos que quedan afuera a propósito: **las hojas que están
+    procesando algo** ("Publicando…", "Procesando foto") se marcan con
+    `renderSheet(html, { dismissible:false })` porque ahí no hay nada que
+    cancelar y cerrarlas dejaría la operación corriendo por detrás con la
+    UI ya cerrada; y **"Marca el lugar"**, donde el overlay tiene
+    `pointer-events:none` y el toque va al mapa a elegir el punto — no
+    hizo falta ningún caso especial, sale solo de cómo ya estaba armado.
   - **El toast se va arriba cuando hay una hoja abierta** (`.toast.top`,
     v10.7): en su posición normal caía sobre el contenido de la hoja — al
     votar tapaba los propios botones de votar, o sea justo lo que acababa
