@@ -172,6 +172,10 @@
   // 20260801120000_lock_down_writes.sql): pasa por un Edge Function que
   // valida el password de admin y borra con la service_role key.
   const ADMIN_DELETE_URL = `${SUPABASE_URL}/functions/v1/admin-delete-report`;
+  // Editar los parámetros tampoco se puede ya con la publishable key: desde
+  // app_config sale max_age_minutes, que es lo que purge_expired_reports()
+  // usa para decidir qué borrar (ver 20260802140000_lock_down_app_config.sql).
+  const ADMIN_CONFIG_URL = `${SUPABASE_URL}/functions/v1/admin-update-config`;
   const SUPABASE_HEADERS = {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -389,8 +393,7 @@
       max_age_minutes: Number(document.getElementById('cfg-maxage').value),
       deny_threshold: Number(document.getElementById('cfg-deny').value),
       report_limit: Number(document.getElementById('cfg-limit').value),
-      report_window_min: Number(document.getElementById('cfg-window').value),
-      updated_at: new Date().toISOString()
+      report_window_min: Number(document.getElementById('cfg-window').value)
     };
     if(body.stale_minutes > body.max_age_minutes){
       configError.textContent = 'Los minutos para "viejo" no pueden superar los de expirar';
@@ -400,12 +403,26 @@
       return;
     }
     try{
-      const res = await fetch(`${CONFIG_URL}?id=eq.true`, {
-        method: 'PATCH',
-        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
-        body: JSON.stringify(body)
+      const res = await fetch(ADMIN_CONFIG_URL, {
+        method: 'POST',
+        headers: SUPABASE_HEADERS,
+        body: JSON.stringify({ password: getAdminPassword(), config: body })
       });
-      if(!res.ok) throw new Error('No se pudo guardar');
+      if(res.status === 401){
+        sessionStorage.removeItem(SESSION_KEY);
+        authed = false;
+        showEntry();
+        showToast('Tu sesión venció. Entra de nuevo.', true);
+        return;
+      }
+      if(!res.ok){
+        // El endpoint valida rangos (ej. max_age_minutes nunca menor a 15) y
+        // devuelve el motivo exacto; mostrarlo es más útil que un genérico.
+        const data = await res.json().catch(() => ({}));
+        configError.textContent = data.error || 'No se pudo guardar';
+        configError.hidden = false;
+        return;
+      }
       showToast('Parámetros actualizados');
     }catch(err){
       configError.textContent = 'Error de conexión con el servidor';

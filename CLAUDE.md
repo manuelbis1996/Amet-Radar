@@ -112,6 +112,9 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
 - `supabase/functions/admin-delete-report/index.ts` — Edge Function que
   borra un reporte desde el panel admin, con la `service_role` key detrás
   del mismo `ADMIN_PASSWORD` (ver "Seguridad de escritura" abajo).
+- `supabase/functions/admin-update-config/index.ts` — Edge Function que
+  edita `app_config` desde el panel admin, detrás del mismo `ADMIN_PASSWORD`
+  y con validación de rangos (ver "app_config también borraba" abajo).
 - `supabase/functions/delete-photo/index.ts` — Edge Function que borra de
   Storage la foto de un reporte que ya no existe. **No es opcional ni un
   extra**: Supabase prohíbe borrar de `storage.objects` por SQL, así que
@@ -334,11 +337,12 @@ por medio.
 - **Tabla `public.app_config`**: fila única (`id boolean primary key
   default true` + `check (id)`, truco de "singleton" para que la PK
   impida una segunda fila) con `stale_minutes`, `max_age_minutes`,
-  `deny_threshold`, `report_limit`, `report_window_min`. RLS abierta
-  (select + update, `USING (true)`), mismo criterio que `reports`.
-  `amet-radar.html` la lee al arrancar (`loadConfig()`) hacia un objeto
-  `CONFIG` mutable con los valores de antes como default si el fetch
-  falla; `admin.html` la edita con `PATCH .../app_config?id=eq.true`.
+  `deny_threshold`, `report_limit`, `report_window_min`. **Solo el `select`
+  está abierto**; el `update` de `anon` se cerró (ver "app_config también
+  borraba" abajo) y la edición pasa por el Edge Function
+  `admin-update-config`. `amet-radar.html` la lee al arrancar
+  (`loadConfig()`) hacia un objeto `CONFIG` mutable con los valores de antes
+  como default si el fetch falla.
 - **Auth del panel**: password compartido, validado por un Edge Function
   nuevo (`supabase/functions/admin-login`) que compara contra el secret
   `ADMIN_PASSWORD` (mismo mecanismo manual que las VAPID keys — no hay
@@ -519,6 +523,40 @@ más barato que el agujero de borrado que cerró v12.0. Migración:
   solo dispara al borrarse una fila). Con el límite de tamaño el desperdicio
   es acotado; si molesta, una barrida periódica de objetos sin fila lo
   resuelve.
+
+### `app_config` también borraba: el cierre de v12.0 tenía una puerta lateral
+
+Encontrado con el linter de seguridad de Supabase (`get_advisors`) **después**
+de dar v12.0 por terminada. `app_config` tenía `anon update config` con
+`USING (true)`, y `purge_expired_reports()` —que se expuso a `anon`
+justamente con el argumento de que "solo puede borrar lo que ya venció"—
+lee `max_age_minutes` **de esa tabla**. O sea que el atacante no necesitaba
+romper la RPC: le alcanzaba con mover la definición de "vencido".
+
+```
+PATCH /rest/v1/app_config?id=eq.true   {"max_age_minutes": 0}
+POST  /rest/v1/rpc/purge_expired_reports
+```
+
+Dos peticiones, base vacía — exactamente el mismo resultado que el
+`DELETE ?id=neq.x` que v12.0 había cerrado. Verificado contra la base real
+con el rol `anon` y reportes de **un minuto** de antigüedad: se los llevó
+todos. Con `deny_threshold` en 1 pasaba algo parecido: un solo voto en
+contra retiraba cualquier reporte.
+
+**La lección, que vale para el próximo cambio**: no alcanza con auditar la
+tabla que se quiere proteger. Hay que auditar también **de dónde salen los
+parámetros que deciden qué se borra**. Una RPC "segura" que lee su umbral de
+una tabla escribible por cualquiera es tan insegura como la tabla.
+
+**Cómo quedó** (`20260802140000_lock_down_app_config.sql`): se quita la
+política de `update` y la edición pasa por `admin-update-config`, mismo
+patrón que `admin-delete-report`. El `select` queda abierto a propósito:
+`amet-radar.html` lo lee al arrancar y no hay nada sensible en esos cinco
+números. El endpoint además **valida rangos** (`max_age_minutes` nunca menor
+a 15, `deny_threshold` nunca menor a 2), para que ni un error de tipeo del
+propio admin pueda vaciar la base; `admin.html` muestra el motivo exacto que
+devuelve el endpoint en vez de un error genérico.
 
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
@@ -877,6 +915,9 @@ ordena alfabéticamente bien):
    devolvía dos filas al retirar un reporte (ver "Borrar fotos")
 10. `20260802120000_lock_down_photo_uploads.sql` — límite de tamaño y de
     tipo en el bucket, y nombre de archivo acotado (ver "Subir fotos")
+11. `20260802140000_lock_down_app_config.sql` — cierra el `update` de
+    `anon` sobre `app_config`, que permitía vaciar la base por una puerta
+    lateral (ver "app_config también borraba")
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
@@ -885,8 +926,9 @@ Editor del proyecto nuevo, en ese orden.
 documentados donde corresponde pero listados acá juntos para no
 saltearse ninguno al migrar):
 - **Edge Functions**: `supabase/functions/notify-nearby/`,
-  `supabase/functions/admin-login/`, `supabase/functions/admin-delete-report/`
-  y `supabase/functions/delete-photo/` hay que desplegarlas aparte
+  `supabase/functions/admin-login/`, `supabase/functions/admin-delete-report/`,
+  `supabase/functions/admin-update-config/` y
+  `supabase/functions/delete-photo/` hay que desplegarlas aparte
   (`deploy_edge_function` o Supabase CLI) — el código fuente sí está en
   el repo, solo el deploy es manual.
 - **Secrets de Edge Functions** (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,

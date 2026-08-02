@@ -1,0 +1,29 @@
+-- Cierra un agujero que dejaba sin efecto todo el cierre de escritura de
+-- v12.0, por una puerta lateral.
+--
+-- PROBLEMA. app_config tenía `anon update config` con USING(true), y la anon
+-- key es pública dentro de amet-radar.html. purge_expired_reports() se expuso
+-- a anon justamente porque "solo puede borrar lo que ya venció"... pero lee
+-- max_age_minutes de esta tabla. O sea que el atacante podía mover la
+-- definición de "vencido" y después pedir la purga:
+--
+--   PATCH /rest/v1/app_config?id=eq.true   {"max_age_minutes": 0}
+--   POST  /rest/v1/rpc/purge_expired_reports
+--
+-- y vaciar la base entera con dos peticiones — el mismo resultado que el
+-- DELETE ?id=neq.x que cerró v12.0. Verificado contra la base real, con el
+-- rol anon y reportes de un minuto de antigüedad: se llevó todo.
+--
+-- Lo mismo con deny_threshold en 1: un solo voto en contra retira cualquier
+-- reporte. Y con report_limit/report_window_min se podía desarmar el
+-- anti-spam del cliente.
+--
+-- SOLUCIÓN: mismo patrón que el borrado desde el panel (v12.0). Se quita la
+-- política de update y la edición pasa por el Edge Function
+-- `admin-update-config`, detrás del ADMIN_PASSWORD y con la service_role key.
+-- Ese endpoint además valida rangos, para que ni un error de tipeo del propio
+-- admin pueda poner max_age_minutes en 0.
+
+-- El select queda abierto a propósito: amet-radar.html lo lee al arrancar
+-- (loadConfig()) y no hay nada sensible en estos cinco números.
+drop policy if exists "anon update config" on public.app_config;
