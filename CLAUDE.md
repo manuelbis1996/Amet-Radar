@@ -270,9 +270,10 @@ reusando `openReportById` — la misma función que usa el deep link `?r=`).
   explícito, nunca `null`/`"all"`) — es la única fuente de verdad del
   lado del cliente.
 - **La campana, en estado activo, ya NO desuscribe al toque.** Abre un
-  panel de gestión (`openPushCategoriesSheet()`, reusa `renderSheet`/
-  `closeOverlay`, el mismo mecanismo del flujo de reporte) con los chips
-  de categoría y un botón "Desactivar avisos" adentro —
+  panel de gestión (`openPushSheet()`, reusa `renderSheet`/
+  `closeOverlay`, el mismo mecanismo del flujo de reporte) con un botón
+  "Desactivar avisos" adentro (hasta v13.0 tenía además los chips de
+  categoría, ver "Reportar es UN toque") —
   `unsubscribeFromPush()` solo se dispara desde ahí. Cambio de
   comportamiento deliberado sobre la campana ya en producción: de paso
   corrige que antes un tap accidental desuscribía sin ninguna
@@ -775,10 +776,18 @@ devuelve el endpoint en vez de un error genérico.
       `activeCategories` sigue existiendo con todas las categorías y ya no
       cambia nunca — `renderVisibleMarkers` la consulta y los reportes
       viejos tienen que seguir dibujándose.
-    - **Queda una inconsistencia conocida**: la hoja de categorías de las
-      notificaciones push (`openPushCategoriesSheet`, se abre tocando la
-      campana ya activa) sigue ofreciendo las cuatro. Es una pantalla
-      secundaria y no se tocó en este cambio.
+    - **La hoja de las notificaciones push también quedó en una sola**
+      (v13.1): tocar la campana activa ya no abre un selector de categorías
+      sino una hoja de gestión con "Desactivar avisos". Se eliminaron del
+      cliente `getPushCategories`, `savePushCategories`,
+      `updatePushCategories`, la clave `amet_push_categories_v1` y el CSS de
+      los chips. **La capacidad del servidor NO se tocó**: la columna
+      `push_subscriptions.categories` y el filtro del Edge Function
+      `notify-nearby` siguen ahí; simplemente el cliente ya no la escribe, o
+      sea que queda en `NULL` = todas las categorías, que es el default
+      correcto y también lo correcto si algún día vuelven las otras. La hoja
+      no se pudo eliminar del todo porque es el único lugar desde donde se
+      desactivan los avisos.
   - **La versión NO se muestra en el header** (v10.4): a un usuario final
     "v10.4" no le dice nada. Sigue siendo consultable **manteniendo
     presionado el logo** (600ms → toast), que es como se confirma a simple

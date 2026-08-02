@@ -159,28 +159,6 @@
   #locate-btn[data-state="active"]{ color:var(--brand); }
   #push-toggle-btn[hidden]{ display:none; }
 
-  /* ---- Chips de categoría ---- */
-  /* Quedan solo en la hoja de avisos push (openPushCategoriesSheet): el
-     filtro del mapa se quitó en v13.0 junto con las categorías múltiples. */
-  .chip{
-    pointer-events:auto; min-width:0;
-    display:inline-flex; align-items:center; justify-content:center; gap:6px;
-    min-height:40px; padding:0 12px; border-radius:999px; border:none;
-    background:var(--surface); color:var(--text); box-shadow:var(--shadow-1);
-    font-size:13px; font-weight:600; white-space:nowrap; cursor:pointer;
-    transition:transform .12s ease, opacity .15s ease;
-  }
-  .chip:active{ transform:scale(.95); }
-  /* Activo = tinte suave del color de la categoría + anillo de ese color.
-     Rellenarlos a full saturación se veía como una pared de color, porque
-     las categorías arrancan todas activas. El tinte lo calcula el JS a partir
-     del hex (--chip-tint) porque en CSS haría falta color-mix(). */
-  .chip[aria-pressed="true"]{
-    background-image:linear-gradient(var(--chip-tint, transparent), var(--chip-tint, transparent));
-    box-shadow:var(--shadow-1), inset 0 0 0 1.5px var(--chip-color, var(--brand));
-  }
-  .chip[aria-pressed="false"]{ opacity:.5; }
-
   /* ---- Pin arrastrable para elegir el lugar del reporte ---- */
   /* OJO: MapLibre posiciona el marcador escribiendo `transform` en ESTE
      elemento, así que acá no se puede animar transform ni ponerle uno —
@@ -519,7 +497,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v13.0';
+  const APP_VERSION = 'v13.1';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -629,20 +607,8 @@
   const VAPID_PUBLIC_KEY = 'BOg_VDCTXvRF0l9cLLFI_sGgWGkiyVb3SmIu93c8bcFatvEcxzSPfqUwvAfaO6X8nMdVH596vW0pIAdhaHe5nKY';
   const PUSH_SUBS_URL = `${SUPABASE_URL}/rest/v1/push_subscriptions`;
   const PUSH_ENDPOINT_KEY = 'amet_push_endpoint_v1';
-  const PUSH_CATEGORIES_KEY = 'amet_push_categories_v1';
   const PUSH_POS_UPDATE_MIN_METERS = 400;
   const PUSH_POS_UPDATE_MIN_MS = 5 * 60 * 1000;
-
-  // Como push_subscriptions no tiene política de SELECT (a propósito, ver
-  // CLAUDE.md), el cliente nunca puede leer de vuelta su fila — la
-  // preferencia de categorías vive solo acá. Ausencia de la clave = nunca
-  // configurado (dispara la hoja de onboarding); presencia = ya se
-  // preguntó, aunque el valor sea la lista completa.
-  function getPushCategories(){
-    try{ const raw = localStorage.getItem(PUSH_CATEGORIES_KEY); return raw ? JSON.parse(raw) : null; }
-    catch(e){ return null; }
-  }
-  function savePushCategories(list){ localStorage.setItem(PUSH_CATEGORIES_KEY, JSON.stringify(list)); }
 
   // Columnas explícitas, no `select=*`: esto se pide cada 8 segundos y trae
   // TODOS los reportes en cada sondeo, así que es de lejos lo que más egreso
@@ -1378,16 +1344,10 @@
       lastPushPosUpdate = { latlng, ts: Date.now() };
       setPushButtonState('active');
       showToast('Listo, te vamos a avisar de retenes cerca');
-      // subscribeToPush() borra y vuelve a crear la fila (DELETE+POST, no
-      // upsert), así que un re-suscribe pierde las categorías que el
-      // dispositivo ya tenía elegidas del lado del servidor — hay que
-      // restaurarlas, no solo decidir "primera vez sí/no".
-      const savedCategories = getPushCategories();
-      if(savedCategories === null){
-        openPushCategoriesSheet();
-      } else if(savedCategories.length < Object.keys(CATEGORIES).length){
-        updatePushCategories(savedCategories);
-      }
+      // Ya no se pregunta por categorías (v13.0): con una sola reportable no
+      // hay nada que elegir. La fila queda con `categories` en NULL, que el
+      // Edge Function interpreta como "todas" — que es justo lo que
+      // corresponde, y lo correcto también si algún día vuelven las otras.
     }catch(err){
       console.error('Error suscribiendo a push', err);
       showToast('No se pudo activar el aviso de retenes cerca');
@@ -1433,55 +1393,22 @@
     }catch(err){ console.error('Error actualizando posición de suscripción push', err); }
   }
 
-  async function updatePushCategories(categories){
-    try{
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      if(!sub) return;
-      const allSelected = categories.length === Object.keys(CATEGORIES).length;
-      await fetch(`${PUSH_SUBS_URL}?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {
-        method: 'PATCH',
-        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ categories: allSelected ? null : categories, updated_at: new Date().toISOString() })
-      });
-      savePushCategories(categories);
-    }catch(err){ console.error('Error actualizando categorías de suscripción push', err); }
-  }
-
-  function openPushCategoriesSheet(){
-    const current = getPushCategories() || Object.keys(CATEGORIES);
-    const selected = new Set(current);
-    const chips = Object.entries(CATEGORIES).map(([key, cat]) => `
-      <button type="button" class="chip" data-cat="${key}" aria-pressed="${selected.has(key)}" style="--chip-color:${cat.hex};--chip-tint:${hexTint(cat.hex, 0.16)}">${cat.emoji} ${cat.label}</button>
-    `).join('');
+  // Con una sola categoría reportable no hay nada que elegir, así que la
+  // hoja quedó solo como gestión del aviso. Igual NO se puede eliminar: es
+  // el único lugar desde donde se desactiva, y que la campana desuscribiera
+  // de un toque (como hacía antes de v11) borraba la suscripción sin
+  // ninguna confirmación.
+  function openPushSheet(){
     renderSheet(`
       <h2>Avisos de retenes</h2>
-      <p class="sub">Elige de qué categorías querés que te avisemos.</p>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">${chips}</div>
+      <p class="sub">Te avisamos cuando alguien reporte un retén cerca de tu ubicación, aunque tengas la app cerrada.</p>
       <div class="btn-row" style="margin-bottom:10px;">
-        <button class="btn btn-ghost" id="push-cat-cancel">Cancelar</button>
-        <button class="btn btn-primary" id="push-cat-save">Guardar</button>
+        <button class="btn btn-primary" id="push-close" style="width:100%;">Listo</button>
       </div>
-      <button class="mini-btn danger" style="width:100%;" id="push-cat-unsubscribe">Desactivar avisos</button>
+      <button class="mini-btn danger" style="width:100%;" id="push-unsubscribe">Desactivar avisos</button>
     `);
-    const saveBtn = document.getElementById('push-cat-save');
-    function refreshSaveState(){ saveBtn.disabled = selected.size === 0; }
-    overlay.querySelectorAll('.chip[data-cat]').forEach(chip => {
-      chip.addEventListener('click', () => {
-        const key = chip.dataset.cat;
-        if(selected.has(key)){ selected.delete(key); chip.setAttribute('aria-pressed', 'false'); }
-        else { selected.add(key); chip.setAttribute('aria-pressed', 'true'); }
-        refreshSaveState();
-      });
-    });
-    refreshSaveState();
-    document.getElementById('push-cat-cancel').addEventListener('click', closeOverlay);
-    saveBtn.addEventListener('click', () => {
-      updatePushCategories(Object.keys(CATEGORIES).filter(k => selected.has(k)));
-      closeOverlay();
-      showToast('Preferencias de avisos actualizadas');
-    });
-    document.getElementById('push-cat-unsubscribe').addEventListener('click', () => {
+    document.getElementById('push-close').addEventListener('click', closeOverlay);
+    document.getElementById('push-unsubscribe').addEventListener('click', () => {
       closeOverlay();
       unsubscribeFromPush();
     });
@@ -1498,7 +1425,7 @@
 
     pushToggleBtn.addEventListener('click', () => {
       if(pushToggleBtn.dataset.state === 'loading') return;
-      if(pushToggleBtn.dataset.state === 'active') openPushCategoriesSheet();
+      if(pushToggleBtn.dataset.state === 'active') openPushSheet();
       else subscribeToPush();
     });
   }
