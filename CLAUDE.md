@@ -490,6 +490,36 @@ equivocado y con reportes sin `owner_hash`, y `true` con el correcto.
 `purge_expired_reports()` se lleva solo los vencidos. Y el trigger de la
 foto llegó a `delete-photo` con respuesta `200 {"ok":true}`.
 
+### Subir fotos: límite de tamaño, no de permisos
+
+El bucket se creó sin `file_size_limit` ni `allowed_mime_types`, y con una
+política de insert que solo miraba el bucket. Con la anon key (pública por
+diseño) cualquiera podía subir archivos arbitrarios hasta el tope global del
+plan (50 MB c/u): con 1 GB de cuota en el Free, **~20 peticiones llenaban el
+almacenamiento y nadie podía volver a publicar un reporte con foto**. Salía
+más barato que el agujero de borrado que cerró v12.0. Migración:
+`20260802120000_lock_down_photo_uploads.sql`.
+
+- **Límite: 512 KB.** No es un número al azar: `compressImage()` reduce a
+  480px de ancho con JPEG q0.6, y midiendo el peor caso plausible (un
+  retrato de ruido a todo color, que comprime peor que cualquier foto real)
+  da **76 KB**. O sea 6.7x de margen — no puede rechazar una foto legítima,
+  y baja el techo del ataque unas 100 veces. Si algún día se sube la
+  resolución de `compressImage()`, hay que volver a medir esto.
+- **`allowed_mime_types = {image/jpeg}`** es higiene, no una defensa:
+  Supabase lo valida contra el `Content-Type` que manda el cliente, no
+  olfateando el archivo. El control real es el tamaño.
+- **El nombre del objeto tiene que matchear `^report_[0-9]+_[a-z0-9]*\.jpg$`**
+  (el formato de id que generan `publishReport`/`publishQuickReport`). Evita
+  que el bucket se llene de rutas arbitrarias. Va con `*` y no `+` a
+  propósito, para que un sufijo corto no rebote un nombre legítimo.
+- **Fotos huérfanas, sin resolver a propósito**: `uploadPhoto()` corre
+  ANTES de insertar la fila, así que si la red se corta en el medio queda un
+  objeto sin reporte, y nada lo limpia (el trigger `reports_delete_photo`
+  solo dispara al borrarse una fila). Con el límite de tamaño el desperdicio
+  es acotado; si molesta, una barrida periódica de objetos sin fila lo
+  resuelve.
+
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
   (objeto `CATEGORIES` dentro del `<script>`, con emoji y color cada una).
@@ -845,6 +875,8 @@ ordena alfabéticamente bien):
    caminos de borrado.
 9. `20260802001000_vote_report_return_single_row.sql` — `vote_report`
    devolvía dos filas al retirar un reporte (ver "Borrar fotos")
+10. `20260802120000_lock_down_photo_uploads.sql` — límite de tamaño y de
+    tipo en el bucket, y nombre de archivo acotado (ver "Subir fotos")
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
