@@ -112,6 +112,10 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
 - `supabase/functions/admin-delete-report/index.ts` — Edge Function que
   borra un reporte desde el panel admin, con la `service_role` key detrás
   del mismo `ADMIN_PASSWORD` (ver "Seguridad de escritura" abajo).
+- `supabase/functions/delete-photo/index.ts` — Edge Function que borra de
+  Storage la foto de un reporte que ya no existe. **No es opcional ni un
+  extra**: Supabase prohíbe borrar de `storage.objects` por SQL, así que
+  esta es la única vía (ver "Borrar fotos" abajo).
 - `admin.html` — panel de administración (moderar reportes, ver
   estadísticas, editar parámetros del sistema), sin backend propio — le
   pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
@@ -170,10 +174,11 @@ key embebida en el `<script>` — no hay backend propio de por medio.
   (`{SUPABASE_URL}/storage/v1/object/public/report-photos/<id>.jpg`) en
   vez del base64 completo — antes cada fila cargaba la imagen entera y
   `GET .../reports?select=*` la traía completa en cada refresh de 8s, para
-  todos los reportes activos. La foto se borra junto con la fila, del lado
-  de la base (`_delete_report()`), no desde el cliente: `anon` perdió el
-  `delete` sobre `storage.objects` en v12.0, si no cualquiera con la anon
-  key podía vaciar el bucket entero. Queda abierto solo el `insert` (sin
+  todos los reportes activos. La foto ya no la borra el cliente: `anon`
+  perdió el `delete` sobre `storage.objects` en v12.0 (si no, cualquiera con
+  la anon key podía vaciar el bucket entero). La limpieza la dispara un
+  trigger al borrarse la fila — ver "Borrar fotos" más abajo, porque **no se
+  puede borrar de Storage por SQL** y eso condiciona todo el diseño. Queda abierto solo el `insert` (sin
   eso no se puede publicar una foto) y no hay política
   de select — un bucket `public` sirve sus objetos vía
   `/object/public/<bucket>/<path>` sin pasar por RLS. Las filas existentes
@@ -404,7 +409,7 @@ fijo). `grant execute` a `anon` **solo** en las tres públicas:
 | `vote_report(p_id, p_dir)` | cliente (`voteReport`) | suma **1** al contador de `confirm`/`deny` y decide ella el retiro comunitario (lee `deny_threshold` de `app_config`). Devuelve `{confirms, denies, removed}` |
 | `delete_own_report(p_id, p_token)` | cliente (`deleteReportRemote`) | compara `encode(digest(p_token,'sha256'),'hex')` contra `owner_hash`. `false` si no coincide, sin decir por qué |
 | `purge_expired_reports()` | cliente (`purgeExpiredRemote`) | borra solo filas con `ts` vencido. Es seguro exponerla: no puede borrar nada que no fuera a desaparecer igual |
-| `_delete_report(p_id)` | **nadie desde el cliente** | borra la fila + su foto de `storage.objects`. Sin grant a `anon`; sí a `service_role`, porque el Edge Function `admin-delete-report` la usa |
+| `_delete_report(p_id)` | **nadie desde el cliente** | borra la fila. La foto la limpia el trigger `reports_delete_photo` (ver "Borrar fotos"), no esta función. Sin grant a `anon`; sí a `service_role`, porque el Edge Function `admin-delete-report` la usa |
 
 **Gotcha del grant a `service_role`**: `revoke all ... from public` también
 se lo saca a `service_role`, que no es dueño de la función. Hay que
@@ -433,6 +438,57 @@ después): el anti-spam sigue siendo del lado del cliente (`canReport()`
 mira `localStorage`, se resetea borrando los datos del sitio), y subir
 fotos sigue abierto a cualquiera con la anon key — no hay moderación
 automática ni forma de reportar abuso.
+
+### Borrar fotos: no se puede desde SQL (leer antes de tocar cualquier borrado)
+
+**Supabase prohíbe `delete from storage.objects` por SQL.** Hay un trigger
+propio, `storage.protect_delete()`, que corta con:
+
+```
+ERROR 42501: Direct deletion from storage tables is not allowed.
+             Use the Storage API instead.
+```
+
+La primera versión de `_delete_report()` (y de `purge_expired_reports()`)
+hacía exactamente eso. Como la excepción se propaga, **se llevaba puesta la
+transacción entera**: no se borraba ni la fila del reporte. Rompía los
+cuatro caminos de borrado a la vez — reporte propio, retiro comunitario,
+vencidos y panel admin. Se detectó probando contra la base real, no en los
+tests del cliente (que mockean la red y nunca ven a Postgres). Migración
+que lo corrige: `20260802000000_delete_photos_via_storage_api.sql`.
+
+**Cómo quedó**: la base borra solo la fila, y un trigger `AFTER DELETE ON
+public.reports` (`reports_delete_photo`) le avisa por `pg_net` al Edge
+Function `delete-photo`, que sí puede usar la Storage API. Es el mismo
+patrón que ya usaba `notify_nearby_reports`. Detalles que importan:
+
+- **Es best-effort y asíncrono a propósito.** Si falla, queda una foto
+  huérfana en el bucket; eso es mucho menos grave que un reporte que no se
+  puede borrar. No hay reintentos.
+- **El trigger tiene un `WHEN`**: solo dispara si `old.photo is not null and
+  old.photo not like 'data:%'`. Un reporte rápido no tiene foto, y las filas
+  viejas guardaban la imagen como `data:` URL embebida — en ninguno de los
+  dos casos hay un objeto en Storage que limpiar.
+- **`delete-photo` se niega a borrar la foto de un reporte que todavía
+  existe.** El trigger la llama con la anon key (pública), así que hay que
+  asumir que cualquiera puede invocarla con el id que quiera: esa invariante
+  —solo limpia huérfanas— es lo único que la hace segura. No la saques.
+
+**Otro bug de la misma tanda**: `return query` en plpgsql agrega filas y
+**sigue ejecutando**, no corta como un `return`. `vote_report` devolvía dos
+filas al retirar un reporte (`removed:true` y después `removed:false`). El
+cliente lee `rows[0]`, así que acertaba de casualidad. Corregido con un
+`return;` explícito en `20260802001000_vote_report_return_single_row.sql`.
+
+**Verificado end-to-end contra la base real** (rol `anon`, no mocks): con la
+anon key, un `delete from reports` masivo y un `update confirms = 99999` no
+tocan ninguna fila; `anon` no puede ejecutar `_delete_report` ni
+`delete_report_photo`; sí puede las tres RPC públicas. Votar suma de a 1 y
+retira al llegar a `deny_threshold` (que está en **5**, no en 2 — lo lee de
+`app_config` en vivo). `delete_own_report` devuelve `false` con token
+equivocado y con reportes sin `owner_hash`, y `true` con el correcto.
+`purge_expired_reports()` se lleva solo los vencidos. Y el trigger de la
+foto llegó a `delete-photo` con respuesta `200 {"ok":true}`.
 
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
@@ -783,6 +839,12 @@ ordena alfabéticamente bien):
    `reports` y el `delete` del bucket, agrega `owner_hash` y las funciones
    `vote_report` / `delete_own_report` / `purge_expired_reports` /
    `_delete_report` (ver "Seguridad de escritura")
+8. `20260802000000_delete_photos_via_storage_api.sql` — saca el borrado de
+   fotos de las funciones SQL y lo pasa al trigger `reports_delete_photo`
+   (ver "Borrar fotos"). **Sin esto la #7 no funciona**: rompe los cuatro
+   caminos de borrado.
+9. `20260802001000_vote_report_return_single_row.sql` — `vote_report`
+   devolvía dos filas al retirar un reporte (ver "Borrar fotos")
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
@@ -791,8 +853,8 @@ Editor del proyecto nuevo, en ese orden.
 documentados donde corresponde pero listados acá juntos para no
 saltearse ninguno al migrar):
 - **Edge Functions**: `supabase/functions/notify-nearby/`,
-  `supabase/functions/admin-login/` y
-  `supabase/functions/admin-delete-report/` hay que desplegarlas aparte
+  `supabase/functions/admin-login/`, `supabase/functions/admin-delete-report/`
+  y `supabase/functions/delete-photo/` hay que desplegarlas aparte
   (`deploy_edge_function` o Supabase CLI) — el código fuente sí está en
   el repo, solo el deploy es manual.
 - **Secrets de Edge Functions** (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
