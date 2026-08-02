@@ -587,6 +587,21 @@ devuelve el endpoint en vez de un error genérico.
   usa el resto del código (`setLatLng`, `map.removeLayer`, el listener de
   `click` que abre la hoja de detalle), así que
   `removeMarker`/`renderVisibleMarkers` no necesitaron cambios.
+- **El sondeo pide columnas explícitas, no `select=*`** (v12.2): se dispara
+  cada 8s y trae todos los reportes cada vez, así que es de lejos lo que más
+  egreso consume del proyecto — y el egreso del plan Free de Supabase (5
+  GB/mes) es el primer techo que se toca al crecer, mucho antes que cualquier
+  otro límite. `created_at` y `owner_hash` no los usa el cliente (el primero
+  se descartaba al recibirlo; la propiedad se valida con el token de
+  `localStorage`, el hash solo viaja al publicar) y entre los dos eran 128 de
+  los 408 bytes de cada fila: **31% menos** de egreso. La lista está en la
+  constante `REPORT_FIELDS`; si se agrega una columna que el cliente
+  necesite, hay que sumarla ahí o llegará `undefined`. `admin.html` sigue con
+  `select=*` a propósito: lo usa una sola persona de vez en cuando, el
+  ahorro sería nulo y el riesgo de romper el panel no vale la pena.
+  Siguientes pasos si el egreso vuelve a ser problema, en orden de
+  conveniencia: filtrar por el área visible del mapa, y reemplazar el sondeo
+  por Supabase Realtime.
 - **Persistencia**: los reportes viven en la tabla `reports` de Supabase
   (Postgres), no en `server.js` ni en un archivo. El cliente mantiene una
   copia en memoria (`reportsCache`) que refresca cada 8s vía `fetch` a la

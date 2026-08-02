@@ -538,7 +538,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v12.1';
+  const APP_VERSION = 'v12.2';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -663,14 +663,23 @@
   }
   function savePushCategories(list){ localStorage.setItem(PUSH_CATEGORIES_KEY, JSON.stringify(list)); }
 
+  // Columnas explícitas, no `select=*`: esto se pide cada 8 segundos y trae
+  // TODOS los reportes en cada sondeo, así que es de lejos lo que más egreso
+  // consume del proyecto. `created_at` y `owner_hash` no los usa nadie del
+  // lado del cliente (el primero se descartaba al recibirlo; la propiedad se
+  // valida con el token de localStorage, el hash solo viaja al publicar) y
+  // entre los dos eran ~125 de los ~408 bytes de cada fila. Si se agrega una
+  // columna que el cliente necesite, hay que sumarla acá.
+  const REPORT_FIELDS = 'id,lat,lng,photo,note,ts,category,confirms,denies,approx';
+
   async function fetchAllReports(){
     try{
-      const res = await fetch(`${REPORTS_URL}?select=*`, { headers: SUPABASE_HEADERS });
+      const res = await fetch(`${REPORTS_URL}?select=${REPORT_FIELDS}`, { headers: SUPABASE_HEADERS });
       if(res.ok){
         const rows = await res.json();
         const next = {};
         for(const row of rows){
-          const { id, created_at, ...record } = row;
+          const { id, ...record } = row;
           next[id] = record;
         }
         reportsCache = next;
