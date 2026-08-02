@@ -742,6 +742,43 @@ devuelve el endpoint en vez de un error genérico.
     (quedaría tapado por el scrim y se auto-ocultaría sin que nadie lo
     lea); por eso `closeOverlay()` llama a `updateCount()` al cerrar, si no
     habría que esperar hasta 8s al próximo sondeo.
+  - **Reportar es UN toque** (v13.0): `#report-btn` publica directo un retén
+    fijo en la ubicación del GPS. Desaparecieron las dos pantallas
+    intermedias — el selector de modo ("¿Cómo quieres reportar?") y el de
+    categoría ("¿Qué estás reportando?") — porque con una sola categoría
+    reportable y sin el modo con foto, las dos quedaban eligiendo entre una
+    sola opción. Pedido explícito del usuario: "quiero que todo sea
+    sencillo".
+    - **La red de seguridad es `showUndoToast()`, no una confirmación**:
+      publicar de un toque hace fácil disparar un reporte sin querer, así
+      que el flujo rápido pasó a usar el mismo toast de 6s con **Deshacer**
+      que ya usaba el de la foto (borra del servidor y devuelve el cupo del
+      anti-spam). Se eligió esto antes que una pantalla de "confirmar"
+      porque el usuario suele estar manejando y un paso más pesa más que el
+      riesgo.
+    - **El flujo con foto NO se borró, se le sacó la entrada.**
+      `FLUJO_CON_FOTO` (en `amet-radar.html`) lo devuelve entero:
+      `askForPhoto` → `startManualPick` → `askForCategory` →
+      `publishReport` siguen completos. La constante se lee de
+      `window.__ametFlujoConFoto`, que en producción no existe (o sea,
+      `false`); ese global es el enganche con el que las suites de
+      Playwright siguen cubriendo ese flujo. Para reactivarlo de verdad hay
+      que editar esa línea.
+    - **`askForCategoryQuick()` se eliminó**; `startQuickReport()` fija
+      `CATEGORIA_UNICA` (`reten_fijo`) y publica.
+    - **`CATEGORIES` conserva las cuatro a propósito**: hacen falta para
+      dibujar reportes viejos de otras categorías que sigan en la base, para
+      la etiqueta del detalle y para el texto de las notificaciones push.
+      Solo se restringió qué se puede *reportar*.
+    - **El filtro por categoría se quitó** (botón del embudo y su hoja):
+      filtrar por categoría no tiene sentido si solo hay una.
+      `activeCategories` sigue existiendo con todas las categorías y ya no
+      cambia nunca — `renderVisibleMarkers` la consulta y los reportes
+      viejos tienen que seguir dibujándose.
+    - **Queda una inconsistencia conocida**: la hoja de categorías de las
+      notificaciones push (`openPushCategoriesSheet`, se abre tocando la
+      campana ya activa) sigue ofreciendo las cuatro. Es una pantalla
+      secundaria y no se tocó en este cambio.
   - **La versión NO se muestra en el header** (v10.4): a un usuario final
     "v10.4" no le dice nada. Sigue siendo consultable **manteniendo
     presionado el logo** (600ms → toast), que es como se confirma a simple
@@ -755,7 +792,9 @@ devuelve el endpoint en vez de un error genérico.
     si la visita viene de un link compartido (`?r=`), porque ese reporte ya
     es el contexto y taparlo sería peor. Vive al final del `<script>` a
     propósito: necesita `overlay`/`renderSheet`/`closeOverlay` ya definidos.
-  - **Los filtros no están sueltos sobre el mapa** (v10.6): vivían como 4
+  - **Los filtros se eliminaron en v13.0** (ver arriba). Lo que sigue es
+    el historial de por qué existían así, por si alguna vez vuelven:
+  - ~~**Los filtros no están sueltos sobre el mapa** (v10.6):~~ vivían como 4
     chips fijos arriba y era fácil apagar una categoría sin querer al
     arrastrar el mapa (reportado por el usuario), además de comerse ~90px
     de alto en un teléfono. Ahora se abren desde `#filter-btn` (embudo, al

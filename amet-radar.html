@@ -144,7 +144,7 @@
   .brand-count b{ font-size:14px; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
 
   .topbar-actions{ display:flex; align-items:center; gap:8px; }
-  #push-toggle-btn, #filter-btn{
+  #push-toggle-btn{
     pointer-events:auto; flex-shrink:0; position:relative;
     width:var(--tap); height:var(--tap); border-radius:50%;
     background:var(--surface); border:none; color:var(--muted);
@@ -152,32 +152,16 @@
     display:flex; align-items:center; justify-content:center;
     cursor:pointer; transition:transform .14s ease, color .14s ease;
   }
-  #push-toggle-btn svg, #filter-btn svg{ width:19px; height:19px; }
-  #push-toggle-btn:active, #filter-btn:active{ transform:scale(.9); }
-  /* Punto naranja cuando hay alguna categoría apagada: si no, el mapa
-     estaría filtrado sin ninguna señal visible y faltarían reportes sin
-     que se entienda por qué. */
-  #filter-btn[data-filtered="true"]{ color:var(--brand); }
-  #filter-btn[data-filtered="true"]::after{
-    content:''; position:absolute; top:9px; right:9px;
-    width:8px; height:8px; border-radius:50%;
-    background:var(--brand); border:2px solid var(--surface);
-  }
+  #push-toggle-btn svg{ width:19px; height:19px; }
+  #push-toggle-btn:active{ transform:scale(.9); }
   #push-toggle-btn[data-state="active"]{ color:var(--brand); }
   #push-toggle-btn[data-state="loading"]{ opacity:.5; cursor:default; }
   #locate-btn[data-state="active"]{ color:var(--brand); }
   #push-toggle-btn[hidden]{ display:none; }
 
-  /* ---- Chips de filtro ---- */
-  /* Ya no están sueltos sobre el mapa: vivían pegados arriba y se
-     activaban sin querer al arrastrar (reportado por el usuario). Ahora
-     salen dentro de la hoja que abre #filter-btn, en grilla 2x2 — las
-     etiquetas ("Control tránsito") son muy largas para meter las 4 en una
-     fila sin recortarlas. */
-  .filter-grid{
-    display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;
-    margin-bottom:16px;
-  }
+  /* ---- Chips de categoría ---- */
+  /* Quedan solo en la hoja de avisos push (openPushCategoriesSheet): el
+     filtro del mapa se quitó en v13.0 junto con las categorías múltiples. */
   .chip{
     pointer-events:auto; min-width:0;
     display:inline-flex; align-items:center; justify-content:center; gap:6px;
@@ -189,7 +173,7 @@
   .chip:active{ transform:scale(.95); }
   /* Activo = tinte suave del color de la categoría + anillo de ese color.
      Rellenarlos a full saturación se veía como una pared de color, porque
-     las 4 categorías arrancan activas. El tinte lo calcula el JS a partir
+     las categorías arrancan todas activas. El tinte lo calcula el JS a partir
      del hex (--chip-tint) porque en CSS haría falta color-mix(). */
   .chip[aria-pressed="true"]{
     background-image:linear-gradient(var(--chip-tint, transparent), var(--chip-tint, transparent));
@@ -498,9 +482,6 @@
         <span class="brand-count"><b id="stat-count">0</b>en vista</span>
       </div>
       <div class="topbar-actions">
-        <button id="filter-btn" data-filtered="false" aria-label="Filtrar reportes por categoría" title="Filtrar por categoría">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>
-        </button>
         <button id="push-toggle-btn" data-state="inactive" aria-label="Avisarme de retenes cerca" title="Avisarme de retenes cerca" hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         </button>
@@ -538,7 +519,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v12.2';
+  const APP_VERSION = 'v13.0';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1192,58 +1173,11 @@
   }
 
   // ---- Filtros de categoría ----
-  // Los filtros viven dentro de una hoja, no sueltos sobre el mapa: antes
-  // eran 4 chips fijos arriba y era fácil apagar una categoría sin querer
-  // mientras se arrastraba el mapa, y encima ocupaban ~90px de alto en un
-  // teléfono. Ahora se abren desde #filter-btn, que muestra un punto
-  // naranja cuando hay algo filtrado (si no, faltarían reportes en el mapa
-  // sin ninguna señal de por qué).
-  const filterBtn = document.getElementById('filter-btn');
-
-  function refreshFilterBadge(){
-    const todas = activeCategories.size === Object.keys(CATEGORIES).length;
-    filterBtn.dataset.filtered = todas ? 'false' : 'true';
-  }
-
-  function openFiltersSheet(){
-    const chips = Object.entries(CATEGORIES).map(([key, cat]) => `
-      <button type="button" class="chip" data-cat="${key}" aria-pressed="${activeCategories.has(key)}" style="--chip-color:${cat.hex};--chip-tint:${hexTint(cat.hex, 0.16)}">${cat.emoji} ${cat.label}</button>
-    `).join('');
-    renderSheet(`
-      <h2>Filtrar reportes</h2>
-      <p class="sub">Elige qué categorías querés ver en el mapa.</p>
-      <div class="filter-grid">${chips}</div>
-      <div class="btn-row">
-        <button class="btn btn-ghost" id="filter-all">Ver todas</button>
-        <button class="btn btn-primary" id="filter-done">Listo</button>
-      </div>
-    `);
-    const sheetChips = () => overlay.querySelectorAll('.chip[data-cat]');
-    sheetChips().forEach(chip => {
-      chip.addEventListener('click', () => {
-        const key = chip.dataset.cat;
-        if(activeCategories.has(key)){
-          activeCategories.delete(key);
-          chip.setAttribute('aria-pressed', 'false');
-        } else {
-          activeCategories.add(key);
-          chip.setAttribute('aria-pressed', 'true');
-        }
-        renderVisibleMarkers();
-        refreshFilterBadge();
-      });
-    });
-    document.getElementById('filter-all').addEventListener('click', () => {
-      Object.keys(CATEGORIES).forEach(k => activeCategories.add(k));
-      sheetChips().forEach(c => c.setAttribute('aria-pressed', 'true'));
-      renderVisibleMarkers();
-      refreshFilterBadge();
-    });
-    document.getElementById('filter-done').addEventListener('click', closeOverlay);
-  }
-
-  filterBtn.addEventListener('click', openFiltersSheet);
-  refreshFilterBadge();
+  // El filtro por categoría se quitó en v13.0: con una sola categoría
+  // reportable no hay nada que filtrar. `activeCategories` se queda con
+  // todas las categorías y nunca cambia — sigue existiendo porque
+  // renderVisibleMarkers la consulta, y porque en la base puede haber
+  // reportes viejos de las otras tres que igual hay que dibujar.
 
   // ---- Renderizado por zona visible + limpieza de vencidos ----
   function renderVisibleMarkers(){
@@ -1785,6 +1719,25 @@
   startLocationWatch();
 
   // ---- Flujo de reporte ----
+  // Reportar es UN toque: el botón publica un retén fijo en la ubicación del
+  // GPS, sin pantallas intermedias. La red de seguridad es showUndoToast()
+  // (6s con botón Deshacer), no una pantalla de confirmación — ver CLAUDE.md.
+  //
+  // Poner FLUJO_CON_FOTO en true devuelve el selector de modo
+  // ("¿Cómo quieres reportar?") y con él todo el flujo detallado, que sigue
+  // completo en el código: askForPhoto -> startManualPick -> askForCategory
+  // -> publishReport. No se borró nada, solo se le sacó la entrada.
+  //
+  // El override por `window` es el enganche de las suites de Playwright, que
+  // siguen cubriendo ese flujo aunque hoy no tenga entrada en la interfaz.
+  // En producción ese global no existe, así que esto vale false y no cambia
+  // nada; para reactivar el flujo de verdad hay que editar esta línea.
+  const FLUJO_CON_FOTO = window.__ametFlujoConFoto === true;
+  // Única categoría reportable. CATEGORIES conserva las cuatro a propósito:
+  // hacen falta para dibujar reportes viejos, para la etiqueta del detalle y
+  // para el texto de las notificaciones push.
+  const CATEGORIA_UNICA = 'reten_fijo';
+
   const overlay = document.getElementById('flow-overlay');
   const reportBtn = document.getElementById('report-btn');
   const cameraInput = document.getElementById('camera-input');
@@ -1859,7 +1812,10 @@
       return;
     }
     reportBtn.disabled = true;
-    askReportMode();
+    // Flujo simplificado (v13.0): un toque publica. Sin elegir modo y sin
+    // elegir categoría — ver FLUJO_CON_FOTO arriba y CLAUDE.md.
+    if(FLUJO_CON_FOTO){ askReportMode(); return; }
+    startQuickReport();
   });
 
   function askReportMode(){
@@ -1890,31 +1846,8 @@
       return;
     }
     pendingLocation = jitterLocation(lastKnownLatLng[0], lastKnownLatLng[1], 0, 30);
-    askForCategoryQuick();
-  }
-
-  function askForCategoryQuick(){
-    const options = Object.entries(CATEGORIES).map(([key, cat]) => `
-      <button class="cat-option" data-cat="${key}" style="--cat-color:${cat.hex};--cat-tint:${hexTint(cat.hex, 0.14)}">
-        <span class="emoji">${cat.emoji}</span>
-        <span>${cat.label}</span>
-      </button>
-    `).join('');
-    renderSheet(`
-      <h2>¿Qué estás reportando?</h2>
-      <p class="sub">Toca una categoría para publicar al instante. Sin foto: se marca una zona aproximada, no el punto exacto.</p>
-      <div class="cat-grid">${options}</div>
-      <div class="btn-row">
-        <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
-      </div>
-    `);
-    document.getElementById('cancel-btn').addEventListener('click', closeOverlay);
-    overlay.querySelectorAll('.cat-option').forEach(btn => {
-      btn.addEventListener('click', () => {
-        pendingCategory = btn.dataset.cat;
-        publishQuickReport();
-      });
-    });
+    pendingCategory = CATEGORIA_UNICA;
+    publishQuickReport();
   }
 
   async function publishQuickReport(){
@@ -1937,7 +1870,9 @@
       updateCount();
       closeOverlay();
       registerReportTime();
-      showToast('Reporte rápido publicado. Gracias por avisar.');
+      // Mismo toast con Deshacer que el flujo con foto: al publicarse de un
+      // solo toque, esta es la única oportunidad de arrepentirse.
+      showUndoToast(id);
     }catch(err){
       if(err instanceof NetworkError){
         enqueuePending(id, record);
@@ -2236,7 +2171,7 @@
       <p class="sub">Reportes de retenes de tránsito en La Vega, hechos por la comunidad.</p>
       <ul class="welcome-list">
         <li><b>👀 Mira el mapa</b> — cada punto es un reporte activo de otra persona.</li>
-        <li><b>📣 Reporta</b> — si ves un retén, avisa con un toque. Hay un modo rápido para cuando vas manejando.</li>
+        <li><b>📣 Reporta</b> — si ves un retén, toca "Reportar ubicación" y se publica al instante. Un solo toque.</li>
         <li><b>👍 Confirma</b> — toca un reporte para decir si sigue ahí o si ya no está.</li>
       </ul>
       <div class="btn-row">
