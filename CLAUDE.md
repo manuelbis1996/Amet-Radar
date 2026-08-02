@@ -961,7 +961,7 @@ que se usa una sola vez.
 ## Despliegue (Cloudflare Workers)
 El frontend está publicado en **Cloudflare Workers + Static Assets**
 (cuenta `manuelbis1996`), Worker `amet-radar`, URL en vivo:
-**https://amet-radar.manuelbis1996.workers.dev/** — verificado en
+**https://amet-radar.lavega.workers.dev/** — verificado en
 producción por el usuario (mapa, reportes, panel admin funcionando).
 
 Antes estuvo en Netlify hasta que se agotó la franja gratuita (banda
@@ -1011,7 +1011,17 @@ mismo criterio "sin dependencias" del resto del proyecto.
   `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`.
 - **`amet-radar.html`**: los meta tags OG/Twitter genéricos del `<head>`
   (`og:url`, `og:image`, `twitter:image`) apuntan a
-  `https://amet-radar.manuelbis1996.workers.dev/`.
+  `https://amet-radar.lavega.workers.dev/`.
+- **El subdominio de la cuenta es `lavega`**, no el usuario de Cloudflare.
+  Se cambió en `Workers & Pages → Account subdomain` para sacar
+  `manuelbis1996` de la URL pública (el link se comparte por WhatsApp y
+  llevar el usuario adentro daba desconfianza). **Ojo**: cambiarlo mata la
+  URL anterior — `amet-radar.manuelbis1996.workers.dev` dejó de resolver — y
+  una PWA está atada al origen desde el que se instaló, así que todas las
+  instalaciones viejas quedaron rotas y hay que reinstalarlas desde la URL
+  nueva. Se hizo a propósito y temprano, cuando casi no había usuarios; más
+  adelante habría sido caro. Si algún día se compra un dominio propio, el
+  mismo costo se paga de nuevo.
 - **Conectado al repo de GitHub** (`manuelbis1996/Amet-Radar`) vía
   `Workers & Pages → Create application → Import a repository`, con
   auto-deploy en cada push a `main`.

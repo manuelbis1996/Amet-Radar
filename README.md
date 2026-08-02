@@ -2,7 +2,7 @@
 
 ## En producción
 
-La app ya está publicada: **https://amet-radar.manuelbis1996.workers.dev**
+La app ya está publicada: **https://amet-radar.lavega.workers.dev**
 (Cloudflare Workers, ver [CLAUDE.md](CLAUDE.md#despliegue-cloudflare-workers)).
 Sirve directo desde ahí, con HTTPS (necesario para geolocalización en el
 celular) y sin depender de que ninguna PC esté prendida — los reportes
