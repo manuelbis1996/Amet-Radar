@@ -50,34 +50,18 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 
 ## 1. Seguridad
 
-**🔴 `push_subscriptions` es la última tabla con escritura abierta**
-Es el mismo agujero que v12.0 cerró para `reports`, y sigue vivo. Las tres
-políticas son `USING (true)` / `WITH CHECK (true)`, así que con la anon key
-—pública por diseño— una sola petición se lleva puestas **todas** las
-suscripciones:
+**✅ `push_subscriptions` — resuelto** (v14.2)
+Era la última tabla con escritura abierta: `DELETE ?endpoint=neq.x` con la
+anon key se llevaba todas las suscripciones, y un `PATCH` podía mover la
+posición de cualquiera. Ahora el alta, la baja y la actualización pasan por
+`subscribe_push` / `unsubscribe_push` / `update_push_position`, que reciben el
+endpoint exacto y tocan una sola fila; la tabla quedó sin ninguna política.
 
-```
-DELETE /rest/v1/push_subscriptions?endpoint=neq.x
-```
-
-y un `PATCH` puede reescribirle el `lat`/`lng` a cualquiera, o sea mandarle
-las notificaciones de otra ciudad. **Verificado contra producción** (con un
-filtro que no matchea ninguna fila, para no borrar nada real): `DELETE` y
-`PATCH` responden 204, o sea que la política los permite.
-
-Lo peor es que **el daño es silencioso**: nadie se entera de que dejó de
-recibir avisos, no hay error visible, y hay que volver a suscribirse a mano
-dispositivo por dispositivo. Es justamente la palanca de retención del
-proyecto.
-
-Por qué no se cerró junto con lo demás: no hay forma obvia de probar
-"esta suscripción es mía" — el `endpoint` es el identificador y a la vez el
-secreto. La salida más limpia es el mismo patrón que ya se usa para los
-reportes: que el cliente guarde un token al suscribirse, que la base guarde su
-hash, y mover el alta/baja/actualización a una RPC. La tabla no tiene política
-de `select`, así que la RPC además resuelve el gotcha de PostgREST que ya está
-documentado.
-- Esfuerzo: medio. Es el único ítem 🔴 que queda.
+No hizo falta inventar un token como en `reports`: sin política de SELECT
+nadie puede enumerar endpoints, y un endpoint de push ya es un secreto largo
+que solo tiene el dispositivo. Eso además evitó el backfill — las
+suscripciones existentes siguieron funcionando. Ver "Cerrar
+push_subscriptions" en `CLAUDE.md`.
 
 **✅ RLS abierta en `reports` y `app_config` — resuelto** (v12.0, v14.0, v14.1)
 Ver "Ya implementado". Queda una sola política en `reports`: `public
@@ -200,10 +184,10 @@ silencio del modelo real en Supabase.
 ## Orden sugerido
 
 1. ~~CI que corra las suites en cada push~~ ✅ hecho
-2. **Cerrar `push_subscriptions`** — el único 🔴 que queda, y el mismo tipo de
-   agujero que ya se cerró en `reports`.
+2. ~~Cerrar `push_subscriptions`~~ ✅ hecho
 3. **Que el CI frene el despliegue** — hoy avisa tarde; desplegar desde el
-   workflow lo convierte en una barrera de verdad.
+   workflow lo convierte en una barrera de verdad. **Es el ítem de mayor
+   prioridad que queda.**
 4. **Automatizar algunos chequeos contra la base real** — es donde
    históricamente aparecen los bugs.
 5. **Realtime**, cuando el egreso vuelva a ser el problema.

@@ -219,10 +219,11 @@ reusando `openReportById` — la misma función que usa el deep link `?r=`).
 
 - **Tabla `public.push_subscriptions`**: `endpoint text PK`, `p256dh text`,
   `auth text`, `lat/lng double precision`, `created_at`/`updated_at
-  timestamptz`. RLS habilitado, **sin política de SELECT** para `anon`
-  (a diferencia de `reports`) — nadie necesita leer endpoint/lat/lng de
-  otro dispositivo; solo insert/update/delete abiertos. El Edge Function
-  usa la `service_role` key (bypassa RLS) para leer todas las filas.
+  timestamptz`. RLS habilitado y **sin ninguna política** desde v14.2 — ni
+  siquiera de SELECT, que nunca tuvo. El alta, la baja y la actualización de
+  posición pasan por `subscribe_push` / `unsubscribe_push` /
+  `update_push_position` (ver "Cerrar push_subscriptions" abajo). El Edge
+  Function usa la `service_role` key (bypassa RLS) para leer todas las filas.
 - **Importante para cualquier cambio futuro al insert desde el cliente**:
   como no hay política de SELECT, un upsert (`on_conflict` +
   `Prefer: resolution=merge-duplicates`) o cualquier `Prefer:
@@ -610,6 +611,72 @@ números. El endpoint además **valida rangos** (`max_age_minutes` nunca menor
 a 15, `deny_threshold` nunca menor a 2), para que ni un error de tipeo del
 propio admin pueda vaciar la base; `admin.html` muestra el motivo exacto que
 devuelve el endpoint en vez de un error genérico.
+
+## Cerrar `push_subscriptions` (v14.2) — el último agujero de escritura
+
+**El problema.** Era la última tabla con `insert`, `update` y `delete`
+abiertos (`USING (true)` / `WITH CHECK (true)`). Con la anon key —pública por
+diseño— una sola petición se llevaba **todas** las suscripciones:
+
+```
+DELETE /rest/v1/push_subscriptions?endpoint=neq.x
+```
+
+y un `PATCH` podía reescribirle el `lat`/`lng` a cualquiera, o sea mandarle
+las notificaciones de otra ciudad. Verificado contra producción con un filtro
+que no matchea ninguna fila (para no borrar nada real): `DELETE` y `PATCH`
+respondían 204. Mismo agujero que v12.0 cerró para `reports`, pero con el
+daño **silencioso**: nadie se entera de que dejó de recibir avisos.
+
+**Por qué NO hizo falta un token como en `reports`.** Para los reportes hubo
+que inventar un secreto por fila porque el `id` es público (se lee en la tabla
+y viaja en los links compartidos). Acá no:
+
+- la tabla **nunca tuvo política de SELECT**, así que `anon` no puede
+  enumerar endpoints;
+- un endpoint de push es una URL con un token aleatorio largo que genera el
+  navegador — no se adivina;
+- o sea que **conocer el endpoint ya es la prueba de propiedad**, y es un
+  secreto que el dispositivo ya tiene.
+
+Ventaja concreta: **no hubo backfill**. Las suscripciones que ya existían
+siguieron funcionando; con un esquema de token habrían quedado sin poder
+desuscribirse hasta volver a suscribirse.
+
+**La clave del diagnóstico**: el agujero nunca fue "cualquiera puede tocar SU
+fila" sino "cualquiera puede tocar TODAS con un filtro". Por eso alcanza con
+que las operaciones pasen por funciones que reciben el endpoint **exacto** y
+tocan una sola fila. Migraciones:
+`20260803170000_push_subscriptions_rpc.sql` (aditiva) y
+`20260803180000_lock_down_push_subscriptions.sql` (cierra), en ese orden y con
+el deploy del cliente en el medio — misma secuencia que v14.0.
+
+**Efecto lateral bueno**: el rodeo de `DELETE` + `POST` que hacía
+`subscribeToPush()` (porque un upsert por PostgREST falla sin política de
+SELECT) desapareció. La RPC es SECURITY DEFINER y hace un upsert de verdad,
+que además **preserva `categories`** en vez de resetearla.
+
+**Lo que NO cubre, asumido**: si un endpoint se filtra (logs, un proxy), quien
+lo tenga puede desuscribir o mover esa suscripción. Es una fila, no la tabla
+entera, y ya era así antes.
+
+**Verificado contra la base real con rol `anon`, en transacciones revertidas**:
+se rechazan endpoint que no es URL, demasiado corto, `p256dh` gigante y
+lat/lng fuera de rango; pasar `'%'`, `''`, `null` o `''' or 1=1 --'` a
+`unsubscribe_push` **no borra nada**; re-suscribir actualiza en lugar sin
+duplicar y preserva `categories`; y la baja por endpoint exacto se lleva solo
+esa fila. Ojo al probar: contar filas **con el rol `anon` puesto siempre da
+0**, porque no hay política de SELECT — hay que hacer `reset role` antes de
+verificar, o parece que la función no insertó nada.
+
+**Del lado de las pruebas**: `check-seguridad.js` excluía a propósito
+`push_subscriptions` de su auditoría de peticiones destructivas, justamente
+porque la app mandaba `DELETE`/`PATCH` legítimos ahí. Se quitó esa excepción y
+se agregó un doble del entorno de push (`PushManager`, `Notification`,
+`serviceWorker.ready`) para **ejercitar el alta y la baja de verdad** — sin
+eso los chequeos nuevos pasaban por vacío. Comprobado que la guarda no es
+decorativa: revirtiendo el cliente al `DELETE` directo, la suite falla y
+muestra la petición exacta.
 
 ## Anti-spam del lado del servidor (v14.0) — leer antes de tocar `create_report` o el flujo de publicar
 
@@ -1236,6 +1303,11 @@ ordena alfabéticamente bien):
 14. `20260803150000_close_photo_uploads.sql` — quita la política de insert
     del bucket y hace que `create_report` rechace fotos y notas (ver "Fotos y
     notas: cerradas del todo"). Deja el bucket sin ninguna política.
+15. `20260803170000_push_subscriptions_rpc.sql` — funciones `subscribe_push`,
+    `unsubscribe_push` y `update_push_position`. Aditiva.
+16. `20260803180000_lock_down_push_subscriptions.sql` — quita las tres
+    políticas abiertas de `push_subscriptions`. **Va después de desplegar el
+    cliente nuevo**, igual que la #13 (ver "Cerrar push_subscriptions").
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.

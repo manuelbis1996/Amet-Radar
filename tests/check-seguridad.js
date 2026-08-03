@@ -14,6 +14,32 @@ Object.defineProperty(navigator,'geolocation',{value:{
   watchPosition:(s)=>{setTimeout(()=>s({coords:{latitude:19.2214,longitude:-70.5295}}),40);return 1;},
   clearWatch:()=>{}},configurable:true});`;
 
+// Doble del entorno de push. Sin esto la campana ni siquiera aparece
+// (la app pide serviceWorker + PushManager + Notification), y la auditoría
+// de peticiones destructivas sobre push_subscriptions no probaría nada:
+// pasaría por vacío, que es peor que no tenerla.
+const PUSH = `
+window.PushManager = function(){};
+window.Notification = { permission:'default', requestPermission: async () => 'granted' };
+const __sub = {
+  endpoint: 'https://fcm.googleapis.com/fcm/send/TEST-abcdefghijklmnopqrst',
+  toJSON: () => ({ endpoint: __sub.endpoint, keys: { p256dh:'clave-p256', auth:'clave-auth' } }),
+  unsubscribe: async () => true
+};
+// getSubscription arranca en null y recién devuelve la suscripción después
+// de subscribe(): si devolviera una siempre, la app bootearía con la campana
+// ya activa y el primer toque abriría la hoja de gestión en vez de dar de
+// alta — o sea, subscribe_push nunca se ejercitaría.
+let __activa = null;
+Object.defineProperty(navigator, 'serviceWorker', { configurable:true, value: {
+  ready: Promise.resolve({ pushManager: {
+    subscribe: async () => { __activa = __sub; return __sub; },
+    getSubscription: async () => __activa
+  }}),
+  register: async () => ({}),
+  addEventListener: () => {}
+}});`;
+
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64');
@@ -43,6 +69,7 @@ const REPORTS = [
   const errores = [];
   page.on('pageerror', e => errores.push(String(e)));
   await page.addInitScript(GEO);
+  await page.addInitScript(PUSH);
   await page.route('**/maplibre-gl.js', r => r.fulfill({ contentType:'application/javascript', body: STUB }));
   await page.route('**/maplibre-gl.css', r => r.fulfill({ contentType:'text/css', body:'' }));
   await page.route('**/fonts.googleapis.com/**', r => r.fulfill({ contentType:'text/css', body:'' }));
@@ -64,6 +91,12 @@ const REPORTS = [
     if(fn === 'vote_report') return r.fulfill({ status:200, contentType:'application/json',
       body: JSON.stringify([{ confirms:0, denies:2, removed:true }]) });
     if(fn === 'delete_own_report') return r.fulfill({ status:200, contentType:'application/json', body:'false' });
+    // Las RPC de push devuelven boolean; el cliente trata cualquier cosa
+    // distinta de true como fallo, así que el '0' genérico de abajo haría
+    // que el alta nunca se complete.
+    if(fn === 'subscribe_push' || fn === 'unsubscribe_push' || fn === 'update_push_position'){
+      return r.fulfill({ status:200, contentType:'application/json', body:'true' });
+    }
     return r.fulfill({ status:200, contentType:'application/json', body:'0' });
   });
 
@@ -145,12 +178,63 @@ const REPORTS = [
   check('y se le avisa al usuario que no se pudo eliminar',
         /no se pudo eliminar/i.test(avisoBorrado), avisoBorrado);
 
+  // ---- 3.bis Alta y baja de avisos push, que es lo que audita el punto 4 ----
+  // Sin ejercitar esto, los chequeos de push_subscriptions de abajo pasarían
+  // por vacío. Se activa la campana (alta) y después se desactiva desde la
+  // hoja de gestión (baja), que son los dos caminos que antes mandaban
+  // POST/DELETE directos contra la tabla.
+  // La sección anterior deja abierta la hoja de detalle, y su scrim se come
+  // el toque en la campana.
+  const scrim = await page.$('.detail-backdrop');
+  if(scrim){ await scrim.click(); await page.waitForTimeout(300); }
+  const campana = await page.$('#push-toggle-btn');
+  check('la campana de avisos está disponible en el entorno de prueba', !!campana);
+  if(campana){
+    await campana.click();
+    await page.waitForTimeout(700);
+    const alta = rpcs.filter(x => x.fn === 'subscribe_push').pop();
+    check('activar los avisos usa subscribe_push, no un POST a la tabla',
+          !!alta && /^https:\/\//.test(alta.args.p_endpoint || ''),
+          JSON.stringify(alta && alta.args && alta.args.p_endpoint));
+
+    // Esperar al estado y no a un timeout fijo: mientras el alta está en
+    // curso el botón queda en 'loading' y su handler sale temprano, así que
+    // un clic apurado no abre nada y el chequeo falla por carrera.
+    await page.waitForFunction(
+      () => document.getElementById('push-toggle-btn').dataset.state === 'active',
+      null, { timeout: 5000 });
+    await page.click('#push-toggle-btn');   // ahora está activa: abre la hoja
+    await page.waitForSelector('#push-unsubscribe', { timeout: 5000 }).catch(() => {});
+    const btnBaja = await page.$('#push-unsubscribe');
+    check('la hoja de gestión ofrece desactivar', !!btnBaja);
+    if(btnBaja){
+      await btnBaja.click();
+      await page.waitForTimeout(700);
+      const baja = rpcs.filter(x => x.fn === 'unsubscribe_push').pop();
+      check('desactivarlos usa unsubscribe_push, no un DELETE con filtro',
+            !!baja && typeof baja.args.p_endpoint === 'string',
+            JSON.stringify(baja && baja.args));
+    }
+  }
+
   // ---- 4. Auditoría: nada destructivo por REST directo ----
+  // La excepción de push_subscriptions se quitó en v14.2: hasta entonces la
+  // app daba de alta y de baja las suscripciones con POST/DELETE/PATCH
+  // directos, y por eso había que excluirla acá. Esas políticas RLS estaban
+  // abiertas, así que un DELETE con filtro arbitrario se llevaba las
+  // suscripciones de TODOS los dispositivos. Ahora pasa por
+  // subscribe_push / unsubscribe_push / update_push_position, y sin la
+  // excepción este chequeo protege también esa tabla.
   const destructivas = enviado.filter(r =>
-    (r.m === 'DELETE' || r.m === 'PATCH' || r.m === 'PUT') &&
-    !/push_subscriptions/.test(r.u));
-  check('la app no manda ningún DELETE/PATCH a reports, app_config ni al bucket de fotos',
+    (r.m === 'DELETE' || r.m === 'PATCH' || r.m === 'PUT'));
+  check('la app no manda ningún DELETE/PATCH directo a ninguna tabla ni al bucket',
         destructivas.length === 0, JSON.stringify(destructivas));
+
+  // Y que tampoco quede un POST directo a la tabla de suscripciones: el alta
+  // también es una RPC ahora.
+  const altaDirecta = enviado.filter(r => r.m === 'POST' && /rest\/v1\/push_subscriptions/.test(r.u));
+  check('el alta de push tampoco va por POST directo a la tabla',
+        altaDirecta.length === 0, JSON.stringify(altaDirecta));
   check('sin errores de JS', errores.length === 0, JSON.stringify(errores));
 
   console.log(fails.length ? `\n>>> ${fails.length} FALLO(S): ${fails.join(' | ')}` : '\n>>> TODOS LOS CHEQUEOS PASARON');

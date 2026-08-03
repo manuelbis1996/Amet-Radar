@@ -73,7 +73,8 @@ pidiendo solo el área visible del mapa.
 
 **Todo lo que escribe pasa por una RPC.** De `/rest/v1/reports` solo queda
 abierto el `GET`: publicar, votar y borrar tienen su propia función con las
-reglas adentro. Sin cuentas de usuario, "este reporte es mío" se resuelve con
+reglas adentro, y lo mismo vale para las suscripciones a notificaciones. No
+queda ninguna tabla con escritura directa. Sin cuentas de usuario, "este reporte es mío" se resuelve con
 un token por reporte — el texto plano queda en `localStorage` del dispositivo y
 la base solo guarda su hash. Publicar aplica anti-spam del lado del servidor
 (dedupe por cercanía y tope por IP).

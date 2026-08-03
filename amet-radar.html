@@ -497,7 +497,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v14.1';
+  const APP_VERSION = 'v14.2';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -605,7 +605,9 @@
   // real lo hace el Edge Function notify-nearby, disparado por un trigger
   // en cada INSERT sobre reports (ver CLAUDE.md).
   const VAPID_PUBLIC_KEY = 'BOg_VDCTXvRF0l9cLLFI_sGgWGkiyVb3SmIu93c8bcFatvEcxzSPfqUwvAfaO6X8nMdVH596vW0pIAdhaHe5nKY';
-  const PUSH_SUBS_URL = `${SUPABASE_URL}/rest/v1/push_subscriptions`;
+  // Ya no hay URL de la tabla: alta, baja y actualización de posición pasan
+  // por rpc/subscribe_push, rpc/unsubscribe_push y rpc/update_push_position.
+  // La tabla no acepta escritura directa desde v14.2.
   const PUSH_ENDPOINT_KEY = 'amet_push_endpoint_v1';
   const PUSH_POS_UPDATE_MIN_METERS = 400;
   const PUSH_POS_UPDATE_MIN_MS = 5 * 60 * 1000;
@@ -1417,27 +1419,24 @@
       });
       const json = sub.toJSON();
       const latlng = lastKnownLatLng || [DEFAULT_CENTER[0], DEFAULT_CENTER[1]];
-      // Sin política de SELECT en push_subscriptions a propósito (ver
-      // CLAUDE.md), así que un upsert con on_conflict/return=representation
-      // falla: PostgREST necesita "leer de vuelta" la fila para resolverlo,
-      // y esa lectura choca con la ausencia deliberada de esa política.
-      // Se resuelve con DELETE (no-op si no existía) + POST simple, ambos
-      // con return=minimal, en vez de un upsert.
-      await fetch(`${PUSH_SUBS_URL}?endpoint=eq.${encodeURIComponent(json.endpoint)}`, {
-        method: 'DELETE', headers: SUPABASE_HEADERS
+      // Antes esto era DELETE + POST directos contra la tabla, porque un
+      // upsert por la REST API falla sin política de SELECT (PostgREST
+      // necesita leer de vuelta la fila). Ese rodeo ya no hace falta: la RPC
+      // es SECURITY DEFINER y hace un upsert de verdad.
+      //
+      // El motivo del cambio no es la comodidad sino la seguridad: con las
+      // políticas abiertas, cualquiera con la anon key podía mandar un
+      // DELETE con filtro arbitrario y llevarse TODAS las suscripciones de
+      // todos los dispositivos. La RPC recibe el endpoint exacto y toca una
+      // sola fila. Ver CLAUDE.md.
+      const guardada = await callRpc('subscribe_push', {
+        p_endpoint: json.endpoint,
+        p_p256dh: json.keys.p256dh,
+        p_auth: json.keys.auth,
+        p_lat: latlng[0],
+        p_lng: latlng[1]
       });
-      const res = await fetch(PUSH_SUBS_URL, {
-        method: 'POST',
-        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
-        body: JSON.stringify({
-          endpoint: json.endpoint,
-          p256dh: json.keys.p256dh,
-          auth: json.keys.auth,
-          lat: latlng[0], lng: latlng[1],
-          updated_at: new Date().toISOString()
-        })
-      });
-      if(!res.ok) throw new Error('No se pudo guardar la suscripción');
+      if(guardada !== true) throw new Error('No se pudo guardar la suscripción');
       localStorage.setItem(PUSH_ENDPOINT_KEY, json.endpoint);
       lastPushPosUpdate = { latlng, ts: Date.now() };
       setPushButtonState('active');
@@ -1459,9 +1458,7 @@
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
       if(sub){
-        await fetch(`${PUSH_SUBS_URL}?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {
-          method: 'DELETE', headers: SUPABASE_HEADERS
-        });
+        await callRpc('unsubscribe_push', { p_endpoint: sub.endpoint });
         await sub.unsubscribe();
       }
     }catch(err){ console.error('Error cancelando suscripción push', err); }
@@ -1482,10 +1479,8 @@
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
       if(!sub) return;
-      await fetch(`${PUSH_SUBS_URL}?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, {
-        method: 'PATCH',
-        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ lat: latlng[0], lng: latlng[1], updated_at: new Date().toISOString() })
+      await callRpc('update_push_position', {
+        p_endpoint: sub.endpoint, p_lat: latlng[0], p_lng: latlng[1]
       });
       lastPushPosUpdate = { latlng, ts: Date.now() };
     }catch(err){ console.error('Error actualizando posición de suscripción push', err); }
