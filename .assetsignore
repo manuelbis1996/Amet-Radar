@@ -24,3 +24,4 @@ server.js
 netlify
 supabase
 functions
+tests

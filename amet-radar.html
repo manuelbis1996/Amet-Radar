@@ -497,7 +497,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v13.2';
+  const APP_VERSION = 'v14.0';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -712,18 +712,54 @@
   // bucket en la migración 20260801120000 — si no, cualquiera con la anon
   // key (que es pública) podía vaciar el bucket entero.
 
+  // El servidor rechazó el reporte por una regla del anti-spam (no es un
+  // problema de red). Se distingue de NetworkError porque acá NO hay que
+  // encolar el reporte: reintentarlo más tarde daría exactamente el mismo
+  // resultado.
+  class ReportRejected extends Error {
+    constructor(reason){ super(reason); this.reason = reason; }
+  }
+
+  const RECHAZO_MENSAJE = {
+    duplicate:  'Ya hay un reporte de esto aquí cerca. Ábrelo y confírmalo en vez de publicar otro.',
+    rate_limit: 'Demasiados reportes desde esta conexión. Intenta de nuevo más tarde.',
+    invalid:    'No se pudo publicar el reporte.'
+  };
+
+  // Publicar ya NO es un POST directo a /rest/v1/reports: esa política de
+  // insert se cerró (migración 20260803130000) porque con la anon key —que es
+  // pública— cualquiera podía insertar en un bucle y llenar el mapa de pines
+  // falsos, disparando de paso una notificación push por cada uno. Ahora pasa
+  // por create_report, que aplica el dedupe por proximidad y el tope por IP
+  // del lado del servidor. Ver "Anti-spam del lado del servidor" en CLAUDE.md.
   async function insertReport(id, record){
     let res;
     try{
-      res = await fetch(REPORTS_URL, {
+      res = await fetch(`${RPC_URL}/create_report`, {
         method: 'POST',
-        headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ id, ...record })
+        headers: SUPABASE_HEADERS,
+        body: JSON.stringify({
+          p_id: id,
+          p_lat: record.lat,
+          p_lng: record.lng,
+          p_photo: record.photo || null,
+          p_note: record.note || '',
+          p_ts: record.ts,
+          p_category: record.category,
+          p_approx: !!record.approx,
+          p_owner_hash: record.owner_hash || null
+        })
       });
     }catch(e){
+      // Igual que antes: solo la caída de red va a la cola offline.
       throw new NetworkError('Sin conexión');
     }
     if(!res.ok) throw new Error('No se pudo publicar el reporte');
+    const out = JSON.parse((await res.text()) || 'null');
+    // ok:true incluye reason:'already_exists' — el reintento de la cola manda
+    // el MISMO id, y si el insert ya había entrado eso es un éxito, no un
+    // error (si no, un reporte publicado se le mostraría al autor como fallo).
+    if(!out || out.ok !== true) throw new ReportRejected((out && out.reason) || 'invalid');
     reportsCache[id] = record;
   }
 
@@ -838,6 +874,11 @@
   function getMine(){ try{ return new Set(JSON.parse(localStorage.getItem(MINE_KEY)||'[]')); }catch(e){ return new Set(); } }
   function saveMine(set){ localStorage.setItem(MINE_KEY, JSON.stringify([...set])); }
 
+  // Freno local, para dar respuesta inmediata sin una ida y vuelta a la red.
+  // YA NO ES LA DEFENSA: se resetea borrando los datos del sitio, y publicar
+  // ni siquiera necesita pasar por acá (se puede llamar a la API a mano). El
+  // límite que cuenta lo aplica create_report en el servidor — ver "Anti-spam
+  // del lado del servidor" en CLAUDE.md. Esto queda como comodidad de UX.
   function canReport(){
     const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]').filter(t => (Date.now()-t) < CONFIG.reportWindowMin*60000);
     localStorage.setItem(TIMES_KEY, JSON.stringify(times));
@@ -1868,6 +1909,15 @@
         showToast('Sin conexión: se publicará cuando vuelvas a tener internet.', true);
         return;
       }
+      if(err instanceof ReportRejected){
+        // Lo rechazó una regla del servidor (duplicado, tope por IP): no se
+        // encola ni se ofrece reintentar, porque volver a mandarlo daría lo
+        // mismo. Se cierra la hoja y se explica el motivo.
+        dropToken(id);
+        closeOverlay();
+        showToast(RECHAZO_MENSAJE[err.reason] || RECHAZO_MENSAJE.invalid, true);
+        return;
+      }
       // El reintento genera un id (y un token) nuevo, así que este queda
       // huérfano en localStorage si no se lo saca acá.
       dropToken(id);
@@ -2117,6 +2167,16 @@
         closeOverlay();
         registerReportTime();
         showToast('Sin conexión: el reporte se publicará solo cuando vuelvas a tener internet.', true);
+        return;
+      }
+      if(err instanceof ReportRejected){
+        // Ver el comentario equivalente en publishQuickReport. La foto ya
+        // subió a Storage y queda huérfana en el bucket: mismo caso ya
+        // asumido en "Subir fotos" (CLAUDE.md), no hay forma de borrarla
+        // desde el cliente desde v12.0.
+        dropToken(id);
+        closeOverlay();
+        showToast(RECHAZO_MENSAJE[err.reason] || RECHAZO_MENSAJE.invalid, true);
         return;
       }
       // El reintento genera un id (y un token) nuevo, así que este queda

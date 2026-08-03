@@ -123,6 +123,14 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   estadísticas, editar parámetros del sistema), sin backend propio — le
   pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
   administración" abajo).
+- `tests/` — **la única suite del repo**, agregada en v14.0
+  (`check-antispam.js` + `maplibre-stub.js`, Playwright). Cubre el flujo de
+  publicar contra la RPC nueva. Correr con
+  `NODE_PATH=$(npm root -g) node tests/check-antispam.js` (levanta su propio
+  `server.js` en el 8123). **Está en `.assetsignore`**: sin eso, con
+  `assets.directory: "./"`, se publicaría como archivo servible. Ojo: hubo
+  otras 11 suites de sesiones anteriores que vivían en un directorio
+  temporal y **se perdieron**; por eso esta va versionada en el repo.
 
 ## Cómo correrlo
 Requiere Node.js instalado y servirse por `http://` (no abrir con doble
@@ -141,22 +149,34 @@ contexto seguro — por IP de red simple (`http://192.168.x.x`) los navegadores
 móviles la bloquean. Un túnel rápido tipo `npx localtunnel --port 8000`
 resuelve esto sin desplegar nada.
 
-No hay build step, linter, ni suite de tests — es HTML/CSS/JS servido tal
-cual y un servidor Node sin dependencias. Verificar cambios corriendo
-`node server.js` y probando manualmente en el navegador en
+No hay build step ni linter — es HTML/CSS/JS servido tal cual y un servidor
+Node sin dependencias. Verificar cambios corriendo `node server.js` y
+probando manualmente en el navegador en
 `http://localhost:8000/amet-radar.html`.
+
+La única suite versionada es `tests/check-antispam.js` (ver "Archivos"), que
+cubre el flujo de publicar. **Y no alcanza sola**: mockea la red, así que
+nunca ve a Postgres — y los bugs más caros de este proyecto salieron todos
+probando contra la base real con el rol `anon`
+(`begin; set local role anon; ...; rollback;`). Para cualquier cambio que
+toque RLS, una RPC o un trigger, esa prueba contra la base no es opcional.
 
 ## API de Supabase (proyecto `amet-radar`, `nikexwjxxcxzhsuypsjn`)
 El cliente (`amet-radar.html`) llama directo a la API REST autogenerada de
 Supabase (PostgREST) sobre la tabla `public.reports`, con la publishable
 key embebida en el `<script>` — no hay backend propio de por medio.
 - `GET  {SUPABASE_URL}/rest/v1/reports?select=*` — todas las filas.
-- `POST {SUPABASE_URL}/rest/v1/reports` — body `{ id, ...record }`, inserta
-  una fila.
+- **Publicar ya NO es un `POST /rest/v1/reports`** desde v14.0: esa política
+  de insert también se eliminó. Se publica con
+  `POST {SUPABASE_URL}/rest/v1/rpc/create_report`, que aplica el anti-spam
+  del lado del servidor (ver "Anti-spam del lado del servidor" abajo).
 - **No hay `PATCH` ni `DELETE` contra `/rest/v1/reports`** desde v12.0: esas
   políticas RLS se eliminaron (ver "Seguridad de escritura" abajo). Todo lo
   destructivo pasa por `POST {SUPABASE_URL}/rest/v1/rpc/<funcion>`
   (`vote_report`, `delete_own_report`, `purge_expired_reports`).
+- O sea que de `/rest/v1/reports` solo queda vivo el `GET`: **la única
+  política RLS que sobrevive en la tabla es la de `select`**. Todo lo que
+  escribe pasa por una RPC.
 - Headers en todas las llamadas: `apikey` y `Authorization: Bearer
   <SUPABASE_ANON_KEY>`.
 - Esquema de `reports`: `id text PK`, `lat/lng double precision`,
@@ -164,11 +184,13 @@ key embebida en el `<script>` — no hay backend propio de por medio.
   text` (check contra las 4 categorías), `confirms/denies integer`, `approx
   boolean`, `created_at timestamptz`, `owner_hash text` (nullable, ver
   "Seguridad de escritura").
-- RLS habilitado. `select` e `insert` siguen abiertos (`USING (true)`): leer
-  y publicar son anónimos por diseño, no hay cuentas de usuario. `update` y
-  `delete` **ya no tienen política** — ver "Seguridad de escritura" abajo.
-  El linter de Supabase marca las dos políticas abiertas que quedan como
-  warning esperado, no como bug.
+- RLS habilitado. Solo `select` sigue abierto (`USING (true)`): leer es
+  anónimo por diseño, no hay cuentas de usuario. `update` y `delete` no
+  tienen política desde v12.0 (ver "Seguridad de escritura" abajo) y el
+  `insert` tampoco desde v14.0 (ver "Anti-spam del lado del servidor").
+  Publicar sigue siendo anónimo, pero pasa por `create_report`. El linter de
+  Supabase marca la política de select abierta como warning esperado, no
+  como bug.
 - `server.js` ya no expone ninguna ruta `/api/*`.
 - **`photo` guarda una URL, no base64**: bucket público `report-photos` en
   Supabase Storage, archivo `<id-del-reporte>.jpg`. `uploadPhoto()` en
@@ -438,11 +460,11 @@ tienen `owner_hash`, así que sus autores no pueden borrarlos (la app avisa
 "Se retirará solo al vencer"). Se van solos a las `max_age_minutes`. No se
 hace backfill porque no hay forma de saber de quién era cada uno.
 
-**Lo que este cambio NO cubre** (bloqueantes conocidos, quedan para
-después): el anti-spam sigue siendo del lado del cliente (`canReport()`
-mira `localStorage`, se resetea borrando los datos del sitio), y subir
-fotos sigue abierto a cualquiera con la anon key — no hay moderación
-automática ni forma de reportar abuso.
+**Lo que este cambio NO cubrió** (eran los dos bloqueantes conocidos): el
+anti-spam del lado del cliente — **ya cerrado en v14.0**, ver "Anti-spam del
+lado del servidor" más abajo — y subir fotos, que sigue abierto a cualquiera
+con la anon key: no hay moderación automática ni forma de reportar abuso.
+Eso último es lo único que queda pendiente de esta lista.
 
 ### Borrar fotos: no se puede desde SQL (leer antes de tocar cualquier borrado)
 
@@ -559,6 +581,171 @@ a 15, `deny_threshold` nunca menor a 2), para que ni un error de tipeo del
 propio admin pueda vaciar la base; `admin.html` muestra el motivo exacto que
 devuelve el endpoint en vez de un error genérico.
 
+## Anti-spam del lado del servidor (v14.0) — leer antes de tocar `create_report` o el flujo de publicar
+
+**El problema que cierra.** `canReport()` miraba `amet_report_times_v1` de
+`localStorage`: borrando los datos del sitio se reseteaba. Y publicar era un
+`POST /rest/v1/reports` con la política `public insert` abierta, así que ni
+siquiera hacía falta abrir la app — con la anon key (pública por diseño) y un
+`curl` en un bucle se llenaba el mapa de pines falsos, **y cada insert
+disparaba una notificación push a todos los suscriptores cercanos**. Era el
+último agujero conocido antes de lanzar en La Vega. Migraciones:
+`20260803120000_server_side_rate_limit.sql` y
+`20260803130000_close_direct_insert.sql`.
+
+**Cómo quedó**: publicar pasa por `create_report(...)` (SECURITY DEFINER,
+`grant execute` a `anon`) y la política de insert se eliminó. La función
+valida la entrada, aplica dos controles y recién ahí inserta. Responde
+`{ ok, reason, id }` — `reason` es `duplicate`, `rate_limit`, `invalid`,
+`already_exists` o `null`.
+
+### La cabecera de IP "documentada" es falsificable — verificado, no teórico
+
+Este es el detalle que más fácil se hace mal. La forma que sale en todos
+lados de leer la IP en PostgREST es
+`current_setting('request.headers', true)::json->>'x-forwarded-for'` y tomar
+la **primera** entrada. **Eso no sirve.** Mandando a mano
+`X-Forwarded-For: 1.2.3.4` contra este mismo proyecto, la base recibe:
+
+```
+x-forwarded-for = "1.2.3.4,160.79.106.29"
+```
+
+o sea que el valor del cliente queda **a la izquierda** y Cloudflare appendea
+la IP real a la derecha. Un atacante que mande una IP distinta por petición
+tendría cuota infinita. Lo que sí resiste (todo comprobado con `curl` real
+contra el proyecto, no leyendo documentación):
+
+| Cabecera | ¿Confiable? | Qué pasa si el cliente intenta mandarla |
+|---|---|---|
+| `cf-connecting-ip` | **sí** | Cloudflare **rechaza la petición entera con 403** (error 1000) |
+| `sb-forwarded-for` | sí | Supabase la reescribe; el valor del cliente se ignora |
+| `x-forwarded-for` | solo la **última** entrada | la primera la controla el cliente |
+| `true-client-ip` | **no** | pasa tal cual desde el cliente |
+
+`_client_ip()` lee en ese orden y, del `x-forwarded-for`, corta por la
+derecha. Si algún día se saca Cloudflare de adelante hay que volver a medir
+esto: el orden depende de la infraestructura, no de ningún estándar.
+
+### Los dos controles, y por qué el de IP es el flojo
+
+- **Dedupe por proximidad — el control de verdad.** Se rechaza un reporte si
+  ya hay uno **de la misma categoría, a menos de 150 m, publicado en los
+  últimos 30 minutos**. No depende de ninguna identidad: no lo esquiva ni
+  borrar los datos del sitio ni rotar de IP. Ataca directamente la amenaza
+  real (llenar el mapa de pines) y además se defiende como producto — si el
+  pin ya está ahí, lo que corresponde es confirmarlo. Los 150 m son los
+  mismos de `APPROX_RADIUS_METERS`. Prefiltro por caja + Haversine para
+  refinar (la caja es un cuadrado: en las esquinas da hasta 1.41x el radio).
+- **Tope por IP — cortafuegos, no control fino.** 30 por hora. Es
+  deliberadamente generoso: en República Dominicana el **NAT de operadora
+  (CGNAT) es la norma en redes móviles**, o sea que mucha gente legítima sale
+  por la misma IP pública y un tope de 5/hora bloquearía a un barrio entero.
+  **No se pudo medir cuánta gente real comparte IP** — el proyecto no guarda
+  ninguna IP, así que no hay dato histórico que mirar — así que se asume el
+  peor caso.
+- **Si no hay IP confiable, NO se bloquea** (fail open). Meter a todos los
+  "desconocidos" en un mismo balde haría que, si cambia la infraestructura y
+  la cabecera deja de llegar, la app entera se quede sin publicar. El dedupe
+  sigue aplicando igual.
+
+### Por qué NO hay un tope global (es una decisión, no un olvido)
+
+Es tentador agregar "máximo N reportes por hora en toda la app" como último
+cortafuegos contra alguien que rote IPs. **No se puso a propósito**: un tope
+global convierte un ataque de spam (degradación — hay pines de más, molesto
+pero la app sirve) en uno de **denegación de servicio** (nadie puede
+publicar). El atacante quemaría la cuota global adrede y dejaría a La Vega
+sin poder avisar. Publicar es el flujo central: es preferible tragarse pines
+de más. Si algún día se agrega igual, que sea con este párrafo a la vista.
+
+### Los umbrales son constantes en el SQL, no `app_config`
+
+Deliberado, y es la lección de la puerta lateral de `app_config` aplicada:
+una RPC que lee su umbral de una tabla escribible desde afuera es tan
+insegura como esa tabla. `app_config.report_limit` /
+`report_window_min` **siguen existiendo y siguen siendo del cliente**
+(`canReport()`, que ahora es solo comodidad de UX). Para cambiar los umbrales
+del servidor hay que editar `create_report` y aplicar una migración nueva.
+
+### La IP se guarda hasheada y sin vínculo con el reporte
+
+La IP **no puede ir en `public.reports`**: esa tabla tiene `select` abierto,
+o sea que publicaría la IP de cada persona que reporta un retén — en una app
+cuyo propósito es esquivar retenes, es exactamente el dato que no hay que
+exponer. Va en `public.report_events`, y con dos cuidados más:
+
+- se guarda `sha256(ip || salt)` y no la IP — un hash de IPv4 pelado se
+  fuerza-brutea (son 4 mil millones); el salt vive en `public.rate_limit_salt`;
+- la fila **no tiene `report_id`**, así que ni con la base entera en la mano
+  se puede decir "esta persona publicó ese reporte". Solo sirve para contar.
+- Consecuencia asumida: **deshacer un reporte no devuelve el cupo de IP**
+  (sí el local). Con 30/hora, quemar uno es irrelevante, y mantenerlo
+  desvinculado vale más.
+
+Las dos tablas tienen RLS **sin ninguna política**: nadie llega por
+PostgREST, solo la función SECURITY DEFINER. El linter las marca con un INFO
+`rls_enabled_no_policy` — es lo esperado, igual que `admin_login_attempts`.
+
+### El orden de los chequeos importa (bug encontrado probando)
+
+El chequeo de "¿ya existe este id?" va **antes** del dedupe. Con el dedupe
+primero, el reintento de la cola offline —que manda el **mismo id**— caía en
+su propio reporte recién insertado y contestaba `duplicate`: a un usuario
+cuyo reporte sí se había publicado se le mostraba un error. Ahora contesta
+`already_exists` con `ok:true` y el cliente lo trata como éxito, así la cola
+se vacía limpia. Detectado probando contra la base real.
+
+### Las dos migraciones van separadas, y en ese orden
+
+`20260803120000` es **puramente aditiva** (crea tablas y funciones, no
+cambia nada para nadie) y `20260803130000` es la que **cierra el insert
+directo**. Van separadas porque la app que está en la calle publica con
+`POST /rest/v1/reports`: si se cierra el insert antes de que el cliente nuevo
+esté desplegado, todo navegador que todavía no bajó v14.0 deja de poder
+publicar en el instante de aplicar la migración. Orden correcto:
+
+1. aplicar `20260803120000_server_side_rate_limit.sql`
+2. mergear a `main` y esperar el deploy de Cloudflare
+3. aplicar `20260803130000_close_direct_insert.sql`
+
+**Estado**: el paso 1 ya está aplicado en producción. Los pasos 2 y 3 quedan
+pendientes — hasta que se haga el 3, el anti-spam es decorativo, porque sigue
+abierto el camino viejo que se lo saltea.
+
+### Del lado del cliente
+
+- `insertReport()` llama a `rpc/create_report` en vez del POST. Solo la caída
+  de red sigue lanzando `NetworkError` (→ cola offline); un rechazo del
+  servidor lanza `ReportRejected`, que **no se encola ni ofrece reintentar**
+  (daría lo mismo) y muestra el motivo con un mensaje propio
+  (`RECHAZO_MENSAJE`).
+- Un rechazo **no gasta cupo local**: `registerReportTime()` está después del
+  insert en el `try`.
+- `canReport()` **sigue existiendo a propósito**: da respuesta inmediata sin
+  ida y vuelta a la red. Ya no es la defensa y su comentario lo dice.
+- `stampOwnership()` sigue corriendo antes de cualquier envío, así el
+  `owner_hash` viaja también por la cola offline (cubierto por la prueba).
+
+### Lo verificado, y lo que no
+
+**Contra la base real con el rol `anon`, en transacciones con `rollback`**
+(los tests del cliente mockean la red y nunca ven a Postgres — así se
+colaron los bugs históricos de este proyecto): el dedupe rechaza a 0 m y a
+100 m y deja pasar a 300 m, otra categoría y un reporte de hace 31 min; el
+tope por IP deja pasar exactamente 30 y corta el 31; **rotar la parte
+falsificable del `x-forwarded-for` no da cuota extra**; se rechazan id mal
+formado, coordenadas fuera de RD, categoría inventada, foto `data:`, foto de
+otro dominio y `owner_hash` que no es un SHA-256; `confirms`/`denies` se
+fuerzan a 0 y un `ts` futuro se clampea; el reintento con el mismo id es
+idempotente; `anon` no puede ejecutar `_client_ip` ni leer `report_events` /
+`rate_limit_salt`; y un reporte creado por la RPC **sigue borrándose con su
+token** (`delete_own_report`), o sea que el "Deshacer" no se rompió.
+
+**Lo que NO se verificó**: cuánta gente real comparte IP por CGNAT en RD (no
+hay dato); y el comportamiento en producción bajo el cliente nuevo, porque
+las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
+
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
   (objeto `CATEGORIES` dentro del `<script>`, con emoji y color cada una).
@@ -628,7 +815,10 @@ devuelve el endpoint en vez de un error genérico.
 - **Preferencias por dispositivo**: qué reportes son "míos"
   (`amet_my_reports_v1`), en cuáles ya voté (`amet_voted_v1`) y el
   historial de anti-spam (`amet_report_times_v1`) siguen en `localStorage`
-  del navegador — son intencionalmente locales, no se comparten.
+  del navegador — son intencionalmente locales, no se comparten. Ojo con el
+  último: desde v14.0 es **solo comodidad de UX** (respuesta inmediata sin
+  ida y vuelta a la red), no un control — el límite que cuenta lo aplica
+  `create_report` en el servidor.
 - **Confirmación comunitaria**: si `denies - confirms >= 2` el reporte se
   borra automáticamente.
 - **Filtrado por zona visible**: los marcadores solo se dibujan si están
@@ -996,6 +1186,14 @@ ordena alfabéticamente bien):
 11. `20260802140000_lock_down_app_config.sql` — cierra el `update` de
     `anon` sobre `app_config`, que permitía vaciar la base por una puerta
     lateral (ver "app_config también borraba")
+12. `20260803120000_server_side_rate_limit.sql` — tablas `report_events` y
+    `rate_limit_salt`, funciones `_client_ip` y `create_report` (dedupe por
+    proximidad + tope por IP). Aditiva: no cambia nada por sí sola.
+13. `20260803130000_close_direct_insert.sql` — quita la política `public
+    insert` de `reports`. **Va después de desplegar el cliente nuevo**, no
+    junto con la #12 (ver "Anti-spam del lado del servidor"). En un proyecto
+    nuevo desde cero, donde no hay clientes viejos dando vueltas, se pueden
+    aplicar las dos seguidas sin problema.
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
@@ -1104,10 +1302,10 @@ mismo criterio "sin dependencias" del resto del proyecto.
   `Workers & Pages → Create application → Import a repository`, con
   auto-deploy en cada push a `main`.
 
-Mejoras posteriores, no bloqueantes: mover el anti-spam al servidor (hoy
-`canReport()` mira solo `localStorage`) y agregar moderación/reporte de
-abuso para las fotos — son los dos bloqueantes conocidos que quedaron fuera
-del cierre de escritura de v12.0 (ver "Seguridad de escritura").
+Mejoras posteriores, no bloqueantes: agregar moderación/reporte de abuso
+para las fotos. Es lo único que queda de los dos bloqueantes que dejó fuera
+el cierre de escritura de v12.0 — el otro, mover el anti-spam al servidor,
+se cerró en v14.0 (ver "Anti-spam del lado del servidor").
 
 ## Historial relevante de decisiones (por si se pregunta "por qué así")
 - Se partió de una versión anterior que usaba `window.storage` (API propia
@@ -1151,6 +1349,18 @@ del cierre de escritura de v12.0 (ver "Seguridad de escritura").
   esquema de token por reporte en vez de agregar autenticación de usuarios
   porque el anonimato es parte del producto (nadie se registra para avisar
   de un retén) y una cuenta sería justo la fricción que mata el uso.
+- Para el anti-spam del servidor (v14.0) se evaluaron tres identidades
+  posibles sin cuentas de usuario: por IP, por proximidad, o las dos. Se
+  eligieron **las dos**, pero con el peso invertido respecto de lo obvio: el
+  dedupe por proximidad es el control real y el tope por IP es solo un
+  cortafuegos generoso, porque el CGNAT de las operadoras dominicanas hace
+  que la IP agrupe a mucha gente legítima junta. Al implementarlo apareció
+  que la forma "documentada" de leer la IP en PostgREST (primera entrada de
+  `x-forwarded-for`) **es falsificable por el cliente** — se verificó con
+  `curl` real y se cambió por `cf-connecting-ip`; vale la pena recordarlo si
+  alguna vez se agrega otro límite por IP. También se descartó a propósito
+  un tope global, porque convertiría un ataque de spam en uno de denegación
+  de servicio (ver "Anti-spam del lado del servidor").
 - Se migró el hosting de Netlify a Cloudflare Workers cuando Netlify
   agotó la franja gratuita (banda ancha/build minutes) y el sitio quedó
   caído — se prefirió migrar de proveedor antes que agregar un método de
