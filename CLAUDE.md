@@ -88,6 +88,9 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   desde Ajustes → Apps (no alcanza con borrar el ícono), borrar los datos
   del sitio en Chrome, y recién ahí reinstalar.
 - `icon-192.png`, `icon-512.png` — íconos de la PWA
+- `tests/` — suites de Playwright (`run.js` las corre todas) más el stub de
+  MapLibre que reemplaza a la librería real, porque el CDN y los tiles están
+  bloqueados en el entorno donde se escribieron. Ver `tests/README.md`.
 - `README.md` — cómo correr el proyecto localmente y qué mejoras de la
   lista ya están implementadas para la prueba local
 - `plan-mejora-amet-radar.md` — plan de mejoras original (por prioridad
@@ -141,10 +144,26 @@ contexto seguro — por IP de red simple (`http://192.168.x.x`) los navegadores
 móviles la bloquean. Un túnel rápido tipo `npx localtunnel --port 8000`
 resuelve esto sin desplegar nada.
 
-No hay build step, linter, ni suite de tests — es HTML/CSS/JS servido tal
-cual y un servidor Node sin dependencias. Verificar cambios corriendo
-`node server.js` y probando manualmente en el navegador en
-`http://localhost:8000/amet-radar.html`.
+No hay build step ni linter — es HTML/CSS/JS servido tal cual y un servidor
+Node sin dependencias. Sí hay **suites de Playwright en `tests/`**:
+
+```bash
+node tests/run.js                 # las 11
+node tests/run.js seguridad area  # solo las que coincidan
+```
+
+Requieren Playwright con Chromium (`npm install -g playwright && npx
+playwright install chromium`); no son dependencia del proyecto. Ver
+`tests/README.md` para qué cubre cada una y, sobre todo, **qué NO pueden
+ver**: mockean la red, así que nunca llegan a Postgres — los tres bugs de
+la tanda de v12.0 solo aparecieron probando contra la base real con el rol
+`anon`. Cualquier cambio que toque RLS, funciones de la base o Edge
+Functions hay que verificarlo también así, dentro de un `begin; ...;
+rollback;`.
+
+Vivían en un directorio temporal y se perdían con cada sesión; se
+versionaron para que dejen de perderse. Además, verificar a mano en el
+navegador con `node server.js`.
 
 ## API de Supabase (proyecto `amet-radar`, `nikexwjxxcxzhsuypsjn`)
 El cliente (`amet-radar.html`) llama directo a la API REST autogenerada de
