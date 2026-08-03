@@ -123,14 +123,19 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   estadísticas, editar parámetros del sistema), sin backend propio — le
   pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
   administración" abajo).
-- `tests/` — **la única suite del repo**, agregada en v14.0
-  (`check-antispam.js` + `maplibre-stub.js`, Playwright). Cubre el flujo de
-  publicar contra la RPC nueva. Correr con
-  `NODE_PATH=$(npm root -g) node tests/check-antispam.js` (levanta su propio
-  `server.js` en el 8123). **Está en `.assetsignore`**: sin eso, con
-  `assets.directory: "./"`, se publicaría como archivo servible. Ojo: hubo
-  otras 11 suites de sesiones anteriores que vivían en un directorio
-  temporal y **se perdieron**; por eso esta va versionada en el repo.
+- `tests/` — las pruebas, versionadas en el repo desde v14.0. **Leer
+  `tests/README.md` antes de tocarlas**: explica qué cubre cada suite y,
+  sobre todo, **qué no pueden ver** (mockean la red y nunca llegan a
+  Postgres, con la tabla de bugs históricos que se colaron justo por ahí).
+  Se corren con `node tests/run.js` — el runner descubre solo los
+  `check-*.js`, resuelve el `playwright` global y devuelve un único código
+  de salida. Hoy hay una suite, `check-antispam.js` (21 chequeos, flujo de
+  publicar contra la RPC nueva), más `maplibre-stub.js`, que es el doble de
+  MapLibre compartido y no una suite. **`tests` está en `.assetsignore`**:
+  sin eso, con `assets.directory: "./"`, estos archivos se publicarían como
+  servibles. Ojo: hubo 11 suites de sesiones anteriores que vivían en un
+  directorio temporal y **se perdieron** al reciclarse el contenedor; por
+  eso lo que hay ahora va versionado.
 
 ## Cómo correrlo
 Requiere Node.js instalado y servirse por `http://` (no abrir con doble
@@ -154,12 +159,13 @@ Node sin dependencias. Verificar cambios corriendo `node server.js` y
 probando manualmente en el navegador en
 `http://localhost:8000/amet-radar.html`.
 
-La única suite versionada es `tests/check-antispam.js` (ver "Archivos"), que
-cubre el flujo de publicar. **Y no alcanza sola**: mockea la red, así que
-nunca ve a Postgres — y los bugs más caros de este proyecto salieron todos
-probando contra la base real con el rol `anon`
-(`begin; set local role anon; ...; rollback;`). Para cualquier cambio que
-toque RLS, una RPC o un trigger, esa prueba contra la base no es opcional.
+Las pruebas se corren con `node tests/run.js` (ver `tests/README.md`). **Y no
+alcanzan solas**: mockean la red, así que nunca ven a Postgres — y los bugs
+más caros de este proyecto salieron todos probando contra la base real con el
+rol `anon` (`begin; set local role anon; ...; rollback;`). Para cualquier
+cambio que toque RLS, una RPC, un trigger o un grant, esa prueba contra la
+base no es opcional; el README tiene la lista de los que se colaron por ese
+hueco y cómo simular las cabeceras HTTP desde SQL.
 
 ## API de Supabase (proyecto `amet-radar`, `nikexwjxxcxzhsuypsjn`)
 El cliente (`amet-radar.html`) llama directo a la API REST autogenerada de

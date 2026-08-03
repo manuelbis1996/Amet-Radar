@@ -16,11 +16,13 @@
 // Postgres, que es justo cómo se colaron los bugs históricos de este
 // proyecto. Acá se prueba que el CLIENTE llama bien y reacciona bien.
 //
-// Correr:  NODE_PATH=$(npm root -g) node tests/check-antispam.js
+// Correr:  node tests/run.js              (todas las suites)
+//     o:    NODE_PATH=$(npm root -g) node tests/check-antispam.js   (solo esta)
 //
-// El NODE_PATH hace falta porque playwright está instalado global en este
-// entorno y el proyecto no tiene package.json (ni dependencias, a propósito).
-// El script levanta su propio server.js en el puerto 8123 y lo baja al salir.
+// El NODE_PATH hace falta al correrla suelta porque playwright está instalado
+// global en este entorno y el proyecto no tiene package.json (ni dependencias,
+// a propósito). run.js lo resuelve solo. La suite levanta su propio server.js
+// y lo baja al salir.
 
 const { chromium } = require('playwright');
 const { spawn } = require('child_process');
@@ -28,7 +30,9 @@ const path = require('path');
 const fs = require('fs');
 
 const RAIZ = path.join(__dirname, '..');
-const PORT = 8123;
+// El runner (tests/run.js) le da a cada suite un puerto propio, así no
+// chocan si algún día se corren en paralelo. Suelta, usa el suyo por default.
+const PORT = Number(process.env.AMET_TEST_PORT) || 8123;
 const BASE = `http://localhost:${PORT}`;
 const STUB = fs.readFileSync(path.join(__dirname, 'maplibre-stub.js'), 'utf8');
 
