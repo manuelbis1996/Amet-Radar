@@ -1,93 +1,96 @@
-// Stub mínimo de MapLibre GL para las pruebas.
-//
-// Por qué existe: el sandbox donde se corren estas pruebas bloquea tanto el
-// CDN de unpkg como los tiles de OpenFreeMap, así que la librería real nunca
-// carga y sin esto la app revienta en `new maplibregl.Map(...)` antes de
-// ejecutar una sola línea del flujo que se quiere probar.
-//
-// Cubre SOLO la superficie que amet-radar.html realmente usa (sacada con
-// grep del archivo): si algún día la app empieza a llamar a otro método del
-// mapa, esto hay que ampliarlo o la prueba falla con "is not a function".
-// NO intenta dibujar nada — el render visual no se verifica acá.
-(function () {
-  // Ojo: se usa un objeto plano y no un Map() nativo — más abajo se declara
-  // `class StubMap`, y una clase llamada `Map` acá dentro sombrearía al Map
-  // global por TDZ ("Cannot access 'Map' before initialization").
-  const listeners = Object.create(null);
+// Stub mínimo de MapLibre GL para poder probar la lógica de amet-radar.html
+// en este sandbox, donde el CDN real (unpkg) y los tiles de OpenFreeMap
+// están bloqueados por red. Solo implementa lo que usa la app; no dibuja
+// ningún mapa. Reemplaza al leaflet-stub.js que se usaba antes del cambio.
+(function(){
+  function Evented(){ this._ev = {}; }
+  Evented.prototype.on = function(name, fn){
+    (this._ev[name] = this._ev[name] || []).push(fn);
+    return this;
+  };
+  Evented.prototype.off = function(name, fn){
+    if(this._ev[name]) this._ev[name] = this._ev[name].filter(f => f !== fn);
+    return this;
+  };
+  Evented.prototype.fire = function(name, arg){
+    (this._ev[name] || []).slice().forEach(fn => fn(arg));
+    return this;
+  };
 
-  function on(ev, fn) {
-    (listeners[ev] || (listeners[ev] = [])).push(fn);
+  function Map(opts){
+    Evented.call(this);
+    const self = this;
+    this._opts = opts;
+    this._zoom = opts.zoom;
+    this._center = { lng: opts.center[0], lat: opts.center[1] };
+    this._container = document.getElementById(opts.container);
+    this._calls = []; // registro de jumpTo/panTo/easeTo/flyTo para los asserts
+    this.touchZoomRotate = { disableRotation(){ self._rotationDisabled = true; } };
+    window.__map = this;
   }
-  function off(ev, fn) {
-    const arr = listeners[ev] || [];
-    const i = arr.indexOf(fn);
-    if (i >= 0) arr.splice(i, 1);
-  }
-  function emitir(ev) { (listeners[ev] || []).forEach((f) => f()); }
-
-  const container = document.createElement('div');
-
-  class StubMap {
-    constructor() {
-      this.transform = {};
-      this.touchZoomRotate = { disableRotation() {} };
-      this._center = { lat: 19.2230, lng: -70.5290 };
-      this._zoom = 12;
-    }
-    on(ev, fn) { on(ev, fn); return this; }
-    off(ev, fn) { off(ev, fn); return this; }
-    // Caja amplia alrededor de La Vega: así los reportes de prueba caen
-    // siempre dentro del área "visible" y renderVisibleMarkers los dibuja.
-    getBounds() {
-      return {
-        getNorth: () => this._center.lat + 0.05,
-        getSouth: () => this._center.lat - 0.05,
-        getEast:  () => this._center.lng + 0.05,
-        getWest:  () => this._center.lng - 0.05
-      };
-    }
-    getCenter() { return { ...this._center }; }
-    getZoom() { return this._zoom; }
-    getContainer() { return container; }
-    addControl() { return this; }
-    easeTo(o) { return this._move(o); }
-    flyTo(o)  { return this._move(o); }
-    jumpTo(o) { return this._move(o); }
-    panTo(c)  { return this._move({ center: c }); }
-    _move(o) {
-      if (o && o.center) {
-        const c = o.center;
-        this._center = Array.isArray(c) ? { lng: c[0], lat: c[1] } : { lng: c.lng, lat: c.lat };
+  Map.prototype = Object.create(Evented.prototype);
+  Map.prototype.getZoom = function(){ return this._zoom; };
+  Map.prototype.getCenter = function(){ return this._center; };
+  Map.prototype.getContainer = function(){ return this._container; };
+  Map.prototype.getBounds = function(){
+    // bbox alrededor de Santo Domingo; los tests lo pueden cambiar con
+    // window.__bounds para probar el filtrado por zona visible.
+    const b = window.__bounds || { n: 18.60, s: 18.36, e: -69.80, w: -70.06 };
+    return { getNorth: () => b.n, getSouth: () => b.s, getEast: () => b.e, getWest: () => b.w };
+  };
+  ['jumpTo','easeTo','flyTo'].forEach(function(m){
+    Map.prototype[m] = function(arg){
+      this._calls.push([m, arg]);
+      if(arg && arg.zoom != null) this._zoom = arg.zoom;
+      if(arg && arg.center){
+        this._center = Array.isArray(arg.center)
+          ? { lng: arg.center[0], lat: arg.center[1] }
+          : arg.center;
       }
-      if (o && typeof o.zoom === 'number') this._zoom = o.zoom;
-      emitir('moveend');
       return this;
-    }
+    };
+  });
+  Map.prototype.addControl = function(ctrl, pos){
+    (this._controls = this._controls || []).push({ ctrl: ctrl, pos: pos });
+    return this;
+  };
+  Map.prototype.panTo = function(ll){
+    this._calls.push(['panTo', ll]);
+    if(Array.isArray(ll)) this._center = { lng: ll[0], lat: ll[1] };
+    return this;
+  };
+
+  function Marker(opts){
+    this._el = opts && opts.element;
+    this._opts = opts || {};
+    this._draggable = !!(opts && opts.draggable);
+    this._anchor = opts && opts.anchor;
+    this._lngLat = null;
+    this._removed = false;
+    (window.__markers = window.__markers || []).push(this);
   }
+  // Se normaliza a {lng, lat}: el código de la app llama a setLngLat tanto
+  // con un array [lng, lat] como con el objeto e.lngLat de un click.
+  Marker.prototype.setLngLat = function(ll){
+    this._lngLat = Array.isArray(ll) ? { lng: ll[0], lat: ll[1] } : { lng: ll.lng, lat: ll.lat };
+    return this;
+  };
+  Marker.prototype.getLngLat = function(){ return this._lngLat; };
+  Marker.prototype.addTo = function(map){
+    this._map = map;
+    const host = document.getElementById('map');
+    if(this._el && host) host.appendChild(this._el);
+    return this;
+  };
+  Marker.prototype.remove = function(){
+    this._removed = true;
+    if(this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
+    const i = window.__markers.indexOf(this);
+    if(i >= 0) window.__markers.splice(i, 1);
+    return this;
+  };
 
-  class Marker {
-    constructor(opts) {
-      this.opts = opts || {};
-      this._el = this.opts.element || document.createElement('div');
-      this._lngLat = { lng: 0, lat: 0 };
-    }
-    setLngLat(v) {
-      this._lngLat = Array.isArray(v) ? { lng: v[0], lat: v[1] } : v;
-      return this;
-    }
-    getLngLat() { return this._lngLat; }
-    addTo() {
-      // El elemento tiene que estar en el DOM: las pruebas cuentan pines con
-      // selectores CSS, y el click en un pin abre la hoja de detalle.
-      document.body.appendChild(this._el);
-      return this;
-    }
-    remove() { if (this._el.parentNode) this._el.parentNode.removeChild(this._el); return this; }
-    on() { return this; }
-    setDraggable() { return this; }
-  }
+  function AttributionControl(opts){ this._opts = opts || {}; }
 
-  class AttributionControl { onAdd() { return document.createElement('div'); } onRemove() {} }
-
-  window.maplibregl = { Map: StubMap, Marker, AttributionControl };
+  window.maplibregl = { Map: Map, Marker: Marker, AttributionControl: AttributionControl };
 })();

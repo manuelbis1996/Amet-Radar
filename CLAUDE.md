@@ -88,6 +88,9 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   desde Ajustes → Apps (no alcanza con borrar el ícono), borrar los datos
   del sitio en Chrome, y recién ahí reinstalar.
 - `icon-192.png`, `icon-512.png` — íconos de la PWA
+- `tests/` — suites de Playwright (`run.js` las corre todas) más el stub de
+  MapLibre que reemplaza a la librería real, porque el CDN y los tiles están
+  bloqueados en el entorno donde se escribieron. Ver `tests/README.md`.
 - `README.md` — cómo correr el proyecto localmente y qué mejoras de la
   lista ya están implementadas para la prueba local
 - `plan-mejora-amet-radar.md` — plan de mejoras original (por prioridad
@@ -123,54 +126,16 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   estadísticas, editar parámetros del sistema), sin backend propio — le
   pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
   administración" abajo).
-- `tests/` — las pruebas, versionadas en el repo desde v14.0. **Leer
-  `tests/README.md` antes de tocarlas**: explica qué cubre cada suite y,
-  sobre todo, **qué no pueden ver** (mockean la red y nunca llegan a
-  Postgres, con la tabla de bugs históricos que se colaron justo por ahí).
-  Se corren con `node tests/run.js` — el runner descubre solo los
-  `check-*.js`, resuelve el `playwright` global y devuelve un único código
-  de salida. Hoy hay una suite, `check-antispam.js` (21 chequeos, flujo de
-  publicar contra la RPC nueva), más `maplibre-stub.js`, que es el doble de
-  MapLibre compartido y no una suite. **`tests` está en `.assetsignore`**:
-  sin eso, con `assets.directory: "./"`, estos archivos se publicarían como
-  servibles. Ojo: hubo 11 suites de sesiones anteriores que vivían en un
-  directorio temporal y **se perdieron** al reciclarse el contenedor; por
-  eso lo que hay ahora va versionado.
-
-## Cómo correrlo
-Requiere Node.js instalado y servirse por `http://` (no abrir con doble
-clic / `file://`), porque geolocalización, el service worker y el fetch a
-Supabase no funcionan sobre `file://`.
-
-```bash
-cd carpeta-del-proyecto
-node server.js
-```
-Abrir `http://localhost:8000/amet-radar.html`.
-
-Para probar desde el móvil necesitas HTTPS (o el flag de Chrome
-`unsafely-treat-insecure-origin-as-secure`) porque la Geolocation API exige
-contexto seguro — por IP de red simple (`http://192.168.x.x`) los navegadores
-móviles la bloquean. Un túnel rápido tipo `npx localtunnel --port 8000`
-resuelve esto sin desplegar nada.
-
-No hay build step ni linter — es HTML/CSS/JS servido tal cual y un servidor
-Node sin dependencias. Verificar cambios corriendo `node server.js` y
-probando manualmente en el navegador en
-`http://localhost:8000/amet-radar.html`.
-
-Las pruebas se corren con `node tests/run.js` (ver `tests/README.md`). **Y no
-alcanzan solas**: mockean la red, así que nunca ven a Postgres — y los bugs
-más caros de este proyecto salieron todos probando contra la base real con el
-rol `anon` (`begin; set local role anon; ...; rollback;`). Para cualquier
-cambio que toque RLS, una RPC, un trigger o un grant, esa prueba contra la
-base no es opcional; el README tiene la lista de los que se colaron por ese
-hueco y cómo simular las cabeceras HTTP desde SQL.
-
-## API de Supabase (proyecto `amet-radar`, `nikexwjxxcxzhsuypsjn`)
-El cliente (`amet-radar.html`) llama directo a la API REST autogenerada de
-Supabase (PostgREST) sobre la tabla `public.reports`, con la publishable
-key embebida en el `<script>` — no hay backend propio de por medio.
+- `tests/` — las 12 suites de Playwright, versionadas en el repo. **Leer
+  `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
+  todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
+  la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
+  contra la base real). Se corren con `node tests/run.js`, que levanta
+  `server.js` en el 8171 (`TEST_PORT` lo cambia) y las corre en serie.
+  `_setup.js` resuelve Playwright y las rutas comunes; `maplibre-stub.js` es
+  el doble de MapLibre que comparten todas (el sandbox bloquea el CDN y los
+  tiles). **`tests` está en `.assetsignore`**: sin eso, con
+  `assets.directory: "./"`, estos archivos se publicarían como servibles.
 - `GET  {SUPABASE_URL}/rest/v1/reports?select=*` — todas las filas.
 - **Publicar ya NO es un `POST /rest/v1/reports`** desde v14.0: esa política
   de insert también se eliminó. Se publica con

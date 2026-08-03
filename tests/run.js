@@ -1,96 +1,87 @@
-// Corre todas las suites de tests/ y devuelve un solo veredicto.
+#!/usr/bin/env node
+// Corre todas las suites: levanta server.js en un puerto de pruebas, ejecuta
+// cada check-*.js en serie y devuelve código distinto de cero si alguna falla.
 //
-//     node tests/run.js              todas
-//     node tests/run.js antispam     solo las que matcheen ese texto
+//   node tests/run.js                 (todas)
+//   node tests/run.js seguridad area  (solo las que coincidan)
 //
-// Descubre solo: toma todos los `tests/check-*.js`, en orden alfabético. Para
-// sumar una suite nueva alcanza con crear el archivo con ese nombre — no hay
-// que registrarla en ningún lado.
-//
-// Contrato que tiene que cumplir cada suite:
-//   * es un script de Node que se corre solo (`node tests/check-loquesea.js`)
-//   * sale con código 0 si todo pasó y != 0 si algo falló
-//   * levanta y baja su propio server.js; usa el puerto de AMET_TEST_PORT
-//     (este runner le da uno distinto a cada una) y no lo hardcodea
-//
-// El runner resuelve NODE_PATH solo: playwright está instalado global en este
-// entorno y el proyecto no tiene package.json a propósito (sin dependencias),
-// así que sin eso las suites no encontrarían el módulo.
+// En serie a propósito: cada suite abre su propio Chromium y en paralelo se
+// pisan por memoria en máquinas chicas.
 
-const { spawnSync, execSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 
 const DIR = __dirname;
-const filtro = process.argv[2];
+const RAIZ = path.join(DIR, '..');
+const PORT = process.env.TEST_PORT || 8171;
 
-// --- NODE_PATH -------------------------------------------------------------
-// Si playwright ya resuelve, no se toca nada. Si no, se busca el root global
-// de npm una sola vez y se se lo pasa a las suites por entorno.
-function resolverNodePath() {
-  try {
-    require.resolve('playwright');
-    return process.env.NODE_PATH || '';
-  } catch (e) {
-    try {
-      const raiz = execSync('npm root -g', { encoding: 'utf8' }).trim();
-      return process.env.NODE_PATH ? `${process.env.NODE_PATH}:${raiz}` : raiz;
-    } catch (e2) {
-      console.error('No se pudo ubicar playwright. Instalalo con: npm i -g playwright');
-      process.exit(1);
-    }
-  }
-}
-
-const NODE_PATH = resolverNodePath();
-
+const filtros = process.argv.slice(2);
 const suites = fs.readdirSync(DIR)
-  .filter((f) => /^check-.*\.js$/.test(f))
-  .filter((f) => !filtro || f.includes(filtro))
+  .filter(f => f.startsWith('check-') && f.endsWith('.js'))
+  .filter(f => filtros.length === 0 || filtros.some(x => f.includes(x)))
   .sort();
 
 if (suites.length === 0) {
-  console.error(filtro ? `Ninguna suite matchea "${filtro}".` : 'No hay suites en tests/.');
+  console.error('Ninguna suite coincide con:', filtros.join(' '));
   process.exit(1);
 }
 
-console.log(`Corriendo ${suites.length} suite(s)\n`);
-
-const resultados = [];
-// Secuencial y no en paralelo: cada suite levanta un Chromium y un server.js,
-// y en paralelo se pisan los tiempos de espera y se vuelve difícil leer qué
-// falló. El puerto propio por suite está igual, para no depender del orden.
-suites.forEach((archivo, i) => {
-  console.log(`── ${archivo} ${'─'.repeat(Math.max(0, 56 - archivo.length))}`);
-  const t0 = Date.now();
-  const r = spawnSync('node', [path.join(DIR, archivo)], {
-    stdio: 'inherit',
-    env: { ...process.env, NODE_PATH, AMET_TEST_PORT: String(8123 + i) }
+function esperarServidor(intentos = 40) {
+  return new Promise((resolve, reject) => {
+    const probar = (n) => {
+      http.get(`http://localhost:${PORT}/amet-radar.html`, res => {
+        res.resume();
+        res.statusCode === 200 ? resolve() : reintentar(n);
+      }).on('error', () => reintentar(n));
+    };
+    const reintentar = (n) => {
+      if (n <= 0) return reject(new Error('el servidor de pruebas no respondió'));
+      setTimeout(() => probar(n - 1), 250);
+    };
+    probar(intentos);
   });
-  const segundos = ((Date.now() - t0) / 1000).toFixed(1);
-  resultados.push({ archivo, ok: r.status === 0, segundos });
+}
+
+(async () => {
+  const server = spawn('node', [path.join(RAIZ, 'server.js')], {
+    env: { ...process.env, PORT },
+    stdio: 'ignore',
+    detached: false,
+  });
+  const cerrarServidor = () => { try { server.kill(); } catch (e) {} };
+  process.on('exit', cerrarServidor);
+  process.on('SIGINT', () => { cerrarServidor(); process.exit(130); });
+
+  try {
+    await esperarServidor();
+  } catch (e) {
+    console.error(e.message);
+    cerrarServidor();
+    process.exit(1);
+  }
+
+  const fallaron = [];
+  for (const s of suites) {
+    process.stdout.write(s.padEnd(24));
+    const r = spawnSync('node', [path.join(DIR, s)], { encoding: 'utf8' });
+    const salida = (r.stdout || '') + (r.stderr || '');
+    const ultima = salida.trim().split('\n').pop() || '(sin salida)';
+    console.log(ultima);
+    if (r.status !== 0) {
+      fallaron.push(s);
+      // El detalle solo cuando hace falta, para que la corrida completa se
+      // lea de un vistazo.
+      console.log(salida.split('\n').filter(l => l.includes('FALLA') || l.includes('Error')).join('\n'));
+    }
+  }
+
+  cerrarServidor();
   console.log('');
-});
-
-// --- Resumen ---------------------------------------------------------------
-const enRojo = resultados.filter((r) => !r.ok);
-console.log('═'.repeat(60));
-resultados.forEach((r) =>
-  console.log(`${r.ok ? ' PASA ' : ' FALLA'}  ${r.archivo}  (${r.segundos}s)`));
-console.log('═'.repeat(60));
-
-if (enRojo.length === 0) {
-  console.log(`${resultados.length}/${resultados.length} suites en verde.`);
-} else {
-  console.log(`${enRojo.length} de ${resultados.length} suite(s) en rojo: ${enRojo.map((r) => r.archivo).join(', ')}`);
-}
-
-// RECORDATORIO, y no es decorativo: estas suites mockean la red y NUNCA
-// llegan a Postgres. Verde acá no dice nada sobre RLS, RPC ni triggers — ver
-// tests/README.md, "Lo que estas suites NO pueden ver".
-if (enRojo.length === 0) {
-  console.log('\nOjo: esto solo cubre el cliente. Si tocaste RLS, una RPC o un');
-  console.log('trigger, falta probarlo contra la base real con el rol anon.');
-}
-
-process.exit(enRojo.length === 0 ? 0 : 1);
+  if (fallaron.length) {
+    console.log(`>>> ${fallaron.length} SUITE(S) CON FALLOS: ${fallaron.join(', ')}`);
+    process.exit(1);
+  }
+  console.log(`>>> LAS ${suites.length} SUITES PASARON`);
+})();
