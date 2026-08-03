@@ -680,9 +680,18 @@ publicar en el instante de aplicar la migración. Orden correcto:
 2. mergear a `main` y esperar el deploy de Cloudflare
 3. aplicar `20260803130000_close_direct_insert.sql`
 
-**Estado**: el paso 1 ya está aplicado en producción. Los pasos 2 y 3 quedan
-pendientes — hasta que se haga el 3, el anti-spam es decorativo, porque sigue
-abierto el camino viejo que se lo saltea.
+**Estado: los tres pasos están hechos.** v14.0 está desplegada en
+producción y las dos migraciones aplicadas. Verificado sobre el sitio en
+vivo, en este orden: el cliente servido llama a `create_report` y ya no
+tiene ningún `fetch(REPORTS_URL,...)`; **un `POST /rest/v1/reports` con la
+anon key ahora devuelve 401** (`new row violates row-level security
+policy`), que es exactamente el agujero que esto cerraba; leer sigue
+respondiendo 200; y publicar por la RPC devuelve `ok:true`, con el segundo
+reporte en el mismo punto rechazado como `duplicate`. El reporte de prueba
+se borró con su token (`delete_own_report`), así que no quedó nada.
+
+Las únicas políticas que quedan en `public.reports` son: `public
+read:SELECT`. Ninguna de insert, update ni delete.
 
 ### Del lado del cliente
 
