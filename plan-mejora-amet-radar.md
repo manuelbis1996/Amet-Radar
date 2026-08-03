@@ -154,15 +154,16 @@ PR. El workflow manda el dominio de Supabase a 127.0.0.1 por `/etc/hosts`,
 para que un hueco de mocking falle ruidoso en vez de tocar producción desde
 CI.
 
-**🟡 El CI no frena un despliegue malo**
-Cloudflare está conectado al repo y despliega al recibir el push a `main`, en
-paralelo con el workflow: si las suites fallan, la regresión ya salió a
-producción y el CI solo avisa. Para cerrarlo hay que desconectar la
-integración de git de Cloudflare y desplegar desde el workflow con
-`wrangler deploy`, condicionado a que los tests pasen, con un
-`CLOUDFLARE_API_TOKEN` en los secrets del repo.
-- Esfuerzo: bajo-medio. El riesgo no es técnico sino operativo: si el token o
-  el workflow se rompen, deja de haber despliegue hasta arreglarlo.
+**🟡 El CI no frena un despliegue malo — código listo, faltan 2 pasos manuales**
+El job `deploy` ya está escrito y mergeado, con `needs: playwright`, y se
+queda inactivo (en verde, con un aviso) mientras falte el secret. Para
+activarlo: cargar `CLOUDFLARE_API_TOKEN` en los secrets del repo **y**
+desconectar la integración de git en Cloudflare — si se hace solo lo primero,
+cada push despliega dos veces. Detalle en "Desplegar desde el CI" en
+`CLAUDE.md`.
+- Esfuerzo: dos clics en dos paneles. El riesgo no es técnico sino operativo:
+  si el token vence o el workflow se rompe, deja de haber despliegue hasta
+  arreglarlo.
 
 **🟡 Las suites no ven la base, y eso ya costó caro**
 Mockean la red y nunca llegan a Postgres: verde ahí no dice nada sobre RLS,
@@ -185,9 +186,9 @@ silencio del modelo real en Supabase.
 
 1. ~~CI que corra las suites en cada push~~ ✅ hecho
 2. ~~Cerrar `push_subscriptions`~~ ✅ hecho
-3. **Que el CI frene el despliegue** — hoy avisa tarde; desplegar desde el
-   workflow lo convierte en una barrera de verdad. **Es el ítem de mayor
-   prioridad que queda.**
+3. **Activar el despliegue desde el CI** — el código ya está; faltan el token
+   y desconectar la integración de git de Cloudflare. **Es lo de mayor
+   prioridad que queda, y son dos clics.**
 4. **Automatizar algunos chequeos contra la base real** — es donde
    históricamente aparecen los bugs.
 5. **Realtime**, cuando el egreso vuelva a ser el problema.

@@ -127,11 +127,13 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
   administración" abajo).
 - `.github/workflows/tests.yml` — CI: corre `node tests/run.js` en cada
-  push y cada PR. **No bloquea el despliegue**: el Worker de Cloudflare está
-  conectado al repo y despliega solo al recibir el push a `main`, en paralelo
-  con el workflow, así que el CI avisa después de los hechos. Para que lo
-  frenara habría que desconectar la integración de git y desplegar desde el
-  workflow con `wrangler deploy` + `CLOUDFLARE_API_TOKEN`. Dos detalles que
+  push y cada PR, más `wrangler deploy --dry-run` (que no necesita
+  credenciales y valida `wrangler.jsonc`, `_worker.js` y la lista de assets).
+  Trae además un job `deploy` **preparado pero inactivo**, que despliega solo
+  si las suites pasaron — ver "Desplegar desde el CI" abajo para los dos
+  pasos manuales que faltan. Mientras tanto **el CI no bloquea el
+  despliegue**: el Worker está conectado al repo y despliega al recibir el
+  push a `main`, en paralelo con el workflow. Dos detalles que
   no son opcionales: **`**/.github` está en `.assetsignore`** (si no, con
   `assets.directory: "./"` el workflow se publicaría como archivo servible), y
   el workflow **manda `nikexwjxxcxzhsuypsjn.supabase.co` a 127.0.0.1 por
@@ -1385,6 +1387,40 @@ el mismo modelo de un solo archivo que tenía la Netlify Edge Function:
 `_worker.js` en la raíz sirve tanto los assets estáticos
 (`env.ASSETS.fetch`) como la lógica de preview dinámico, sin build step —
 mismo criterio "sin dependencias" del resto del proyecto.
+
+### Desplegar desde el CI (preparado, falta un paso manual)
+
+Hoy el Worker está conectado al repo por la integración de git de Cloudflare:
+despliega al recibir el push a `main`, **en paralelo con los tests**. O sea
+que una regresión llega a producción igual y el CI solo avisa después.
+
+El job `deploy` de `.github/workflows/tests.yml` invierte eso (`needs:
+playwright`: no despliega nada si las suites fallaron), pero está **inactivo a
+propósito** hasta que se hagan dos cosas manuales, y **el orden importa**:
+
+1. **Cargar el secret `CLOUDFLARE_API_TOKEN`** en Settings → Secrets and
+   variables → Actions. El token se crea en Cloudflare (My Profile → API
+   Tokens) con la plantilla *Edit Cloudflare Workers*. Si el token abarca más
+   de una cuenta, agregar también `CLOUDFLARE_ACCOUNT_ID` (Workers & Pages →
+   columna derecha).
+2. **Desconectar la integración de git en Cloudflare** (Workers & Pages →
+   `amet-radar` → Settings → Build → desconectar el repositorio). **Si no se
+   hace, cada push despliega dos veces**: una por Cloudflare sin esperar los
+   tests —que es justo lo que se quiere evitar— y otra desde el workflow.
+
+Mientras falte el secret, el job **no falla**: escribe un `::notice` diciendo
+qué falta y termina en verde. Por eso el archivo se puede tener mergeado sin
+romper nada y sin dejar el CI en rojo.
+
+El último paso del job vuelve a pedir la home de producción y **compara
+`APP_VERSION` contra la del repo**, reintentando ~5 minutos. Sin eso, un
+`wrangler deploy` que responde bien pero no propaga dejaría producción atrás
+sin que nadie se entere hasta abrir la app en el teléfono.
+
+**Riesgo asumido, que conviene tener claro antes de activarlo**: el problema
+deja de ser técnico y pasa a ser operativo. Si el token vence o se revoca, o
+el workflow se rompe, **no hay despliegue hasta arreglarlo** — hoy, con la
+integración de git, el despliegue no depende de nada del repo.
 
 ### Archivos de la configuración de despliegue
 - **`_worker.js`** (raíz del repo) — sirve el preview dinámico por

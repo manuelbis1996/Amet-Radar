@@ -51,9 +51,16 @@ Requieren Playwright con Chromium (`npm install -g playwright && npx
 playwright install chromium`), que tampoco es dependencia del proyecto.
 
 En cada push y cada PR las corre GitHub Actions
-([.github/workflows/tests.yml](.github/workflows/tests.yml)). **Ojo con lo que
-eso no hace**: Cloudflare despliega en paralelo al recibir el push, así que el
-CI avisa de una regresión pero no la frena.
+([.github/workflows/tests.yml](.github/workflows/tests.yml)), junto con un
+`wrangler deploy --dry-run` que valida la configuración de despliegue sin
+necesitar credenciales.
+
+**Ojo con lo que hoy no hace**: Cloudflare despliega en paralelo al recibir el
+push, así que el CI avisa de una regresión pero todavía no la frena. El
+workflow ya trae el despliegue condicionado a que los tests pasen, pero está
+inactivo hasta cargar el token y desconectar la integración de git de
+Cloudflare — los dos pasos están en
+[CLAUDE.md](CLAUDE.md), sección "Desplegar desde el CI".
 
 **Verde ahí no alcanza.** Las suites mockean la red y nunca llegan a Postgres,
 así que no dicen nada sobre RLS, funciones de la base ni triggers — que es por
