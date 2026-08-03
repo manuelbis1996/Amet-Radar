@@ -669,6 +669,17 @@ esa fila. Ojo al probar: contar filas **con el rol `anon` puesto siempre da
 0**, porque no hay política de SELECT — hay que hacer `reset role` antes de
 verificar, o parece que la función no insertó nada.
 
+**Trampa al verificar que quedó cerrado, que casi da un falso negativo**: un
+`DELETE` o un `PATCH` por REST contra una tabla sin políticas **sigue
+devolviendo 204**. No es que esté permitido: RLS hace que no matchee ninguna
+fila, y PostgREST contesta 204 igual que si hubiera borrado cero filas. O sea
+que el código de estado **no distingue "bloqueado" de "no había nada"**. (El
+`POST` sí devuelve 401, porque ahí RLS rechaza la fila nueva de forma
+explícita.) La única prueba concluyente es dar de alta una fila propia por la
+RPC, intentar borrarla con un `DELETE` directo **de filtro exacto** —nunca uno
+amplio, que tocaría las suscripciones reales— y después comprobar por SQL que
+la fila sigue viva.
+
 **Del lado de las pruebas**: `check-seguridad.js` excluía a propósito
 `push_subscriptions` de su auditoría de peticiones destructivas, justamente
 porque la app mandaba `DELETE`/`PATCH` legítimos ahí. Se quitó esa excepción y
@@ -818,6 +829,11 @@ se borró con su token (`delete_own_report`), así que no quedó nada.
 
 Las únicas políticas que quedan en `public.reports` son: `public
 read:SELECT`. Ninguna de insert, update ni delete.
+
+**Estado del esquema entero desde v14.2**: en todo `public` quedan **dos
+políticas, las dos de `SELECT`** (`reports: public read` y `app_config: anon
+select config`). Ninguna tabla acepta escritura directa: todo pasa por una
+función `SECURITY DEFINER`.
 
 ### Del lado del cliente
 
