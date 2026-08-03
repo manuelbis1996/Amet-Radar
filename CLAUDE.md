@@ -432,10 +432,11 @@ tienen `owner_hash`, así que sus autores no pueden borrarlos (la app avisa
 hace backfill porque no hay forma de saber de quién era cada uno.
 
 **Lo que este cambio NO cubrió** (eran los dos bloqueantes conocidos): el
-anti-spam del lado del cliente — **ya cerrado en v14.0**, ver "Anti-spam del
-lado del servidor" más abajo — y subir fotos, que sigue abierto a cualquiera
-con la anon key: no hay moderación automática ni forma de reportar abuso.
-Eso último es lo único que queda pendiente de esta lista.
+anti-spam del lado del cliente —**cerrado en v14.0**, ver "Anti-spam del lado
+del servidor"— y subir fotos, que quedaba abierto a cualquiera con la anon
+key. **Los dos están cerrados**: el de las fotos en v14.1, cerrando la puerta
+en vez de moderando (ver "Fotos y notas: cerradas del todo"). Ya no queda
+nada pendiente de esta lista.
 
 ### Borrar fotos: no se puede desde SQL (leer antes de tocar cualquier borrado)
 
@@ -488,7 +489,52 @@ equivocado y con reportes sin `owner_hash`, y `true` con el correcto.
 `purge_expired_reports()` se lleva solo los vencidos. Y el trigger de la
 foto llegó a `delete-photo` con respuesta `200 {"ok":true}`.
 
-### Subir fotos: límite de tamaño, no de permisos
+### Fotos y notas: cerradas del todo (v14.1) — leer antes de reactivar el flujo con foto
+
+**Estado actual: no se puede subir ninguna foto ni escribir ninguna nota.**
+Migración `20260803150000_close_photo_uploads.sql`. Es la respuesta al último
+bloqueante que quedaba ("moderación/reporte de abuso para las fotos"), y se
+resolvió **cerrando en vez de moderando**.
+
+**El agujero era real y estaba vivo**, verificado de punta a punta contra
+producción antes de tocar nada: con la anon key se subía un JPEG arbitrario
+al bucket (200), se publicaba un reporte con esa foto (`ok:true`) y la imagen
+quedaba **pública en el mapa para todo el mundo** (200). Con `note` pasaba lo
+mismo: ningún flujo la escribe, pero por API se le mandaba texto arbitrario y
+el detalle lo renderiza.
+
+**Por qué cerrar y no moderar.** Desde v13.0 el flujo con foto no tiene
+entrada en la interfaz (`FLUJO_CON_FOTO` es `false` en producción) y ningún
+flujo escribe notas: la app publica solo (ubicación, categoría, momento). O
+sea que **no existe una foto legítima** —el bucket estaba en cero objetos— y
+el 100% de lo que pudiera entrar era abuso por API. Montar un circuito de
+denuncias para eso sería vigilar una puerta tapiada mientras la de al lado
+queda abierta, y encima es reactivo: la imagen se ve hasta que alguien la
+denuncia y se llega a un umbral. Cerrar es preventivo y **no cuesta nada de
+UX**, porque nadie podía adjuntar una foto igual.
+
+**Qué se hizo, las dos cosas juntas** (una sola no alcanza):
+- se quitó la política `anon upload report photos` de `storage.objects` — el
+  bucket se quedó **sin ninguna política**, o sea que nadie sube nada;
+- `create_report` rechaza (`reason: 'invalid'`) cualquier `p_photo` o
+  `p_note` no vacíos, y además inserta `null`/`''` explícitamente.
+
+**Lo que NO se rompe**: los reportes viejos con foto se siguen viendo. Un
+bucket `public` sirve por `/object/public/<bucket>/<path>` sin pasar por RLS,
+así que quitar las políticas no afecta la lectura. El límite de 512 KB y el
+de `image/jpeg` del bucket quedan como estaban, listos para el día que se
+reabra.
+
+**Para volver a tener fotos hay que deshacer las dos cosas** (política del
+bucket + rechazo en `create_report`, restaurando ahí la validación de
+longitud y prefijo que tenía) **y recién entonces construir la moderación**,
+que con fotos sí hace falta. Está anotado también en el comentario de
+`FLUJO_CON_FOTO` en `amet-radar.html`, que es donde va a mirar quien lo
+reactive. **Ojo**: las suites de Playwright mockean la red, así que van a
+seguir en verde aunque el servidor rechace — eso se prueba contra la base
+real.
+
+### Subir fotos: límite de tamaño, no de permisos (histórico, ver arriba)
 
 El bucket se creó sin `file_size_limit` ni `allowed_mime_types`, y con una
 política de insert que solo miraba el bucket. Con la anon key (pública por
@@ -1174,6 +1220,9 @@ ordena alfabéticamente bien):
     junto con la #12 (ver "Anti-spam del lado del servidor"). En un proyecto
     nuevo desde cero, donde no hay clientes viejos dando vueltas, se pueden
     aplicar las dos seguidas sin problema.
+14. `20260803150000_close_photo_uploads.sql` — quita la política de insert
+    del bucket y hace que `create_report` rechace fotos y notas (ver "Fotos y
+    notas: cerradas del todo"). Deja el bucket sin ninguna política.
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
@@ -1282,10 +1331,12 @@ mismo criterio "sin dependencias" del resto del proyecto.
   `Workers & Pages → Create application → Import a repository`, con
   auto-deploy en cada push a `main`.
 
-Mejoras posteriores, no bloqueantes: agregar moderación/reporte de abuso
-para las fotos. Es lo único que queda de los dos bloqueantes que dejó fuera
-el cierre de escritura de v12.0 — el otro, mover el anti-spam al servidor,
-se cerró en v14.0 (ver "Anti-spam del lado del servidor").
+No quedan bloqueantes conocidos para lanzar. Los dos que dejó fuera el
+cierre de escritura de v12.0 están resueltos: el anti-spam se movió al
+servidor en v14.0, y la moderación de fotos se cerró en v14.1 quitando la
+posibilidad de subirlas (ver "Fotos y notas: cerradas del todo"). Si algún
+día vuelve el flujo con foto, la moderación pasa a ser un requisito y hay que
+construirla junto con la reapertura.
 
 ## Historial relevante de decisiones (por si se pregunta "por qué así")
 - Se partió de una versión anterior que usaba `window.storage` (API propia
@@ -1341,6 +1392,16 @@ se cerró en v14.0 (ver "Anti-spam del lado del servidor").
   alguna vez se agrega otro límite por IP. También se descartó a propósito
   un tope global, porque convertiría un ataque de spam en uno de denegación
   de servicio (ver "Anti-spam del lado del servidor").
+- Para el último bloqueante (moderación de fotos, v14.1) se eligió **cerrar
+  en vez de moderar**. El razonamiento, por si se quiere reabrir: el flujo con
+  foto está apagado en la interfaz desde v13.0 y ningún flujo escribe notas,
+  así que no existía una foto legítima —el bucket estaba vacío— y todo lo que
+  podía entrar era abuso directo por API, verificado en producción. Un
+  circuito de denuncias habría sido reactivo (la imagen se ve hasta que
+  alguien la denuncia) y habría dejado abierta la puerta que causaba el
+  problema. Cerrarla es preventivo y no cuesta UX porque nadie podía adjuntar
+  fotos igual. La moderación **vuelve a hacer falta** el día que se reactive
+  el flujo con foto, y ahí hay que construirla junto con la reapertura.
 - Se migró el hosting de Netlify a Cloudflare Workers cuando Netlify
   agotó la franja gratuita (banda ancha/build minutes) y el sitio quedó
   caído — se prefirió migrar de proveedor antes que agregar un método de

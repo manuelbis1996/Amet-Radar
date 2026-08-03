@@ -92,6 +92,17 @@ Dos cosas prácticas al hacerlo:
 
 ## Flujo con foto, hoy desactivado
 
+> **⚠️ Punto ciego concreto y actual.** Desde v14.1 el servidor **rechaza
+> toda foto y toda nota** (se cerró la política de insert del bucket y
+> `create_report` devuelve `invalid` si vienen). Las suites de acá abajo
+> siguen publicando con foto contra un mock que contesta `ok`, así que
+> **siguen en verde aunque en producción esa publicación falle**. No es un
+> bug de las suites: cubren el comportamiento de la interfaz de un flujo que
+> se dejó completo a propósito. Pero si alguien reactiva `FLUJO_CON_FOTO`,
+> el verde de acá **no** significa que funcione — hay que reabrir la
+> política del bucket y el rechazo en `create_report`, y probarlo contra la
+> base real.
+
 Desde v13.0 el flujo con foto no tiene entrada en la interfaz, pero el
 código sigue completo. Las suites que lo cubren
 (`check-maplibre`, `check-pin`, `check-publicar`, `check-gps`, `check-voto`,
