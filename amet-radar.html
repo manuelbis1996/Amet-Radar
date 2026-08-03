@@ -497,7 +497,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v13.1';
+  const APP_VERSION = 'v13.2';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -619,9 +619,52 @@
   // columna que el cliente necesite, hay que sumarla acá.
   const REPORT_FIELDS = 'id,lat,lng,photo,note,ts,category,confirms,denies,approx';
 
+  // Margen sobre el área visible: se piden reportes un poco más allá del
+  // borde para que ya estén dibujados justo antes de entrar en pantalla.
+  // Es más grande que el 25% que usa renderVisibleMarkers a propósito —
+  // así un paneo corto no dispara un fetch nuevo.
+  const FETCH_PAD = 0.5;
+  let lastFetchBox = null;
+
+  function currentBox(pad){
+    const b = map.getBounds();
+    const padLat = (b.getNorth() - b.getSouth()) * pad;
+    const padLng = (b.getEast() - b.getWest()) * pad;
+    return {
+      south: b.getSouth() - padLat, north: b.getNorth() + padLat,
+      west:  b.getWest()  - padLng, east:  b.getEast()  + padLng
+    };
+  }
+
+  function boxContains(fuera, dentro){
+    return !!fuera && fuera.south <= dentro.south && fuera.north >= dentro.north
+                   && fuera.west  <= dentro.west  && fuera.east  >= dentro.east;
+  }
+
+  // Un reporte suelto por id: lo necesitan los links compartidos y las
+  // notificaciones push, porque ese reporte puede estar fuera del área que
+  // se está mirando y entonces no vino en el sondeo.
+  async function fetchReportById(id){
+    try{
+      const res = await fetch(
+        `${REPORTS_URL}?id=eq.${encodeURIComponent(id)}&select=${REPORT_FIELDS}`,
+        { headers: SUPABASE_HEADERS });
+      if(!res.ok) return null;
+      const rows = await res.json();
+      if(!rows[0]) return null;
+      const { id: _id, ...record } = rows[0];
+      return record;
+    }catch(e){ return null; }
+  }
+
   async function fetchAllReports(){
     try{
-      const res = await fetch(`${REPORTS_URL}?select=${REPORT_FIELDS}`, { headers: SUPABASE_HEADERS });
+      const box = currentBox(FETCH_PAD);
+      const res = await fetch(
+        `${REPORTS_URL}?select=${REPORT_FIELDS}` +
+        `&lat=gte.${box.south}&lat=lte.${box.north}` +
+        `&lng=gte.${box.west}&lng=lte.${box.east}`,
+        { headers: SUPABASE_HEADERS });
       if(res.ok){
         const rows = await res.json();
         const next = {};
@@ -631,6 +674,7 @@
         }
         reportsCache = next;
         reportsLoadedOnce = true;
+        lastFetchBox = box;
       }
     }catch(e){ console.error('Error cargando reportes', e); }
     return reportsCache;
@@ -1247,7 +1291,13 @@
   // En MapLibre 'moveend' ya cubre el fin de un zoom, así que alcanza con
   // ese (Leaflet necesitaba 'moveend zoomend'; MapLibre además no acepta
   // varios eventos separados por espacio en un solo on()).
-  map.on('moveend', renderVisibleMarkers);
+  map.on('moveend', () => {
+    renderVisibleMarkers();
+    // Si el usuario se fue del área que se trajo en el último fetch, hay
+    // que pedir la nueva ya: esperar hasta 8s al próximo sondeo dejaría el
+    // mapa vacío justo después de panear, que se lee como que no hay nada.
+    if(!boxContains(lastFetchBox, currentBox(0.25))) refreshReports();
+  });
 
   // El círculo de zona aproximada tiene radio en metros pero se dibuja con
   // un tamaño en píxeles, así que hay que recalcularlo mientras se hace
@@ -1265,9 +1315,16 @@
   // openReportById es la parte reutilizable (centrar mapa + abrir popup);
   // la usan tanto el link compartido como el click en una notificación
   // push mientras la app ya está abierta (ver listener de 'message' más abajo).
-  function openReportById(id){
-    const r = reportsCache[id];
-    if(!r) return;
+  async function openReportById(id){
+    // Puede no estar en la caché: desde v13.2 el sondeo solo trae el área
+    // visible, y un link compartido o una notificación push apuntan
+    // justamente a un reporte que suele estar en otra parte del mapa.
+    let r = reportsCache[id];
+    if(!r){
+      r = await fetchReportById(id);
+      if(!r) return;
+      reportsCache[id] = r;
+    }
     // OJO: map.setView es de Leaflet y NO existe en MapLibre — tenerlo acá
     // hacía que abrir un reporte por link compartido o por notificación
     // lanzara excepción. Además el orden es [lng, lat], al revés que Leaflet.

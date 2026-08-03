@@ -600,9 +600,24 @@ devuelve el endpoint en vez de un error genérico.
   necesite, hay que sumarla ahí o llegará `undefined`. `admin.html` sigue con
   `select=*` a propósito: lo usa una sola persona de vez en cuando, el
   ahorro sería nulo y el riesgo de romper el panel no vale la pena.
-  Siguientes pasos si el egreso vuelve a ser problema, en orden de
-  conveniencia: filtrar por el área visible del mapa, y reemplazar el sondeo
-  por Supabase Realtime.
+  Siguiente paso si el egreso vuelve a ser problema: reemplazar el sondeo por
+  Supabase Realtime.
+- **El sondeo pide solo el área visible** (v13.2): la consulta lleva
+  `lat=gte/lte` y `lng=gte/lte` derivados de `map.getBounds()` con un margen
+  del 50% (`FETCH_PAD`, más ancho que el 25% de `renderVisibleMarkers` para
+  que un paneo corto no dispare un fetch nuevo). Antes se traía el país
+  entero en cada sondeo aunque el usuario mirara diez cuadras.
+  - **Lo que esto podía romper, y por qué no lo rompe**: `openReportById`
+    leía de `reportsCache`, y un link compartido o una notificación push
+    apuntan justamente a un reporte que suele estar fuera del área visible.
+    Ahora, si no está en la caché, se pide suelto con `fetchReportById`
+    (`?id=eq.<id>`). La función pasó a ser `async`; sus dos llamadores
+    (`openSharedReportFromUrl` y el `message` del service worker) ya lo
+    toleraban. Cubierto por `check-area.js`.
+  - **`moveend` dispara un refresco** si el área visible se salió de la que
+    trajo el último fetch (`lastFetchBox`): esperar hasta 8s al próximo
+    sondeo dejaría el mapa vacío justo después de panear, y eso se lee como
+    que no hay reportes.
 - **Persistencia**: los reportes viven en la tabla `reports` de Supabase
   (Postgres), no en `server.js` ni en un archivo. El cliente mantiene una
   copia en memoria (`reportsCache`) que refresca cada 8s vía `fetch` a la
