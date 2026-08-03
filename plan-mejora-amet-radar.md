@@ -1,10 +1,13 @@
 # Plan de Mejora — AMET Radar
 
-App de reportes comunitarios de retenes/AMET sobre mapa Leaflet, con flujo
-de reporte (ubicación + foto obligatoria + nota), backend real en Supabase
-y panel de administración. Este plan reemplaza la versión original (que
-describía la app todavía sobre `localStorage`, sin backend compartido) —
-casi todo lo que proponía ya está hecho; ver "Ya implementado" abajo.
+App de reportes comunitarios de retenes/AMET sobre **MapLibre GL**, con
+publicación de **un toque** (ubicación + categoría, sin foto ni nota), backend
+en Supabase y panel de administración. Desplegada en Cloudflare Workers.
+
+Este archivo lleva el registro de qué falta y por qué. Las versiones
+anteriores describían una app sobre Leaflet, con foto obligatoria y RLS
+abierta: nada de eso sigue siendo cierto. El detalle de **cómo** funciona cada
+cosa está en `CLAUDE.md`; acá va solo lo pendiente y lo cerrado.
 
 Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 
@@ -12,55 +15,86 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 
 ## Ya implementado (no reabrir sin razón)
 
-- **Backend real**: Supabase (tabla `public.reports`), no `localStorage` ni
-  archivo del servidor — cualquier dispositivo ve/publica/vota/borra sobre
-  los mismos reportes.
-- **Confirmación comunitaria**: botones "Sigue ahí" / "Ya no está"; se
-  retira solo con suficientes negaciones.
-- **Categorías**: retén fijo, retén móvil, accidente, control de tránsito.
-- **Filtrado por zona visible** en el mapa.
-- **Manejo de geolocalización denegada** con aviso y centro por defecto.
-- **PWA instalable** (`manifest.json` + `sw.js`).
-- **Compartir por deep link** (`?r=<id>`) + preview dinámico por reporte
-  para bots de WhatsApp/Twitter (Netlify Edge Function).
-- **Notificaciones push por cercanía**, con filtro por categoría.
-- **Panel de administración** (`admin.html`): moderar reportes, ver
-  estadísticas, editar parámetros del sistema (`app_config`), protegido
-  por password vía Edge Function `admin-login`.
-- **Anti-spam** cliente (3 reportes/hora) y reporte rápido sin foto
-  (`approx: true`, círculo de zona aproximada).
-
-Detalle completo de cómo funciona cada uno en `CLAUDE.md`.
+- **Backend real**: Supabase (`public.reports`). Cualquier dispositivo ve y
+  publica sobre los mismos reportes; se autoexpiran.
+- **Escritura cerrada** (v12.0 → v14.1): de `/rest/v1/reports` solo queda
+  abierto el `GET`. Publicar, votar y borrar pasan por funciones
+  `SECURITY DEFINER`. La propiedad de un reporte se resuelve con un token por
+  reporte (texto plano en `localStorage`, hash en la base), sin cuentas de
+  usuario.
+- **Anti-spam del lado del servidor** (v14.0): dedupe por proximidad
+  (150 m / 30 min / misma categoría) como control real, más un tope por IP
+  generoso (30/h) como cortafuegos. El límite de `localStorage` quedó solo
+  como comodidad de UX.
+- **Fotos y notas cerradas** (v14.1): sin política de insert en el bucket y
+  `create_report` las rechaza. Era el último bloqueante conocido.
+- **`app_config` cerrada** (v12.0): el `update` de `anon` permitía mover la
+  definición de "vencido" y vaciar la base por una puerta lateral.
+- **Reportar es un toque** (v13.0), con "Deshacer" de 6 s como red de
+  seguridad.
+- **Confirmación comunitaria** ("Sigue ahí" / "Ya no está"), con el retiro
+  decidido por el servidor.
+- **Fetch acotado al área visible** (v13.2) y columnas explícitas en el
+  sondeo (v12.2): juntos, lo que más bajó el egreso.
+- **Fotos fuera de la fila** (Storage en vez de base64), aunque hoy el flujo
+  esté cerrado.
+- **Notificaciones push por cercanía** (radio 2 km).
+- **Compartir**: deep link `?r=` + preview dinámico por reporte para bots,
+  servido por el Worker de Cloudflare.
+- **Panel de administración** (`admin.html`), con el borrado y la edición de
+  parámetros detrás de Edge Functions con password.
+- **PWA instalable**; mapa limitado a República Dominicana.
+- **12 suites de Playwright** versionadas en `tests/`.
 
 ---
 
-## 1. Seguridad (la brecha más real hoy)
+## 1. Seguridad
 
-**🔴 RLS completamente abierta en Supabase**
-`reports`, `push_subscriptions` (insert/update/delete) y `app_config`
-tienen políticas `USING (true)` — cualquiera con la anon key (pública,
-embebida en el HTML) puede borrar o editar cualquier fila de cualquier
-tabla pegándole directo a la REST API, sin pasar por la UI ni por el
-panel admin. Ya se aceptó como diseño consciente para el volumen actual,
-pero ahora que hay un panel admin real vale evaluar mediar el DELETE de
-reportes (y la edición de `app_config`) a través de una Postgres function
-o Edge Function con lógica propia (rate limit, registro de quién borró),
-en vez de dejar la tabla abierta a cualquiera.
-- Esfuerzo: alto (implica autenticación real o funciones + revocar
-  acceso directo a la tabla). Bloqueante solo si el proyecto crece a un
-  punto donde el abuso se vuelva un problema real.
+**🔴 `push_subscriptions` es la última tabla con escritura abierta**
+Es el mismo agujero que v12.0 cerró para `reports`, y sigue vivo. Las tres
+políticas son `USING (true)` / `WITH CHECK (true)`, así que con la anon key
+—pública por diseño— una sola petición se lleva puestas **todas** las
+suscripciones:
+
+```
+DELETE /rest/v1/push_subscriptions?endpoint=neq.x
+```
+
+y un `PATCH` puede reescribirle el `lat`/`lng` a cualquiera, o sea mandarle
+las notificaciones de otra ciudad. **Verificado contra producción** (con un
+filtro que no matchea ninguna fila, para no borrar nada real): `DELETE` y
+`PATCH` responden 204, o sea que la política los permite.
+
+Lo peor es que **el daño es silencioso**: nadie se entera de que dejó de
+recibir avisos, no hay error visible, y hay que volver a suscribirse a mano
+dispositivo por dispositivo. Es justamente la palanca de retención del
+proyecto.
+
+Por qué no se cerró junto con lo demás: no hay forma obvia de probar
+"esta suscripción es mía" — el `endpoint` es el identificador y a la vez el
+secreto. La salida más limpia es el mismo patrón que ya se usa para los
+reportes: que el cliente guarde un token al suscribirse, que la base guarde su
+hash, y mover el alta/baja/actualización a una RPC. La tabla no tiene política
+de `select`, así que la RPC además resuelve el gotcha de PostgREST que ya está
+documentado.
+- Esfuerzo: medio. Es el único ítem 🔴 que queda.
+
+**✅ RLS abierta en `reports` y `app_config` — resuelto** (v12.0, v14.0, v14.1)
+Ver "Ya implementado". Queda una sola política en `reports`: `public
+read:SELECT`.
 
 **✅ Rate-limit de `admin-login` — resuelto**
-El contador de intentos ahora vive en la tabla `public.admin_login_attempts`
-(RLS habilitada, sin políticas — solo la toca el Edge Function con la
-service_role key) en vez de un `Map` en memoria que se reseteaba en cada
-cold start.
+El contador vive en `public.admin_login_attempts` en vez de un `Map` en
+memoria que se reseteaba en cada cold start.
 
-**🟢 Documentar el modelo de "gate de conveniencia" para el password de admin**
-Ya está anotado en `CLAUDE.md` que el login de `admin.html` no protege
-datos reales (la RLS abierta ya los expone). Si en algún momento se agrega
-autenticación de usuarios de verdad, revisar esto junto con el punto de
-RLS de arriba, no por separado.
+**🟢 El password de admin ya no es solo un "gate de conveniencia"**
+Esto cambió y conviene no repetir la frase vieja: cuando la RLS estaba
+abierta, el login no protegía nada porque cualquiera con la anon key podía
+hacer lo mismo por la API. Hoy **sí** es la única vía para borrar un reporte
+ajeno y para editar `app_config`. Sigue siendo un password compartido, sin
+usuarios ni sesiones, y `admin.html` lo guarda en `sessionStorage` para
+reenviarlo en cada acción — aceptable para el uso actual, pero ya no es cierto
+que "no protege nada".
 - Esfuerzo: n/a, solo mantenerlo en mente.
 
 ---
@@ -68,52 +102,47 @@ RLS de arriba, no por separado.
 ## 2. Datos y escalabilidad
 
 **✅ Fotos en base64 dentro de `reports.photo` — resuelto**
-Bucket público `report-photos` en Supabase Storage (nombre de archivo
-`<id-del-reporte>.jpg`). `publishReport()` sube la foto comprimida antes
-de insertar el reporte y guarda la URL pública en `photo` en vez del
-base64 completo; `deleteReportRemote()`/`deleteReport()` (admin) borran
-la foto al borrar el reporte. La cola offline (`flushPendingQueue`) sigue
-guardando el base64 en `localStorage` hasta que hay red, y recién ahí lo
-sube. Las filas viejas con foto en base64 no se migraron (bajo volumen) —
-siguen renderizando igual, un `data:` URL y una URL de Storage son ambos
-valores válidos de `<img src>`.
+Pasaron a Storage, y desde v14.1 no se aceptan fotos nuevas.
 
-**🟡 Sin límite/paginación en el fetch de reportes**
-Se trae la tabla entera en cada poll; el filtrado por zona visible ya
-existe pero es client-side (`renderVisibleMarkers`), el fetch trae todo
-igual. No es un problema con el volumen actual, pero no escala si crece
-mucho la cantidad de reportes activos simultáneos.
-- Esfuerzo: medio.
+**✅ Sin límite/paginación en el fetch — resuelto** (v12.2 + v13.2)
+El sondeo pide solo columnas explícitas y solo el área visible del mapa, con
+un margen del 50%. Un `moveend` que se sale de la caja traída dispara un
+refresco, para que el mapa no quede vacío tras panear.
 
-**🟢 Polling de 8s en vez de Supabase Realtime**
-Supabase soporta suscripciones en tiempo real sobre la tabla `reports`;
-reemplazar el `setInterval(refreshReports, 8000)` por una suscripción
-bajaría la latencia de "ver un reporte nuevo" y el tráfico redundante de
-polling constante.
-- Esfuerzo: medio-alto, cambio de patrón — no crítico hoy.
+**🟡 Polling de 8s en vez de Supabase Realtime**
+Sigue siendo lo que más egreso consume, y el egreso del plan Free (5 GB/mes)
+es el primer techo que se toca al crecer. Ya se le sacó bastante con lo de
+arriba; el siguiente paso real es reemplazar el `setInterval` por una
+suscripción de Realtime, que además bajaría la latencia de ver un reporte
+nuevo.
+- Esfuerzo: medio-alto, cambio de patrón. Repriorizar cuando el egreso
+  vuelva a apretar, no antes.
 
 ---
 
 ## 3. Producto y funcionalidad
 
-**🟡 Editar (no solo borrar) un reporte propio**
-Hoy `getMine()` solo habilita "Eliminar" en el popup; permitir corregir
-la nota o la categoría de un reporte recién publicado evitaría el ciclo
-de borrar y volver a publicar por un error de tipeo.
-- Esfuerzo: bajo-medio.
+**🟢 Moderación / denuncia de abuso — solo si vuelven las fotos**
+Estaba como bloqueante y se cerró de raíz en v14.1 quitando la posibilidad de
+subir fotos y escribir notas, que era por donde entraba el contenido abusivo.
+Mientras la app publique solo (ubicación, categoría, momento) **no hay
+contenido que moderar**. El día que se reactive `FLUJO_CON_FOTO` esto vuelve a
+ser un requisito y hay que construirlo **junto con** la reapertura, no después.
+- Esfuerzo: medio-alto. Bloqueante condicional.
+
+**🟢 Editar un reporte propio**
+Quedó casi sin sentido: ya no hay nota que corregir ni categoría que elegir
+(hay una sola). Lo único editable sería mover el pin, y para eso el "Deshacer"
+de 6 s ya cubre el caso del error inmediato.
+- Esfuerzo: bajo-medio, pero de valor dudoso hoy.
 
 **🟢 Colapsar notificaciones push repetidas**
-Documentado como decisión consciente de no hacerlo todavía ("sin volumen
-real de suscriptores para que el ruido sea un dolor real") — repriorizar
-si empieza a haber varios reportes cercanos en poco tiempo y empiezan a
-quejarse los usuarios.
+Decisión consciente de no hacerlo todavía: sin volumen real de suscriptores,
+el ruido no es un dolor. Repriorizar si empiezan las quejas.
 - Esfuerzo: medio.
 
 **🟢 Imagen OG dinámica por reporte**
-El preview por WhatsApp/Twitter reusa `icon-512.png` genérico en vez de
-un thumbnail del mapa centrado en el reporte — quedó fuera de alcance a
-propósito al construir el preview dinámico, por simplicidad. Mejora
-cosmética, no urgente.
+El preview reusa `icon-512.png` en vez de un thumbnail del mapa. Cosmético.
 - Esfuerzo: medio-alto.
 
 ---
@@ -121,53 +150,55 @@ cosmética, no urgente.
 ## 4. Accesibilidad
 
 **✅ `admin.html` sin `aria-label` — resuelto**
-Se etiquetaron los botones de acción (entrar, guardar, cerrar sesión) y,
-más importante, el botón "Eliminar" por fila de la tabla de reportes
-(antes eran varios botones idénticos sin contexto para un lector de
-pantalla — ahora dicen "Eliminar reporte de <categoría>"). También se
-agregó `alt="Foto del reporte"` a la miniatura y texto oculto
-(`.sr-only`) a las dos columnas de la tabla sin encabezado visible
-(foto/acciones).
 
-**🟢 Soporte de teclado para elegir ubicación en el reporte manual**
-El picker de ubicación sigue dependiendo de un click en el mapa; una
-alternativa por dirección/buscador serviría para quien no puede
-interactuar con el mapa táctil.
+**🟢 Alternativa por teclado para elegir ubicación**
+El pin arrastrable depende del mapa táctil. Hoy solo se usa en el flujo con
+foto, que está apagado, así que en la práctica no bloquea a nadie — pero
+vuelve a importar si ese flujo se reactiva.
 - Esfuerzo: medio.
 
 ---
 
 ## 5. Calidad y DX
 
-**🟡 Cero tests, cero CI**
-No hay `.github/workflows` ni suite de tests en el repo. El proyecto ya
-tiene lógica no trivial (RLS, Edge Functions, trigger de notificaciones,
-panel admin) que se puede romper en silencio con un cambio sin querer.
-Un smoke test automatizado en cada push a `main` (ej. GitHub Actions
-corriendo un check básico contra la app desplegada, o el mismo flujo de
-Playwright que se usó manualmente para validar `admin.html` en esta
-sesión) evitaría regresiones que hoy solo se detectan probando a mano.
-- Esfuerzo: medio.
+**✅ Cero tests — resuelto**
+12 suites de Playwright versionadas en `tests/`, con `node tests/run.js`.
+
+**🟡 Cero CI**
+Los tests existen pero **nada los corre solo**: no hay `.github/workflows`, y
+un push a `main` despliega a producción sin que nadie los ejecute. Es la mitad
+que falta del ítem original. Un workflow que corra `node tests/run.js` en cada
+push evitaría desplegar una regresión que las suites sí detectan.
+- Esfuerzo: bajo. Es el mejor retorno por esfuerzo de la lista.
+
+**🟡 Las suites no ven la base, y eso ya costó caro**
+Mockean la red y nunca llegan a Postgres: verde ahí no dice nada sobre RLS,
+RPC ni triggers. Todos los bugs caros del proyecto se colaron por ese hueco
+(la lista está en `tests/README.md`). Hoy la verificación contra la base real
+es manual, con `begin; set local role anon; ...; rollback;`. Automatizar
+aunque sea un puñado de esos chequeos contra una base de pruebas cerraría el
+agujero de verdad.
+- Esfuerzo: medio-alto (requiere un proyecto Supabase de pruebas o
+  `supabase start` local).
 
 **🟢 Vigilar que `server.js` no vuelva a acumular lógica de API**
-Hoy `server.js` es puro servidor de archivos estáticos para desarrollo
-local (correcto, documentado) — si en el futuro alguien le vuelve a
-agregar rutas `/api/*` sin querer, diverge silenciosamente del modelo
-real en Supabase. No es un problema actual, solo un riesgo a vigilar en
-PRs futuros.
+Hoy es puro servidor estático. Si alguien le agrega rutas `/api/*`, diverge en
+silencio del modelo real en Supabase.
 - Esfuerzo: n/a, solo revisión.
 
 ---
 
 ## Orden sugerido
 
-1. ~~`aria-label` en `admin.html`~~ ✅ hecho
-2. ~~Rate-limit persistente de `admin-login`~~ ✅ hecho
-3. ~~Fotos a Supabase Storage~~ ✅ hecho
-4. Editar reporte propio
-5. Smoke test / CI básico
-6. Evaluar mediar el DELETE de reportes con lógica propia (el ítem de
-   seguridad más grande, pero también el de mayor esfuerzo — requiere
-   decisión de producto sobre autenticación real antes de encararlo)
-7. Resto (Realtime, paginación, imagen OG dinámica, notificaciones
-   colapsadas, teclado en el picker)
+1. **CI que corra las suites en cada push** — esfuerzo bajo, evita desplegar
+   regresiones que los tests ya detectan.
+2. **Cerrar `push_subscriptions`** — el único 🔴 que queda, y el mismo tipo de
+   agujero que ya se cerró en `reports`.
+3. **Automatizar algunos chequeos contra la base real** — es donde
+   históricamente aparecen los bugs.
+4. **Realtime**, cuando el egreso vuelva a ser el problema.
+5. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
+   editar reporte propio).
+
+**Condicional, fuera del orden**: si se reactiva el flujo con foto, la
+moderación deja de ser 🟢 y pasa a ser bloqueante en el mismo cambio.
