@@ -11,6 +11,7 @@
 # a mano con `wrangler deploy --dry-run` (ver CLAUDE.md).
 
 **/.git
+**/.github
 **/node_modules
 **/.DS_Store
 _worker.js

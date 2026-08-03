@@ -1,0 +1,71 @@
+name: Tests
+
+# Corre las 12 suites de Playwright en cada push y en cada PR.
+#
+# OJO CON LO QUE ESTO NO HACE: el Worker de Cloudflare está conectado al repo
+# y despliega solo en cada push a `main`, en paralelo con este workflow. O sea
+# que esto NO bloquea un despliegue malo — avisa después. Para que sí lo
+# bloquee habría que desconectar la integración de git de Cloudflare y
+# desplegar desde acá con `wrangler deploy` y un CLOUDFLARE_API_TOKEN, que es
+# un cambio aparte y con más riesgo. Ver plan-mejora-amet-radar.md.
+
+on:
+  push:
+  pull_request:
+
+# Un push nuevo sobre la misma rama cancela la corrida anterior: no tiene
+# sentido gastar minutos en un commit que ya quedó viejo.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # RED DE SEGURIDAD, no es paranoia: las suites mockean la red con
+      # page.route, pero si alguna vez queda un endpoint sin mockear, la
+      # petición saldría a la instancia REAL de Supabase — y algunas de esas
+      # llamadas escriben (create_report, purge_expired_reports). Mandando el
+      # dominio a 127.0.0.1, cualquier hueco de mocking falla rápido y ruidoso
+      # en vez de tocar producción desde CI.
+      - name: Blindar producción contra huecos de mocking
+        run: echo "127.0.0.1 nikexwjxxcxzhsuypsjn.supabase.co" | sudo tee -a /etc/hosts
+
+      # Playwright NO es dependencia del proyecto (no hay package.json, a
+      # propósito): se instala acá, igual que se hace a mano en local. La
+      # versión va pineada para que una release nueva no rompa el CI de un día
+      # para el otro; para subirla, cambiar el número acá.
+      - name: Instalar Playwright
+        run: |
+          npm install -g playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      # tests/_setup.js hace require('playwright') y prueba unas rutas fijas
+      # que no incluyen la del runner de GitHub. Con NODE_PATH apuntando al
+      # root global de npm, la primera opción resuelve y no hay que tocar el
+      # código de los tests.
+      - name: Exponer el Playwright global a los tests
+        run: echo "NODE_PATH=$(npm root -g)" >> "$GITHUB_ENV"
+
+      - name: Correr las suites
+        run: node tests/run.js
+
+      # check-publicar.js deja capturas de pantalla; cuando algo falla son lo
+      # más rápido para entender qué se rompió sin reproducir en local.
+      - name: Guardar capturas si algo falló
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capturas
+          path: tests/*.png
+          if-no-files-found: ignore
+          retention-days: 7

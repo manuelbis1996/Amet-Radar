@@ -164,12 +164,21 @@ vuelve a importar si ese flujo se reactiva.
 **✅ Cero tests — resuelto**
 12 suites de Playwright versionadas en `tests/`, con `node tests/run.js`.
 
-**🟡 Cero CI**
-Los tests existen pero **nada los corre solo**: no hay `.github/workflows`, y
-un push a `main` despliega a producción sin que nadie los ejecute. Es la mitad
-que falta del ítem original. Un workflow que corra `node tests/run.js` en cada
-push evitaría desplegar una regresión que las suites sí detectan.
-- Esfuerzo: bajo. Es el mejor retorno por esfuerzo de la lista.
+**✅ Cero CI — resuelto**
+`.github/workflows/tests.yml` corre `node tests/run.js` en cada push y cada
+PR. El workflow manda el dominio de Supabase a 127.0.0.1 por `/etc/hosts`,
+para que un hueco de mocking falle ruidoso en vez de tocar producción desde
+CI.
+
+**🟡 El CI no frena un despliegue malo**
+Cloudflare está conectado al repo y despliega al recibir el push a `main`, en
+paralelo con el workflow: si las suites fallan, la regresión ya salió a
+producción y el CI solo avisa. Para cerrarlo hay que desconectar la
+integración de git de Cloudflare y desplegar desde el workflow con
+`wrangler deploy`, condicionado a que los tests pasen, con un
+`CLOUDFLARE_API_TOKEN` en los secrets del repo.
+- Esfuerzo: bajo-medio. El riesgo no es técnico sino operativo: si el token o
+  el workflow se rompen, deja de haber despliegue hasta arreglarlo.
 
 **🟡 Las suites no ven la base, y eso ya costó caro**
 Mockean la red y nunca llegan a Postgres: verde ahí no dice nada sobre RLS,
@@ -190,14 +199,15 @@ silencio del modelo real en Supabase.
 
 ## Orden sugerido
 
-1. **CI que corra las suites en cada push** — esfuerzo bajo, evita desplegar
-   regresiones que los tests ya detectan.
+1. ~~CI que corra las suites en cada push~~ ✅ hecho
 2. **Cerrar `push_subscriptions`** — el único 🔴 que queda, y el mismo tipo de
    agujero que ya se cerró en `reports`.
-3. **Automatizar algunos chequeos contra la base real** — es donde
+3. **Que el CI frene el despliegue** — hoy avisa tarde; desplegar desde el
+   workflow lo convierte en una barrera de verdad.
+4. **Automatizar algunos chequeos contra la base real** — es donde
    históricamente aparecen los bugs.
-4. **Realtime**, cuando el egreso vuelva a ser el problema.
-5. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
+5. **Realtime**, cuando el egreso vuelva a ser el problema.
+6. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
    editar reporte propio).
 
 **Condicional, fuera del orden**: si se reactiva el flujo con foto, la

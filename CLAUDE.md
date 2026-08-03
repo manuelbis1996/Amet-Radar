@@ -126,6 +126,19 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   estadísticas, editar parámetros del sistema), sin backend propio — le
   pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
   administración" abajo).
+- `.github/workflows/tests.yml` — CI: corre `node tests/run.js` en cada
+  push y cada PR. **No bloquea el despliegue**: el Worker de Cloudflare está
+  conectado al repo y despliega solo al recibir el push a `main`, en paralelo
+  con el workflow, así que el CI avisa después de los hechos. Para que lo
+  frenara habría que desconectar la integración de git y desplegar desde el
+  workflow con `wrangler deploy` + `CLOUDFLARE_API_TOKEN`. Dos detalles que
+  no son opcionales: **`**/.github` está en `.assetsignore`** (si no, con
+  `assets.directory: "./"` el workflow se publicaría como archivo servible), y
+  el workflow **manda `nikexwjxxcxzhsuypsjn.supabase.co` a 127.0.0.1 por
+  `/etc/hosts`** — las suites mockean la red, pero si alguna vez queda un
+  endpoint sin mockear la petición saldría a la instancia REAL, y algunas de
+  esas llamadas escriben. Con eso, un hueco de mocking falla ruidoso en vez de
+  tocar producción desde CI.
 - `tests/` — las 12 suites de Playwright, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con

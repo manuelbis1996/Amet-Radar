@@ -50,6 +50,11 @@ node tests/run.js seguridad area  # solo las que coincidan
 Requieren Playwright con Chromium (`npm install -g playwright && npx
 playwright install chromium`), que tampoco es dependencia del proyecto.
 
+En cada push y cada PR las corre GitHub Actions
+([.github/workflows/tests.yml](.github/workflows/tests.yml)). **Ojo con lo que
+eso no hace**: Cloudflare despliega en paralelo al recibir el push, así que el
+CI avisa de una regresión pero no la frena.
+
 **Verde ahí no alcanza.** Las suites mockean la red y nunca llegan a Postgres,
 así que no dicen nada sobre RLS, funciones de la base ni triggers — que es por
 donde se colaron los bugs más caros de este proyecto. Cualquier cambio que
@@ -122,6 +127,7 @@ cualquiera encuentre la pantalla de moderación.
 | `supabase/migrations/` | Historial del esquema de la base |
 | `supabase/functions/` | Edge Functions (push, panel admin, borrado de fotos) |
 | `tests/` | Las 12 suites de Playwright |
+| `.github/workflows/` | CI: corre las suites en cada push y PR |
 
 ## Más detalle
 
