@@ -16,7 +16,19 @@ const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:manuelbis1996@gmail.com";
 
-const RADIUS_METERS = 2000;
+// El radio ya NO es una constante: sale de app_config.push_radius_meters, que
+// se edita desde el panel admin (ver "Radio de las notificaciones push" en
+// CLAUDE.md). Este número queda como red: si la lectura falla, se avisa con el
+// valor de siempre en vez de no avisar a nadie — una notificación que no sale
+// no se recupera después, y el push es lo que hace útil a la app cuando está
+// cerrada.
+const RADIUS_FALLBACK_METERS = 2000;
+// Los mismos topes que el check de la columna. Van repetidos a propósito: si
+// alguien edita la fila por fuera del endpoint (hoy solo se puede con la
+// service_role key), un valor absurdo agrandaría el bounding box hasta barrer
+// la tabla entera en cada reporte.
+const RADIUS_MIN_METERS = 100;
+const RADIUS_MAX_METERS = 50000;
 const METERS_PER_DEG_LAT = 111320;
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -25,6 +37,24 @@ const CATEGORY_LABELS: Record<string, string> = {
   accidente: "⚠️ Accidente",
   control: "🚦 Control de tránsito",
 };
+
+// deno-lint-ignore no-explicit-any
+async function radioConfigurado(supabase: any): Promise<number> {
+  try {
+    const { data, error } = await supabase
+      .from("app_config")
+      .select("push_radius_meters")
+      .eq("id", true)
+      .maybeSingle();
+    if (error) throw error;
+    const n = Number(data?.push_radius_meters);
+    if (!Number.isFinite(n)) return RADIUS_FALLBACK_METERS;
+    return Math.min(RADIUS_MAX_METERS, Math.max(RADIUS_MIN_METERS, Math.round(n)));
+  } catch (err) {
+    console.error("No se pudo leer push_radius_meters, uso el valor por defecto", err);
+    return RADIUS_FALLBACK_METERS;
+  }
+}
 
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
   const R = 6371000;
@@ -53,9 +83,10 @@ Deno.serve(async (req) => {
     }
 
     const { lat, lng, id, category } = record;
-    const dLat = RADIUS_METERS / METERS_PER_DEG_LAT;
+    const radius = await radioConfigurado(supabase);
+    const dLat = radius / METERS_PER_DEG_LAT;
     const metersPerDegLng = METERS_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180);
-    const dLng = RADIUS_METERS / metersPerDegLng;
+    const dLng = radius / metersPerDegLng;
 
     const { data: subs, error } = await supabase
       .from("push_subscriptions")
@@ -70,7 +101,7 @@ Deno.serve(async (req) => {
     // categories null/vacío = suscripción sin filtro, avisa de todo.
     const nearby = (subs ?? []).filter(
       (s) =>
-        haversineMeters(lat, lng, s.lat, s.lng) <= RADIUS_METERS &&
+        haversineMeters(lat, lng, s.lat, s.lng) <= radius &&
         (!s.categories || s.categories.length === 0 || s.categories.includes(category)),
     );
 
@@ -107,7 +138,10 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ notified: nearby.length - expired.length, expired: expired.length }),
+      // `radius` va en la respuesta para poder confirmar desde afuera qué valor
+      // usó de verdad: como se lee de app_config en cada disparo, es la única
+      // forma de distinguir "tomó el nuevo" de "cayó al de por defecto".
+      JSON.stringify({ notified: nearby.length - expired.length, expired: expired.length, radius }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
   } catch (err) {

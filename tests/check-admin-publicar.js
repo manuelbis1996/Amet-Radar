@@ -25,7 +25,7 @@ const check = (n, c, extra='') => {
 };
 
 const CONFIG = [{ stale_minutes:45, max_age_minutes:120, deny_threshold:3,
-                  report_limit:5, report_window_min:60 }];
+                  report_limit:5, report_window_min:60, push_radius_meters:2500 }];
 
 const ahora = Date.now();
 // Dos reportes ya existentes: uno exacto y uno de zona aproximada, de
@@ -66,6 +66,12 @@ async function abrirPanel(browser, opciones = {}) {
     return r.fulfill({ status:200, contentType:'application/json', body:'{"ok":true}' });
   });
 
+  const configs = [];
+  await page.route('**/functions/v1/admin-update-config', r => {
+    configs.push(JSON.parse(r.request().postData() || '{}'));
+    return r.fulfill({ status:200, contentType:'application/json', body:'{"ok":true}' });
+  });
+
   const rpcs = [];
   await page.route('**/rest/v1/rpc/create_report', r => {
     rpcs.push(JSON.parse(r.request().postData() || '{}'));
@@ -78,7 +84,7 @@ async function abrirPanel(browser, opciones = {}) {
   await page.click('#login-btn');
   await page.waitForSelector('#dashboard:not([hidden])', { timeout:8000 });
   await page.waitForTimeout(400);
-  return { ctx, page, rpcs, errores, borrados };
+  return { ctx, page, rpcs, errores, borrados, configs };
 }
 
 (async () => {
@@ -251,6 +257,34 @@ async function abrirPanel(browser, opciones = {}) {
       rpcs.length === 1 && Math.abs(rpcs[0].p_lat - 19.31) < 0.0001,
       JSON.stringify(rpcs[0] && { lat:rpcs[0].p_lat, lng:rpcs[0].p_lng }));
     check('y sin errores de JS sueltos', errores.length === 0, JSON.stringify(errores));
+    await ctx.close();
+  }
+
+  // ---- 5. El radio de las notificaciones push se edita desde el panel ----
+  // Era el único número del sistema que exigía editar el código de un Edge
+  // Function y redesplegarlo. Lo que se cubre acá es el lado del cliente: que
+  // el campo se cargue de app_config y que viaje en el guardado. Que el push
+  // salga con ese radio lo decide notify-nearby, que estas suites no ven.
+  {
+    const { ctx, page, configs, errores } = await abrirPanel(browser);
+
+    check('el radio de push se carga del valor guardado, no de un fijo',
+      (await page.inputValue('#cfg-push-radius')) === '2500',
+      await page.inputValue('#cfg-push-radius'));
+
+    await page.fill('#cfg-push-radius', '4000');
+    await page.click('#config-save-btn');
+    await page.waitForTimeout(600);
+
+    check('guardar manda el radio nuevo al endpoint de admin',
+      configs.length === 1 && configs[0].config &&
+      configs[0].config.push_radius_meters === 4000, JSON.stringify(configs));
+    check('y sigue mandando el resto de los parámetros',
+      configs[0] && configs[0].config &&
+      configs[0].config.max_age_minutes === 120 &&
+      configs[0].config.deny_threshold === 3,
+      JSON.stringify(configs[0] && configs[0].config));
+    check('sin errores de JS al guardar', errores.length === 0, JSON.stringify(errores));
     await ctx.close();
   }
 

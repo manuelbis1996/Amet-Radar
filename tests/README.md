@@ -43,7 +43,7 @@ código, revisá si el método está acá.
 
 | Suite | Qué protege |
 |---|---|
-| `check-admin-publicar.js` | Que el panel publique por `rpc/create_report` (sin endpoint privilegiado nuevo), mandando las coordenadas **del pin** y no las del dispositivo; que ofrezca las 4 categorías; que dibuje en el mapa los reportes existentes y el recién publicado; que un rechazo se muestre con su motivo; y que **si MapLibre no carga, el panel no se caiga** y se pueda publicar igual con las coordenadas a mano |
+| `check-admin-publicar.js` | Que el panel publique por `rpc/create_report` (sin endpoint privilegiado nuevo), mandando las coordenadas **del pin** y no las del dispositivo; que ofrezca las 4 categorías; que dibuje en el mapa los reportes existentes y el recién publicado; que un rechazo se muestre con su motivo; que se pueda **eliminar un reporte tocándolo en el mapa**; que el radio de las notificaciones push se cargue de `app_config` y viaje en el guardado; y que **si MapLibre no carga, el panel no se caiga** y se pueda publicar igual con las coordenadas a mano |
 | `check-antispam.js` | Que publicar vaya por `rpc/create_report` y **no** por el `POST` directo (cerrado en v14.0); que un rechazo `duplicate`/`rate_limit` tenga su mensaje, no gaste cupo local ni se encole; y que la cola offline reintente con el **mismo id** tratando `already_exists` como éxito |
 | `check-untoque.js` | Reportar es un solo toque: sin pantallas intermedias, categoría `reten_fijo`, `owner_hash` presente, y Deshacer borra en el servidor y devuelve el cupo |
 | `check-seguridad.js` | Que la app no emita ningún `DELETE`/`PATCH` directo contra `reports`, `app_config` ni el bucket; que votar vaya por RPC sin mandar totales; que borrar exija el token de propiedad |

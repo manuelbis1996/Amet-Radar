@@ -42,12 +42,24 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 // mandan sobre borrados masivos (max_age_minutes lo usa
 // purge_expired_reports) y un cero de más en el formulario vaciaría la base
 // sin vuelta atrás. El mínimo de max_age_minutes existe exactamente por eso.
-const LIMITES: Record<string, { min: number; max: number }> = {
-  stale_minutes:     { min: 1, max: 10080 },  // hasta 7 días
-  max_age_minutes:   { min: 15, max: 10080 }, // nunca menos de 15 min
-  deny_threshold:    { min: 2, max: 100 },    // 1 dejaría que un solo voto retire cualquier reporte
-  report_limit:      { min: 1, max: 100 },
-  report_window_min: { min: 1, max: 1440 },
+//
+// `opcional` marca los campos que se agregaron después: si no vienen en el
+// body, se deja el valor que ya está en la tabla en vez de responder 400. Sin
+// eso, desplegar esta función antes que el admin.html que manda el campo nuevo
+// rompería el guardado de TODOS los parámetros hasta que el frontend salga —
+// el mismo orden de despliegue que ya mordió en v14.0 (ver "Las dos
+// migraciones van separadas" en CLAUDE.md).
+const LIMITES: Record<string, { min: number; max: number; opcional?: boolean }> = {
+  stale_minutes:      { min: 1, max: 10080 },  // hasta 7 días
+  max_age_minutes:    { min: 15, max: 10080 }, // nunca menos de 15 min
+  deny_threshold:     { min: 2, max: 100 },    // 1 dejaría que un solo voto retire cualquier reporte
+  report_limit:       { min: 1, max: 100 },
+  report_window_min:  { min: 1, max: 1440 },
+  // Rango generoso a propósito: este parámetro no decide ningún borrado, el
+  // peor caso de un valor raro es avisar de más o de menos. Los topes son los
+  // mismos que el check de la columna, para que el endpoint dé un mensaje
+  // entendible en vez de un error de Postgres.
+  push_radius_meters: { min: 100, max: 50000, opcional: true },
 };
 
 function clientIp(req: Request): string {
@@ -134,9 +146,10 @@ Deno.serve(async (req) => {
   const entrada = body.config ?? {};
   const limpio: Record<string, number> = {};
 
-  for (const [campo, { min, max }] of Object.entries(LIMITES)) {
+  for (const [campo, { min, max, opcional }] of Object.entries(LIMITES)) {
     const bruto = entrada[campo];
     if (bruto === undefined || bruto === null) {
+      if (opcional) continue;
       return json({ error: `falta el parámetro ${campo}` }, 400);
     }
     const n = Number(bruto);

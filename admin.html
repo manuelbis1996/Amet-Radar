@@ -158,6 +158,7 @@
   /* ---- Parámetros ---- */
   .config-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:0 18px; }
   .config-grid .field{ display:flex; flex-direction:column; }
+  .field-hint{ margin:-8px 0 14px; font-size:11px; line-height:1.45; color:var(--muted-2); }
 
   .toast{
     position:fixed; top:18px; left:50%; transform:translateX(-50%);
@@ -369,9 +370,14 @@
             <label for="cfg-limit">Reportes máximos por ventana</label>
             <input type="number" id="cfg-limit" min="1" required>
           </div>
-          <div class="field" style="grid-column:1/-1">
+          <div class="field">
             <label for="cfg-window">Duración de la ventana anti-spam (minutos)</label>
             <input type="number" id="cfg-window" min="1" required>
+          </div>
+          <div class="field">
+            <label for="cfg-push-radius">Radio de las notificaciones push (metros)</label>
+            <input type="number" id="cfg-push-radius" min="100" max="50000" step="100" required>
+            <p class="field-hint">A qué distancia de un reporte nuevo se avisa. 2000 m es el valor de siempre.</p>
           </div>
         </div>
         <button class="btn btn-primary" type="submit" id="config-save-btn" aria-label="Guardar parámetros del sistema">Guardar</button>
@@ -606,6 +612,7 @@
     document.getElementById('cfg-deny').value = cfg.deny_threshold ?? 2;
     document.getElementById('cfg-limit').value = cfg.report_limit ?? 3;
     document.getElementById('cfg-window').value = cfg.report_window_min ?? 60;
+    document.getElementById('cfg-push-radius').value = cfg.push_radius_meters ?? 2000;
   }
 
   configForm.addEventListener('submit', async (e) => {
@@ -619,7 +626,8 @@
       max_age_minutes: Number(document.getElementById('cfg-maxage').value),
       deny_threshold: Number(document.getElementById('cfg-deny').value),
       report_limit: Number(document.getElementById('cfg-limit').value),
-      report_window_min: Number(document.getElementById('cfg-window').value)
+      report_window_min: Number(document.getElementById('cfg-window').value),
+      push_radius_meters: Number(document.getElementById('cfg-push-radius').value)
     };
     if(body.stale_minutes > body.max_age_minutes){
       configError.textContent = 'Los minutos para "viejo" no pueden superar los de expirar';

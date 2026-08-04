@@ -38,7 +38,8 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
   sondeo (v12.2): juntos, lo que más bajó el egreso.
 - **Fotos fuera de la fila** (Storage en vez de base64), aunque hoy el flujo
   esté cerrado.
-- **Notificaciones push por cercanía** (radio 2 km).
+- **Notificaciones push por cercanía**, con el radio configurable desde el
+  panel admin (2 km por default).
 - **Compartir**: deep link `?r=` + preview dinámico por reporte para bots,
   servido por el Worker de Cloudflare.
 - **Panel de administración** (`admin.html`), con el borrado y la edición de
@@ -190,12 +191,14 @@ silencio del modelo real en Supabase.
 
 1. ~~CI que corra las suites en cada push~~ ✅ hecho
 2. ~~Cerrar `push_subscriptions`~~ ✅ hecho
-3. **Proteger `main`** — que exija el check `playwright` antes de mergear.
-   **Es lo de mayor prioridad que queda, y es un clic.**
-4. **Automatizar algunos chequeos contra la base real** — es donde
-   históricamente aparecen los bugs.
-5. **Realtime**, cuando el egreso vuelva a ser el problema.
-6. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
+3. ~~**Proteger `main`**, que exija el check `playwright` antes de
+   mergear~~ ✅ hecho (regla de rama creada; ya no se puede pushear directo)
+4. ~~Radio de las notificaciones push configurable~~ ✅ hecho (v14.5) — era
+   el último número que exigía redesplegar un Edge Function para cambiarlo
+5. **Automatizar algunos chequeos contra la base real** — es donde
+   históricamente aparecen los bugs. **Es lo de mayor prioridad que queda.**
+6. **Realtime**, cuando el egreso vuelva a ser el problema.
+7. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
    editar reporte propio).
 
 **Condicional, fuera del orden**: si se reactiva el flujo con foto, la
