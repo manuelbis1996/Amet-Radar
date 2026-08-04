@@ -126,21 +126,18 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   estadísticas, editar parámetros del sistema), sin backend propio — le
   pega directo a Supabase igual que `amet-radar.html` (ver "Panel de
   administración" abajo).
-- `.github/workflows/tests.yml` — CI: corre `node tests/run.js` en cada
-  push y cada PR, más `wrangler deploy --dry-run` (que no necesita
-  credenciales y valida `wrangler.jsonc`, `_worker.js` y la lista de assets).
-  Trae además un job `deploy` **preparado pero inactivo**, que despliega solo
-  si las suites pasaron — ver "Desplegar desde el CI" abajo para los dos
-  pasos manuales que faltan. Mientras tanto **el CI no bloquea el
-  despliegue**: el Worker está conectado al repo y despliega al recibir el
-  push a `main`, en paralelo con el workflow. Dos detalles que
-  no son opcionales: **`**/.github` está en `.assetsignore`** (si no, con
-  `assets.directory: "./"` el workflow se publicaría como archivo servible), y
-  el workflow **manda `nikexwjxxcxzhsuypsjn.supabase.co` a 127.0.0.1 por
-  `/etc/hosts`** — las suites mockean la red, pero si alguna vez queda un
-  endpoint sin mockear la petición saldría a la instancia REAL, y algunas de
-  esas llamadas escriben. Con eso, un hueco de mocking falla ruidoso en vez de
-  tocar producción desde CI.
+- `.github/workflows/tests.yml` — CI: corre `node tests/run.js` en cada push
+  y cada PR, más `wrangler deploy --dry-run` (que no necesita credenciales y
+  valida `wrangler.jsonc`, `_worker.js` y la lista de assets, así que también
+  hace de guarda de `.assetsignore`). **No despliega**: el gate es la regla de
+  protección de `main`, no un paso de acá — ver "Cómo llega el código a
+  producción". **`**/.github` está en `.assetsignore`**: sin eso, con
+  `assets.directory: "./"`, el workflow y la plantilla de PR se publicarían
+  como archivos servibles.
+- `.github/pull_request_template.md` — plantilla de PR. Pide lo que en este
+  proyecto ya mordió al menos una vez: verificación contra la base real cuando
+  se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
+  rompe.
 - `tests/` — las 12 suites de Playwright, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
@@ -1388,39 +1385,57 @@ el mismo modelo de un solo archivo que tenía la Netlify Edge Function:
 (`env.ASSETS.fetch`) como la lógica de preview dinámico, sin build step —
 mismo criterio "sin dependencias" del resto del proyecto.
 
-### Desplegar desde el CI (preparado, falta un paso manual)
+### Cómo llega el código a producción (leer antes de tocar el CI)
 
-Hoy el Worker está conectado al repo por la integración de git de Cloudflare:
-despliega al recibir el push a `main`, **en paralelo con los tests**. O sea
-que una regresión llega a producción igual y el CI solo avisa después.
+El Worker está conectado al repo por la integración de git de Cloudflare y
+**despliega solo al recibir un push a `main`**. Eso no cambió y no conviene
+cambiarlo: es simple y no depende de ningún token que pueda vencer.
 
-El job `deploy` de `.github/workflows/tests.yml` invierte eso (`needs:
-playwright`: no despliega nada si las suites fallaron), pero está **inactivo a
-propósito** hasta que se hagan dos cosas manuales, y **el orden importa**:
+Lo que hace que a producción llegue solo código probado **no es un paso del
+workflow**, sino una **regla de protección sobre `main`**: el trabajo va en una
+rama, se abre un PR, y `main` no acepta el merge hasta que el check
+`playwright` esté en verde. Como nada entra a `main` sin pasar los tests,
+cuando Cloudflare despliega ya está probado.
 
-1. **Cargar el secret `CLOUDFLARE_API_TOKEN`** en Settings → Secrets and
-   variables → Actions. El token se crea en Cloudflare (My Profile → API
-   Tokens) con la plantilla *Edit Cloudflare Workers*. Si el token abarca más
-   de una cuenta, agregar también `CLOUDFLARE_ACCOUNT_ID` (Workers & Pages →
-   columna derecha).
-2. **Desconectar la integración de git en Cloudflare** (Workers & Pages →
-   `amet-radar` → Settings → Build → desconectar el repositorio). **Si no se
-   hace, cada push despliega dos veces**: una por Cloudflare sin esperar los
-   tests —que es justo lo que se quiere evitar— y otra desde el workflow.
+**El paso manual que falta** (una sola vez, en la interfaz de GitHub —
+Settings → Rules → Rulesets → New branch ruleset):
 
-Mientras falte el secret, el job **no falla**: escribe un `::notice` diciendo
-qué falta y termina en verde. Por eso el archivo se puede tener mergeado sin
-romper nada y sin dejar el CI en rojo.
+- **Target branches**: `main` (Include default branch)
+- **Require a pull request before merging** — con *Required approvals: 0*, que
+  para un proyecto de una persona es lo razonable; el valor está en el gate de
+  los tests, no en la revisión
+- **Require status checks to pass** → agregar **`playwright`**
+  ⚠️ El check se llama `playwright` (el **job**), no `Tests` (que es el nombre
+  del *workflow*). Es el error clásico: si se pone `Tests`, la regla espera un
+  check que nunca aparece y **ningún PR se puede mergear nunca**.
+- **Block force pushes**
 
-El último paso del job vuelve a pedir la home de producción y **compara
-`APP_VERSION` contra la del repo**, reintentando ~5 minutos. Sin eso, un
-`wrangler deploy` que responde bien pero no propaga dejaría producción atrás
-sin que nadie se entere hasta abrir la app en el teléfono.
+**Consecuencia**: se termina el push directo a `main`. Todo pasa por PR, y hay
+una plantilla (`.github/pull_request_template.md`) con las cuatro cosas que en
+este proyecto ya mordieron al menos una vez.
 
-**Riesgo asumido, que conviene tener claro antes de activarlo**: el problema
-deja de ser técnico y pasa a ser operativo. Si el token vence o se revoca, o
-el workflow se rompe, **no hay despliegue hasta arreglarlo** — hoy, con la
-integración de git, el despliegue no depende de nada del repo.
+#### Por qué NO se despliega desde el workflow
+
+Hubo una versión del workflow con un job `deploy` que corría `wrangler deploy`
+con un `CLOUDFLARE_API_TOKEN`, condicionado a que las suites pasaran. Se quitó,
+y vale la pena tener claro el razonamiento antes de reponerlo:
+
+- con `main` protegido es **redundante** — el código ya está probado antes de
+  llegar ahí;
+- agrega un token que hay que gestionar y rotar, y si vence **deja de haber
+  despliegue**;
+- tener dos mecanismos de despliegue confunde sobre cuál manda;
+- se pierden las preview URLs y los comentarios en PR que da Workers Builds.
+
+Sigue en el historial de git (commit `615a13b`) por si algún día se quiere
+controlar el *cómo* del despliegue (variables por entorno, pasos previos), que
+es cuando sí conviene.
+
+**La otra alternativa que se evaluó** y también se descartó: dejar la
+integración de git pero apuntando a una rama `release`, y que el workflow le
+haga fast-forward cuando los tests pasan en `main`. No necesita ningún token,
+pero agrega una rama al modelo mental para resolver algo que la regla de
+protección ya resuelve sin piezas nuevas.
 
 ### Archivos de la configuración de despliegue
 - **`_worker.js`** (raíz del repo) — sirve el preview dinámico por

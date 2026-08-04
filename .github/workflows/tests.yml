@@ -1,12 +1,20 @@
 name: Tests
 
-# Corre las 12 suites de Playwright en cada push y en cada PR, y —cuando esté
-# habilitado— despliega a Cloudflare solo si pasaron.
+# Corre las 12 suites de Playwright en cada push y en cada PR.
 #
-# ESTADO: el despliegue está PREPARADO PERO INACTIVO. Falta un paso manual que
-# no se puede hacer desde acá; está explicado en el job `deploy` de abajo y en
-# CLAUDE.md ("Desplegar desde el CI"). Mientras falte, el job avisa y termina
-# en verde sin desplegar, así que este archivo es seguro de mergear tal cual.
+# CÓMO ENCAJA ESTO CON EL DESPLIEGUE (importante, es contraintuitivo):
+# este workflow NO despliega. El Worker de Cloudflare está conectado al repo y
+# despliega solo al recibir un push a `main`. Lo que hace que a producción
+# llegue solo código probado NO es un paso de este archivo, sino la regla de
+# protección de `main`: exige que el check `playwright` esté en verde antes de
+# poder mergear un PR, y no deja pushear directo. O sea que `main` solo recibe
+# código que ya pasó por acá, y Cloudflare despliega desde `main` tranquilo.
+#
+# Hubo una versión de este archivo con un job `deploy` que corría
+# `wrangler deploy` con un CLOUDFLARE_API_TOKEN, para lo mismo. Se sacó: con
+# `main` protegido es redundante, y tener dos mecanismos de despliegue confunde
+# sobre cuál manda. Está en el historial de git si alguna vez hace falta (ver
+# "Cómo llega el código a producción" en CLAUDE.md).
 
 on:
   push:
@@ -15,8 +23,9 @@ on:
 concurrency:
   group: tests-${{ github.ref }}
   # En ramas, un push nuevo cancela la corrida anterior: no tiene sentido
-  # gastar minutos en un commit viejo. En `main` NO se cancela, porque ahí
-  # puede haber un despliegue a medio camino.
+  # gastar minutos en un commit que ya quedó viejo. En `main` NO se cancela:
+  # esa corrida es el registro de que lo que está desplegado pasó los tests, y
+  # cancelarla deja el commit sin veredicto.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -77,87 +86,3 @@ jobs:
           path: tests/*.png
           if-no-files-found: ignore
           retention-days: 7
-
-  # ---------------------------------------------------------------------------
-  # Despliegue condicionado a que los tests pasen
-  # ---------------------------------------------------------------------------
-  # POR QUÉ EXISTE: hoy el Worker está conectado al repo por la integración de
-  # git de Cloudflare, que despliega al recibir el push, EN PARALELO con los
-  # tests. O sea que una regresión llega a producción igual y el CI solo avisa
-  # después. `needs: playwright` invierte eso: acá no se despliega nada si las
-  # suites fallaron.
-  #
-  # PARA ACTIVARLO HACEN FALTA DOS COSAS, Y EL ORDEN IMPORTA:
-  #
-  #   1. Cargar el secret `CLOUDFLARE_API_TOKEN` en
-  #      Settings → Secrets and variables → Actions → New repository secret.
-  #      El token se crea en el panel de Cloudflare (My Profile → API Tokens)
-  #      con la plantilla "Edit Cloudflare Workers".
-  #      Si el token abarca más de una cuenta, agregar también el secret
-  #      `CLOUDFLARE_ACCOUNT_ID` (Workers & Pages → columna derecha).
-  #
-  #   2. DESCONECTAR la integración de git en Cloudflare
-  #      (Workers & Pages → amet-radar → Settings → Build → desconectar el
-  #      repositorio). SI NO SE HACE, cada push despliega DOS VECES: una por
-  #      Cloudflare al recibir el push —sin esperar los tests, que es
-  #      justamente lo que se quiere evitar— y otra desde acá.
-  #
-  # Mientras falte el secret, este job no falla: avisa y termina. Así el
-  # archivo se puede mergear sin romper nada y sin dejar el CI en rojo.
-  deploy:
-    needs: playwright
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      # El contexto `secrets` no se puede usar en el `if` de un job, así que
-      # la comprobación se hace acá y se expone como output.
-      - name: ¿Está configurado el token?
-        id: gate
-        env:
-          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "listo=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Despliegue desde el CI inactivo::Falta el secret CLOUDFLARE_API_TOKEN. Hasta que se cargue (y se desconecte la integración de git en Cloudflare), sigue desplegando Cloudflare al recibir el push, sin esperar a los tests. Ver los comentarios de .github/workflows/tests.yml."
-          else
-            echo "listo=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Desplegar a Cloudflare Workers
-        if: steps.gate.outputs.listo == 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        # Pineada por la misma razón que Playwright: que una release de
-        # wrangler no cambie el comportamiento del despliegue sin aviso.
-        run: npx --yes wrangler@4.118.0 deploy
-
-      - name: Confirmar que producción quedó en la versión de este commit
-        if: steps.gate.outputs.listo == 'true'
-        run: |
-          # El despliegue tarda unos segundos en propagarse. Se compara
-          # APP_VERSION del HTML servido contra el del repo: si no coinciden,
-          # el push salió pero producción quedó atrás, y eso hay que verlo en
-          # rojo y no descubrirlo desde el teléfono.
-          esperada=$(grep -o "APP_VERSION = '[^']*'" amet-radar.html | head -1 | cut -d"'" -f2)
-          echo "esperada: $esperada"
-          for i in $(seq 1 20); do
-            servida=$(curl -s -m 15 "https://amet-radar.lavega.workers.dev/?cb=$RANDOM" \
-                      | grep -o "APP_VERSION = '[^']*'" | head -1 | cut -d"'" -f2)
-            echo "intento $i: $servida"
-            if [ "$servida" = "$esperada" ]; then
-              echo "::notice title=Desplegado::Producción sirviendo $esperada"
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "::error title=El despliegue no se reflejó::Producción sigue en '$servida' y se esperaba '$esperada'"
-          exit 1

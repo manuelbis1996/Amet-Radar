@@ -154,16 +154,19 @@ PR. El workflow manda el dominio de Supabase a 127.0.0.1 por `/etc/hosts`,
 para que un hueco de mocking falle ruidoso en vez de tocar producción desde
 CI.
 
-**🟡 El CI no frena un despliegue malo — código listo, faltan 2 pasos manuales**
-El job `deploy` ya está escrito y mergeado, con `needs: playwright`, y se
-queda inactivo (en verde, con un aviso) mientras falte el secret. Para
-activarlo: cargar `CLOUDFLARE_API_TOKEN` en los secrets del repo **y**
-desconectar la integración de git en Cloudflare — si se hace solo lo primero,
-cada push despliega dos veces. Detalle en "Desplegar desde el CI" en
-`CLAUDE.md`.
-- Esfuerzo: dos clics en dos paneles. El riesgo no es técnico sino operativo:
-  si el token vence o el workflow se rompe, deja de haber despliegue hasta
-  arreglarlo.
+**🟡 Que a `main` solo llegue código probado — falta un clic**
+El CI ya corre en cada push y cada PR, pero **no frena nada por sí solo**:
+Cloudflare despliega al recibir el push a `main`. El cierre es una **regla de
+protección sobre `main`** que exija el check `playwright` antes de mergear —
+un solo paso en Settings → Rules, sin token ni infraestructura nueva. Los
+valores exactos (y el error clásico de poner `Tests` en vez de `playwright`)
+están en "Cómo llega el código a producción" en `CLAUDE.md`.
+
+Se evaluaron y descartaron dos alternativas: desplegar con `wrangler` desde el
+workflow (redundante con `main` protegido, agrega un token que puede vencer y
+duplica el mecanismo de despliegue) y una rama `release` intermedia (no
+necesita token, pero agrega una rama para resolver lo mismo).
+- Esfuerzo: un clic. **Es lo de mayor prioridad que queda.**
 
 **🟡 Las suites no ven la base, y eso ya costó caro**
 Mockean la red y nunca llegan a Postgres: verde ahí no dice nada sobre RLS,
@@ -186,9 +189,8 @@ silencio del modelo real en Supabase.
 
 1. ~~CI que corra las suites en cada push~~ ✅ hecho
 2. ~~Cerrar `push_subscriptions`~~ ✅ hecho
-3. **Activar el despliegue desde el CI** — el código ya está; faltan el token
-   y desconectar la integración de git de Cloudflare. **Es lo de mayor
-   prioridad que queda, y son dos clics.**
+3. **Proteger `main`** — que exija el check `playwright` antes de mergear.
+   **Es lo de mayor prioridad que queda, y es un clic.**
 4. **Automatizar algunos chequeos contra la base real** — es donde
    históricamente aparecen los bugs.
 5. **Realtime**, cuando el egreso vuelva a ser el problema.

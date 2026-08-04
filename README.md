@@ -9,8 +9,13 @@ build step y sin dependencias.
 
 **https://amet-radar.lavega.workers.dev** — Cloudflare Workers, con HTTPS
 (necesario para la geolocalización en el celular) y sin depender de que
-ninguna PC esté prendida: los reportes viven en Supabase. Un push a `main`
-redespliega solo.
+ninguna PC esté prendida: los reportes viven en Supabase.
+
+**Cómo se publica**: el trabajo va en una rama, se abre un PR, y `main` no
+acepta el merge hasta que los tests estén en verde. Al mergear, Cloudflare
+despliega solo. O sea que a producción solo llega código probado, y el gate
+es la regla de protección de `main` — no un paso del CI. Detalle en
+[CLAUDE.md](CLAUDE.md), "Cómo llega el código a producción".
 
 El resto de este README es para correr el proyecto en local.
 
@@ -54,13 +59,6 @@ En cada push y cada PR las corre GitHub Actions
 ([.github/workflows/tests.yml](.github/workflows/tests.yml)), junto con un
 `wrangler deploy --dry-run` que valida la configuración de despliegue sin
 necesitar credenciales.
-
-**Ojo con lo que hoy no hace**: Cloudflare despliega en paralelo al recibir el
-push, así que el CI avisa de una regresión pero todavía no la frena. El
-workflow ya trae el despliegue condicionado a que los tests pasen, pero está
-inactivo hasta cargar el token y desconectar la integración de git de
-Cloudflare — los dos pasos están en
-[CLAUDE.md](CLAUDE.md), sección "Desplegar desde el CI".
 
 **Verde ahí no alcanza.** Las suites mockean la red y nunca llegan a Postgres,
 así que no dicen nada sobre RLS, funciones de la base ni triggers — que es por
@@ -135,7 +133,7 @@ cualquiera encuentre la pantalla de moderación.
 | `supabase/migrations/` | Historial del esquema de la base |
 | `supabase/functions/` | Edge Functions (push, panel admin, borrado de fotos) |
 | `tests/` | Las 12 suites de Playwright |
-| `.github/workflows/` | CI: corre las suites en cada push y PR |
+| `.github/` | CI (corre las suites en cada push y PR) y plantilla de PR |
 
 ## Más detalle
 
