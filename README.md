@@ -94,7 +94,8 @@ Los reportes se autoexpiran, así que el mapa siempre muestra cosas recientes.
 - **Confirmar o desmentir** desde la hoja de detalle de cada reporte; con
   suficientes negaciones se retira solo. Tu voto queda visible.
 - **Notificaciones push por cercanía** (campana del header): avisan aunque la
-  app esté cerrada cuando alguien publica cerca de tu última posición.
+  app esté cerrada cuando alguien publica cerca de tu última posición. El
+  radio se ajusta desde el panel admin, sin tocar código.
 - **Mapa** MapLibre GL + OpenFreeMap (tiles vectoriales, sin API key),
   limitado a República Dominicana y centrado en La Vega al abrir. Botón de
   ubicación con modo "seguir", que se desactiva solo al arrastrar el mapa.
@@ -114,7 +115,8 @@ Los reportes se autoexpiran, así que el mapa siempre muestra cosas recientes.
 
 `admin.html` — ver todos los reportes y borrar cualquiera, estadísticas,
 editar en caliente los parámetros del sistema (cuánto dura un reporte, cuántas
-negaciones lo retiran, el límite local de reportes) y **publicar un reporte en
+negaciones lo retiran, el límite local de reportes, el radio de las
+notificaciones push) y **publicar un reporte en
 cualquier punto del mapa sin estar cerca**, eligiendo entre las cuatro
 categorías. Sin backend propio: le pega a Supabase igual que la app, con el
 borrado y la edición detrás de un password validado por un Edge Function.

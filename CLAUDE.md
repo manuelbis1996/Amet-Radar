@@ -243,8 +243,8 @@ reusando `openReportById` — la misma función que usa el deep link `?r=`).
   porque si no PostgREST la expone como RPC pública (linter de seguridad lo
   marca).
 - **Edge Function `notify-nearby`**: recibe el webhook, calcula un bounding
-  box desde `lat/lng` del reporte (radio **2 km**, constante
-  `RADIUS_METERS` en el archivo — conversión grados↔metros con
+  box desde `lat/lng` del reporte (radio configurable, ver "Radio de las
+  notificaciones push" abajo — conversión grados↔metros con
   `cos(latitud)`, no es simétrica), refina con Haversine, arma
   `title`/`body` con un mapa propio de las 4 categorías (el service worker
   no tiene acceso a `CATEGORIES`, vive en otro scope), manda el push con
@@ -291,6 +291,53 @@ reusando `openReportById` — la misma función que usa el deep link `?r=`).
   `subscribeToPush()` exitoso, se restaura la preferencia guardada
   (`updatePushCategories`) en vez de asumir "primera vez" — la hoja de
   onboarding solo se muestra si `localStorage` nunca tuvo la clave.
+
+### Radio de las notificaciones push (v14.5) — configurable desde el panel
+
+Era el **único número del sistema que no se podía tocar sin editar código y
+redesplegar una función**: `RADIUS_METERS = 2000` vivía dentro de
+`notify-nearby`. Y es un número de producto, no de seguridad — cuánto de
+lejos avisar depende del tamaño de la ciudad y de cuánto ruido tolere la
+gente, o sea que se ajusta probando, no en un commit. Ahora sale de
+`app_config.push_radius_meters` y se edita desde el panel admin. Migración:
+`20260804150000_push_radius_config.sql`.
+
+**Por qué es seguro leerlo de `app_config`, dado el antecedente.** La lección
+de "app_config también borraba" fue que una función que lee su umbral de una
+tabla escribible por cualquiera es tan insegura como esa tabla. Acá no aplica,
+por dos razones independientes: `app_config` ya **no tiene política de
+UPDATE** desde v12.0 (solo se edita por `admin-update-config`, que valida
+rangos), y sobre todo **este parámetro no decide ningún borrado** — el peor
+caso de un valor absurdo es avisar de más o de menos, no se pierde nada. Por
+eso el rango permitido (100 m a 50 km) puede ser generoso sin riesgo.
+
+**Tres capas de validación, a propósito**: el `max`/`min` del input en
+`admin.html` (comodidad), el rango en `admin-update-config` (da un mensaje
+entendible en vez de un error de Postgres), y el `check` de la columna
+(`app_config_push_radius_range`) como última red, para el día que alguien
+edite la fila por fuera del endpoint con la `service_role` key. En
+`notify-nearby` además se **clampea** al leer: un radio absurdo agrandaría
+el bounding box hasta barrer la tabla de suscripciones entera en cada reporte.
+
+**Si la lectura falla, se avisa igual con 2000 m** (`RADIUS_FALLBACK_METERS`),
+no se corta la notificación. Un push que no sale no se recupera después, y es
+justo lo que hace útil a la app cuando está cerrada.
+
+**El campo es `opcional` en `admin-update-config`.** El bucle de validación
+respondía 400 ante cualquier campo faltante; con el campo nuevo obligatorio,
+desplegar la función antes que el `admin.html` que lo manda **rompería el
+guardado de todos los parámetros** hasta que saliera el frontend. Es el mismo
+orden de despliegue que ya mordió en v14.0. Si falta, se deja el valor que ya
+está en la tabla.
+
+**Verificado contra producción, no solo con mocks**: se probó
+`notify-nearby` con un reporte falso en coordenadas remotas del suroeste de RD
+(ninguna suscripción cerca, o sea **sin mandar ningún push real**), se cambió
+`push_radius_meters` a 3500 en la base y se volvió a probar. La función
+respondió `radius: 2000` y después `radius: 3500` sin redesplegar nada — o sea
+que lo lee en vivo. Para eso el campo `radius` va en la respuesta: es la única
+forma de distinguir "tomó el valor nuevo" de "cayó al de por defecto". El
+`check` de la columna se comprobó rechazando un `update` a 10 (`23514`).
 
 ## Preview dinámico por reporte (Cloudflare Worker)
 Cuando se comparte el link de un reporte puntual (`?r=<id>`) por WhatsApp,
@@ -344,7 +391,9 @@ por medio.
 - **Tabla `public.app_config`**: fila única (`id boolean primary key
   default true` + `check (id)`, truco de "singleton" para que la PK
   impida una segunda fila) con `stale_minutes`, `max_age_minutes`,
-  `deny_threshold`, `report_limit`, `report_window_min`. **Solo el `select`
+  `deny_threshold`, `report_limit`, `report_window_min` y
+  `push_radius_meters` (este último lo lee `notify-nearby`, no el cliente —
+  ver "Radio de las notificaciones push"). **Solo el `select`
   está abierto**; el `update` de `anon` se cerró (ver "app_config también
   borraba" abajo) y la edición pasa por el Edge Function
   `admin-update-config`. `amet-radar.html` la lee al arrancar
@@ -421,8 +470,9 @@ por medio.
     dibuja mal. Por eso `initAdminMap()` se llama desde `loadDashboard()` y
     hace un `resize()` diferido.
   - **Publicar desde acá manda notificaciones push reales** a los suscriptos
-    a menos de 2 km — el trigger es el mismo `AFTER INSERT`. La tarjeta lo
-    avisa en pantalla; no es una zona de pruebas.
+    dentro del radio configurado (`push_radius_meters`, editable en la misma
+    página) — el trigger es el mismo `AFTER INSERT`. La tarjeta lo avisa en
+    pantalla; no es una zona de pruebas.
   - **`admin.html` no está en el app shell de `sw.js`**, así que tocarlo no
     exige subir `APP_VERSION`/`CACHE_NAME`.
 - **El pin aparece solo cuando elegís un punto** (v14.4): antes el mapa
@@ -1405,6 +1455,9 @@ ordena alfabéticamente bien):
 16. `20260803180000_lock_down_push_subscriptions.sql` — quita las tres
     políticas abiertas de `push_subscriptions`. **Va después de desplegar el
     cliente nuevo**, igual que la #13 (ver "Cerrar push_subscriptions").
+17. `20260804150000_push_radius_config.sql` — columna `push_radius_meters` en
+    `app_config`, con su `check` de rango (ver "Radio de las notificaciones
+    push"). Aditiva y con default, así que no rompe nada por sí sola.
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
