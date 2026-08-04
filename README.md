@@ -48,7 +48,7 @@ Lo más rápido es un túnel, `npx localtunnel --port 8000`.
 ## Pruebas
 
 ```bash
-node tests/run.js                 # las 12 suites
+node tests/run.js                 # las 13 suites
 node tests/run.js seguridad area  # solo las que coincidan
 ```
 
@@ -112,11 +112,16 @@ Los reportes se autoexpiran, así que el mapa siempre muestra cosas recientes.
 
 ## Panel de administración
 
-`admin.html` — ver todos los reportes y borrar cualquiera, estadísticas, y
+`admin.html` — ver todos los reportes y borrar cualquiera, estadísticas,
 editar en caliente los parámetros del sistema (cuánto dura un reporte, cuántas
-negaciones lo retiran, el límite local de reportes) sin tocar código. Sin
-backend propio: le pega a Supabase igual que la app, con el borrado y la
-edición detrás de un password validado por un Edge Function.
+negaciones lo retiran, el límite local de reportes) y **publicar un reporte en
+cualquier punto del mapa sin estar cerca**, eligiendo entre las cuatro
+categorías. Sin backend propio: le pega a Supabase igual que la app, con el
+borrado y la edición detrás de un password validado por un Edge Function.
+
+Publicar desde el panel usa la misma RPC pública que la app, así que le
+aplican las mismas reglas anti-spam — y **manda notificaciones push reales**
+a quien esté suscrito cerca.
 
 Es un **gate de conveniencia**, no una barrera de seguridad: sirve para que no
 cualquiera encuentre la pantalla de moderación.
@@ -132,7 +137,7 @@ cualquiera encuentre la pantalla de moderación.
 | `sw.js`, `manifest.json`, `icon-*.png` | PWA |
 | `supabase/migrations/` | Historial del esquema de la base |
 | `supabase/functions/` | Edge Functions (push, panel admin, borrado de fotos) |
-| `tests/` | Las 12 suites de Playwright |
+| `tests/` | Las 13 suites de Playwright |
 | `.github/` | CI (corre las suites en cada push y PR) y plantilla de PR |
 
 ## Más detalle

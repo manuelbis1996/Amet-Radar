@@ -138,7 +138,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 12 suites de Playwright, versionadas en el repo. **Leer
+- `tests/` — las 13 suites de Playwright, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -378,6 +378,36 @@ por medio.
   que ya se describe como "gate de conveniencia" era desproporcionado. Si
   el endpoint responde 401 (el password cambió con la pestaña abierta), el
   panel limpia la sesión y vuelve al login.
+- **Publicar un reporte desde el panel, en cualquier punto** (v14.3): tarjeta
+  "Publicar reporte" con un mapa MapLibre y un pin arrastrable, selector de
+  categoría y checkbox de zona aproximada. Sirve para sembrar el mapa al
+  lanzar o para cargar un retén que te avisaron por teléfono, **sin estar
+  cerca**.
+  - **No hay endpoint nuevo ni permiso especial**: usa la misma
+    `rpc/create_report` que la app. Se puede porque `create_report` **nunca
+    compara `lat`/`lng` contra la ubicación de quien llama** — solo valida que
+    caigan dentro de RD. El permiso ya existía desde v14.0; lo único que
+    faltaba era la interfaz.
+  - **Se decidió NO darle al admin una vía que saltee el anti-spam.** Habría
+    que exponer otro endpoint con la `service_role` key, o sea superficie de
+    ataque nueva, para resolver algo que no molesta: el dedupe (150 m/30 min/
+    misma categoría) es justamente lo que uno querría que frene también acá, y
+    el tope por IP es de 30/hora. Si el servidor rechaza, el panel muestra el
+    motivo exacto en vez de un error genérico.
+  - **El panel ofrece las 4 categorías**, no solo `reten_fijo` como la app.
+    Es la razón de peso para que `CATEGORIES` conserve las cuatro.
+  - **Sin `owner_hash`**: el "borrar el mío" del cliente no aplica: estos
+    reportes se borran desde la tabla del propio panel, que usa el endpoint de
+    admin y puede borrar cualquiera.
+  - **El mapa se crea recién al entrar al panel**, no al cargar la página:
+    mientras el dashboard está `hidden` el contenedor mide 0x0 y MapLibre se
+    dibuja mal. Por eso `initAdminMap()` se llama desde `loadDashboard()` y
+    hace un `resize()` diferido.
+  - **Publicar desde acá manda notificaciones push reales** a los suscriptos
+    a menos de 2 km — el trigger es el mismo `AFTER INSERT`. La tarjeta lo
+    avisa en pantalla; no es una zona de pruebas.
+  - **`admin.html` no está en el app shell de `sw.js`**, así que tocarlo no
+    exige subir `APP_VERSION`/`CACHE_NAME`.
 - **Por qué no quedó en Netlify Functions + Blobs**: la primera versión de
   este panel (antes de este commit) se construyó sobre un backend propio en
   Netlify Functions con Netlify Blobs como reemplazo de un `data/*.json` —

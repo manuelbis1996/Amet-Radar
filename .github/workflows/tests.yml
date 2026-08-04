@@ -1,6 +1,6 @@
 name: Tests
 
-# Corre las 12 suites de Playwright en cada push y en cada PR.
+# Corre las 13 suites de Playwright en cada push y en cada PR.
 #
 # CÓMO ENCAJA ESTO CON EL DESPLIEGUE (importante, es contraintuitivo):
 # este workflow NO despliega. El Worker de Cloudflare está conectado al repo y

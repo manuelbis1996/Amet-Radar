@@ -44,7 +44,7 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 - **Panel de administración** (`admin.html`), con el borrado y la edición de
   parámetros detrás de Edge Functions con password.
 - **PWA instalable**; mapa limitado a República Dominicana.
-- **12 suites de Playwright** versionadas en `tests/`.
+- **13 suites de Playwright** versionadas en `tests/`.
 
 ---
 
@@ -146,7 +146,8 @@ vuelve a importar si ese flujo se reactiva.
 ## 5. Calidad y DX
 
 **✅ Cero tests — resuelto**
-12 suites de Playwright versionadas en `tests/`, con `node tests/run.js`.
+13 suites de Playwright versionadas en `tests/`, con `node tests/run.js` —
+incluida `check-admin-publicar.js`, la primera que cubre `admin.html`.
 
 **✅ Cero CI — resuelto**
 `.github/workflows/tests.yml` corre `node tests/run.js` en cada push y cada
