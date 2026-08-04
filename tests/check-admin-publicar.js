@@ -27,6 +27,16 @@ const check = (n, c, extra='') => {
 const CONFIG = [{ stale_minutes:45, max_age_minutes:120, deny_threshold:3,
                   report_limit:5, report_window_min:60 }];
 
+const ahora = Date.now();
+// Dos reportes ya existentes: uno exacto y uno de zona aproximada, de
+// categorías distintas, para comprobar que el panel los dibuja en el mapa.
+const REPORTES = [
+  { id:'r-uno', lat:19.2230, lng:-70.5300, photo:null, note:'', ts: ahora-5*60000,
+    category:'reten_fijo', confirms:1, denies:0, approx:false },
+  { id:'r-dos', lat:19.2400, lng:-70.5100, photo:null, note:'', ts: ahora-9*60000,
+    category:'accidente', confirms:0, denies:0, approx:true },
+];
+
 async function abrirPanel(browser, opciones = {}) {
   const ctx = await browser.newContext({ viewport:{ width:1100, height:900 } });
   const page = await ctx.newPage();
@@ -44,7 +54,8 @@ async function abrirPanel(browser, opciones = {}) {
   await page.route('**/rest/v1/app_config*', r =>
     r.fulfill({ contentType:'application/json', body: JSON.stringify(CONFIG) }));
   await page.route('**/rest/v1/reports*', r =>
-    r.fulfill({ contentType:'application/json', body:'[]' }));
+    r.fulfill({ contentType:'application/json',
+      body: JSON.stringify(opciones.reportes === undefined ? REPORTES : opciones.reportes) }));
   // El login del panel pasa por un Edge Function; acá se acepta siempre.
   await page.route('**/functions/v1/admin-login', r =>
     r.fulfill({ status:200, contentType:'application/json', body:'{"ok":true}' }));
@@ -103,6 +114,38 @@ async function abrirPanel(browser, opciones = {}) {
     await ctx.close();
   }
 
+  // ---- 1.bis Los reportes existentes se dibujan en el mapa del panel ----
+  // Antes solo estaban en la tabla: el mapa mostraba únicamente el pin de
+  // "dónde voy a publicar", así que no se veía lo que ya había ni lo recién
+  // publicado, y era fácil poner un duplicado encima de otro.
+  {
+    const { ctx, page, rpcs } = await abrirPanel(browser);
+
+    const puntos = await page.$$eval('.rep-dot', els => els.map(e => ({
+      cls: e.className, bg: e.style.background, title: e.title
+    })));
+    check('los reportes existentes aparecen como marcadores en el mapa',
+      puntos.length === 2, 'marcadores=' + puntos.length);
+    check('el de zona aproximada se distingue del exacto',
+      puntos.filter(p => /approx/.test(p.cls)).length === 1,
+      JSON.stringify(puntos.map(p => p.cls)));
+    check('cada marcador dice qué es y de cuándo',
+      puntos.every(p => /·/.test(p.title)), JSON.stringify(puntos.map(p => p.title)));
+
+    // Publicar redibuja el mapa: el reporte nuevo tiene que aparecer.
+    await page.route('**/rest/v1/reports*', r =>
+      r.fulfill({ contentType:'application/json',
+        body: JSON.stringify(REPORTES.concat([{ id:'r-nuevo', lat:19.2600, lng:-70.5000,
+          photo:null, note:'', ts: Date.now(), category:'control', confirms:0, denies:0, approx:false }])) }));
+    await page.click('#publish-btn');
+    await page.waitForTimeout(700);
+    check('tras publicar, el reporte nuevo se dibuja sin recargar la página',
+      (await page.$$eval('.rep-dot', e => e.length)) === 3,
+      'marcadores=' + (await page.$$eval('.rep-dot', e => e.length)));
+    check('y se publicó de verdad', rpcs.length === 1);
+    await ctx.close();
+  }
+
   // ---- 2. Rechazo del servidor: se muestra el motivo, no un éxito falso ----
   {
     const { ctx, page } = await abrirPanel(browser, {
@@ -142,6 +185,8 @@ async function abrirPanel(browser, opciones = {}) {
       (await page.inputValue('#cfg-maxage')) === '120', await page.inputValue('#cfg-maxage'));
     check('sin mapa, la tabla de reportes igual se dibuja',
       !!(await page.$('#reports-tbody tr')));
+    check('sin mapa, no se intenta dibujar marcadores (no revienta)',
+      (await page.$$eval('.rep-dot', e => e.length)) === 0);
     const avisoVisible = await page.$eval('#map-fallback', el => !el.hidden);
     check('se avisa que el mapa no cargó, en vez de dejar una caja muda', avisoVisible);
 

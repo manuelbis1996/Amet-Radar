@@ -78,10 +78,32 @@
   Marker.prototype.getLngLat = function(){ return this._lngLat; };
   Marker.prototype.addTo = function(map){
     this._map = map;
-    const host = document.getElementById('map');
+    // El contenedor sale del mapa al que se agrega, no de un id fijo: la app
+    // usa #map pero el panel admin usa #admin-map, y con el id hardcodeado
+    // los marcadores del panel no llegaban nunca al DOM.
+    const host = (map && map.getContainer && map.getContainer()) || document.getElementById('map');
     if(this._el && host) host.appendChild(this._el);
     return this;
   };
+  // El Marker real de MapLibre es Evented (dragend, drag, dragstart). La app
+  // no lo usa —lee getLngLat() al confirmar— pero el panel admin sí engancha
+  // 'dragend', y sin esto initAdminMap tiraba "pinMarker.on is not a
+  // function" y el mapa del panel no se creaba nunca en las pruebas.
+  Marker.prototype.on = function(name, fn){
+    (this._ev = this._ev || {})[name] = (this._ev[name] || []).concat(fn);
+    return this;
+  };
+  Marker.prototype.off = function(name, fn){
+    if(this._ev && this._ev[name]) this._ev[name] = this._ev[name].filter(f => f !== fn);
+    return this;
+  };
+  // Para que un test pueda simular que el usuario arrastró el pin.
+  Marker.prototype.fire = function(name, arg){
+    ((this._ev && this._ev[name]) || []).slice().forEach(fn => fn(arg));
+    return this;
+  };
+  Marker.prototype.setDraggable = function(v){ this._draggable = !!v; return this; };
+
   Marker.prototype.remove = function(){
     this._removed = true;
     if(this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
