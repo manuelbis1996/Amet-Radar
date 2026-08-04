@@ -185,6 +185,17 @@
   }
   .amet-pin.stale .badge{ filter:grayscale(1); opacity:.7; }
   .amet-pin.pending .badge{ opacity:.6; border-style:dashed; }
+  /* Cámara chiquita sobre el pin: distingue de un vistazo el reporte que
+     tiene evidencia real del que es solo un aviso. El .badge es position
+     relative para poder colgarla de la esquina. */
+  .amet-pin .badge{ position:relative; }
+  .amet-pin .pin-cam{
+    position:absolute; right:-5px; bottom:-4px;
+    width:17px; height:17px; border-radius:50%;
+    background:var(--surface); border:1.5px solid var(--surface);
+    font-size:9px; font-style:normal; line-height:14px; text-align:center;
+    box-shadow:0 1px 3px rgba(0,0,0,.3);
+  }
 
   /* Zona aproximada de un reporte rápido (approx:true). Antes era un
      L.circle de Leaflet (SVG con radio en metros); MapLibre no tiene un
@@ -194,8 +205,15 @@
     border-radius:50%; box-sizing:border-box;
     border:2px dashed var(--approx-color, #f59e0b);
     background:var(--approx-fill, rgba(245,158,11,.18));
+    /* Para colgar la cámara del centro: el círculo cambia de tamaño con el
+       zoom (sizeApproxCircle), así que la marca se centra en vez de anclarse
+       a un borde que se mueve. */
+    position:relative;
   }
   .amet-approx.pending{ border-style:dotted; }
+  .amet-approx .pin-cam{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  }
 
   .me-marker{ width:22px; height:22px; }
   .me-dot{
@@ -317,6 +335,16 @@
     display:inline-flex; align-items:center; justify-content:center; gap:7px;
   }
   .mini-btn.primary svg{ width:16px; height:16px; flex-shrink:0; }
+
+  /* Denunciar una foto va como enlace discreto y no como botón: es una
+     acción rara y destructiva para el reporte de otro, no algo que haya que
+     invitar a tocar. Igual respeta el mínimo de 44px de alto táctil. */
+  .link-btn{
+    display:block; width:100%; min-height:var(--tap); margin-top:4px;
+    background:none; border:0; color:var(--muted); font-size:12.5px;
+    text-decoration:underline; cursor:pointer;
+  }
+  .link-btn:disabled{ text-decoration:none; opacity:.55; cursor:default; }
 
   /* ---- Estado vacío (ningún reporte en la zona visible) ---- */
   /* Sin esto el usuario ve un mapa mudo y no sabe si la app falló, si no
@@ -497,7 +525,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v14.2';
+  const APP_VERSION = 'v15.0';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -572,6 +600,11 @@
   // pública y con RLS abierta cualquiera podía vaciar la tabla. Ver la
   // migración 20260801120000_lock_down_writes.sql.
   const RPC_URL = `${SUPABASE_URL}/rest/v1/rpc`;
+  // Adjuntar una foto tampoco va directo a Storage: el bucket no tiene
+  // ninguna política (v14.1) y NO se reabrió al volver las fotos. La subida
+  // pasa por este Edge Function, que valida la propiedad con el token y
+  // escribe con la service_role key. Ver "Fotos opcionales" en CLAUDE.md.
+  const ATTACH_PHOTO_URL = `${SUPABASE_URL}/functions/v1/attach-photo`;
   const SUPABASE_HEADERS = {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -619,7 +652,7 @@
   // valida con el token de localStorage, el hash solo viaja al publicar) y
   // entre los dos eran ~125 de los ~408 bytes de cada fila. Si se agrega una
   // columna que el cliente necesite, hay que sumarla acá.
-  const REPORT_FIELDS = 'id,lat,lng,photo,note,ts,category,confirms,denies,approx';
+  const REPORT_FIELDS = 'id,lat,lng,photo,note,ts,category,confirms,denies,approx,photo_flags';
 
   // Margen sobre el área visible: se piden reportes un poco más allá del
   // borde para que ya estén dibujados justo antes de entrar en pantalla.
@@ -713,6 +746,45 @@
   // lado de la base, junto con la fila. anon perdió el delete sobre el
   // bucket en la migración 20260801120000 — si no, cualquiera con la anon
   // key (que es pública) podía vaciar el bucket entero.
+
+  // ---- Foto opcional, adjunta DESPUÉS de publicar --------------------------
+  //
+  // El orden es la decisión de diseño central, no un detalle: reportar es UN
+  // toque y la gente lo hace manejando. Cualquier paso antes de publicar
+  // retrasa el aviso a los demás justo cuando más urge, y encima empuja a
+  // sacar una foto en movimiento. Publicando primero, el reporte ya sirve
+  // desde el segundo cero y la foto se agrega cuando se puede — en el
+  // semáforo, o parado dos cuadras después.
+  //
+  // Efecto lateral que vale la pena: `create_report` no se tocó (sigue
+  // rechazando fotos) y el bucket sigue sin políticas. Ver CLAUDE.md.
+  async function attachPhotoRemote(id, dataUrl){
+    const token = getTokens()[id];
+    // Sin token no hay forma de demostrar que es suyo. Pasa con los reportes
+    // publicados antes de v12.0 y con los de otro dispositivo.
+    if(!token) return { ok:false, reason:'no_token' };
+    let res;
+    try{
+      res = await fetch(ATTACH_PHOTO_URL, {
+        method: 'POST',
+        headers: SUPABASE_HEADERS,
+        body: JSON.stringify({ id, token, photo: dataUrl })
+      });
+    }catch(e){
+      // A diferencia de publicar, esto NO se encola: la foto es opcional y
+      // el reporte ya está publicado. Reintentarlo a mano es más simple que
+      // arrastrar imágenes en localStorage esperando red.
+      return { ok:false, reason:'network' };
+    }
+    let data = {};
+    try{ data = await res.json(); }catch(e){}
+    if(res.ok && data.ok) return { ok:true, photo: data.photo };
+    return { ok:false, reason: data.reason || 'error' };
+  }
+
+  const PHOTO_FLAGS_KEY = 'amet_photo_flagged_v1';
+  function getFlagged(){ try{ return new Set(JSON.parse(localStorage.getItem(PHOTO_FLAGS_KEY)||'[]')); }catch(e){ return new Set(); } }
+  function saveFlagged(s){ try{ localStorage.setItem(PHOTO_FLAGS_KEY, JSON.stringify([...s])); }catch(e){} }
 
   // El servidor rechazó el reporte por una regla del anti-spam (no es un
   // problema de red). Se distingue de NetworkError porque acá NO hay que
@@ -1011,14 +1083,20 @@
   // en vez de fabricar un ícono nuevo se repinta el elemento existente.
   // `sig` evita reescribir el innerHTML en cada refresco de 8s cuando nada
   // cambió visualmente — sin eso, cada marcador parpadearía cada 8 segundos.
-  function paintPin(el, ageMinutes, category, pending){
+  // `hasPhoto` va en la firma (dataset.sig) además de dibujarse: sin eso, un
+  // reporte al que se le acaba de adjuntar una foto no repintaría el pin, y
+  // la cámara no aparecería hasta el próximo cambio de estado.
+  function paintPin(el, ageMinutes, category, pending, hasPhoto){
     const cat = CATEGORIES[category] || CATEGORIES.reten_fijo;
     const stale = ageMinutes > CONFIG.staleMinutes;
-    const sig = `${category}|${stale}|${pending}`;
+    const sig = `${category}|${stale}|${pending}|${hasPhoto?1:0}`;
     if(el.dataset.sig === sig) return el;
     el.dataset.sig = sig;
     el.className = `amet-pin${pending?' pending':''}${stale?' stale':''}`;
-    el.innerHTML = `<div class="badge" style="background:${cat.hex}"><span>${cat.emoji}</span></div>`;
+    // La cámara distingue de un vistazo el reporte que tiene evidencia real
+    // del que es solo un aviso — que es justo lo que el mapa no comunicaba
+    // cuando todos los pines eran el mismo emoji.
+    el.innerHTML = `<div class="badge" style="background:${cat.hex}"><span>${cat.emoji}</span>${hasPhoto?'<i class="pin-cam" aria-hidden="true">📷</i>':''}</div>`;
     return el;
   }
 
@@ -1069,6 +1147,13 @@
     const denies = r.denies || 0;
     const yaVoto = getVoted().has(id);
     const miVoto = getVoteDirs()[id] || null;
+    const yaDenuncio = getFlagged().has(id);
+    // Solo el autor puede adjuntar, y solo si todavía no hay foto: el
+    // servidor lo exige igual (`photo is null` en el WHERE de _attach_photo),
+    // acá se oculta el botón para no ofrecer algo que va a fallar. Sin token
+    // guardado tampoco se puede demostrar la propiedad — pasa con reportes de
+    // antes de v12.0.
+    const puedeAdjuntar = mine && !r.photo && !pending && !!getTokens()[id];
     return `
       <div class="grabber"></div>
       <div class="detail-head">
@@ -1095,7 +1180,13 @@
       <div class="mini-actions">
         <button class="mini-btn primary" data-action="share" data-id="${id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>Compartir</button>
         ${mine ? `<button class="mini-btn danger" data-action="delete" data-id="${id}">Eliminar</button>` : ''}
-      </div>`}`;
+      </div>
+      ${puedeAdjuntar ? `
+      <div class="mini-actions">
+        <button class="mini-btn" data-action="add-photo" data-id="${id}">📷 Agregar foto</button>
+      </div>` : ''}
+      ${(r.photo && !mine) ? `
+      <button class="link-btn" data-action="flag-photo" data-id="${id}"${yaDenuncio ? ' disabled' : ''}>${yaDenuncio ? 'Foto denunciada' : 'Denunciar foto'}</button>` : ''}`}`;
   }
 
   function openDetail(id){
@@ -1153,6 +1244,21 @@
     entry.el.classList.toggle('pending', pending);
     entry.el.style.setProperty('--approx-color', color);
     entry.el.style.setProperty('--approx-fill', hexTint(color, 0.18));
+    // La cámara va también en el círculo, no solo en el pin: el reporte de
+    // un toque es approx:true, o sea que es EL tipo más común de la app. Sin
+    // esto, justo el reporte que más gente publica nunca mostraría que tiene
+    // foto.
+    const tieneFoto = !!r.photo;
+    const cam = entry.el.querySelector('.pin-cam');
+    if(tieneFoto && !cam){
+      const i = document.createElement('i');
+      i.className = 'pin-cam';
+      i.setAttribute('aria-hidden', 'true');
+      i.textContent = '📷';
+      entry.el.appendChild(i);
+    } else if(!tieneFoto && cam){
+      cam.remove();
+    }
     sizeApproxCircle(entry);
   }
 
@@ -1168,11 +1274,11 @@
     const entry = markersById[id];
     if(entry){
       entry.marker.setLngLat([r.lng, r.lat]);
-      paintPin(entry.el, ageMinutes, r.category, pending);
+      paintPin(entry.el, ageMinutes, r.category, pending, !!r.photo);
     } else {
       const el = document.createElement('div');
       el.addEventListener('click', () => openDetail(id));
-      paintPin(el, ageMinutes, r.category, pending);
+      paintPin(el, ageMinutes, r.category, pending, !!r.photo);
       markersById[id] = {
         kind: 'pin', el,
         marker: new maplibregl.Marker({ element: el }).setLngLat([r.lng, r.lat]).addTo(map)
@@ -1554,6 +1660,39 @@
     const r = reportsCache[id];
     if(!r) return;
 
+    if(action === 'add-photo'){
+      // Se guarda a quién adjuntarle la foto y se abre la cámara. El
+      // `change` del input decide qué hacer según esta variable: es el mismo
+      // input que usa el flujo con foto de siempre.
+      attachTargetId = id;
+      cameraInput.click();
+      return;
+    }
+
+    if(action === 'flag-photo'){
+      const flagged = getFlagged();
+      if(flagged.has(id)){ showToast('Ya denunciaste esta foto'); return; }
+      // Igual que los votos, el freno de "una por persona" es local: sin
+      // cuentas de usuario no hay nada mejor, y el servidor solo cuenta.
+      flagged.add(id); saveFlagged(flagged);
+      try{
+        const res = await callRpc('flag_photo', { p_id: id });
+        if(res && res.hidden){
+          r.photo = null;
+          upsertMarker(id, r);
+          refreshDetail(id);
+          showToast('Gracias. La foto se quitó.');
+        } else {
+          refreshDetail(id);
+          showToast('Gracias, la revisaremos.');
+        }
+      }catch(err){
+        flagged.delete(id); saveFlagged(flagged);
+        showToast('No se pudo enviar la denuncia.', true);
+      }
+      return;
+    }
+
     if(action === 'confirm' || action === 'deny'){
       const voted = getVoted();
       if(voted.has(id)){ showToast('Ya votaste en este reporte'); return; }
@@ -1753,18 +1892,25 @@
   // En producción ese global no existe, así que esto vale false y no cambia
   // nada; para reactivar el flujo de verdad hay que editar esta línea.
   //
-  // ⚠️ REACTIVARLO ACÁ SOLO NO ALCANZA: publicar con foto va a fallar.
-  // Como ningún flujo podía adjuntar fotos, en v14.1 se cerró la entrada de
-  // contenido del lado del servidor (migración
-  // 20260803150000_close_photo_uploads.sql), porque lo único que podía subir
-  // una imagen era el abuso directo de la API y quedaba pública en el mapa.
-  // Hoy el servidor rechaza toda foto y toda nota. Para volver a tener fotos
-  // hay que, además de esta línea:
-  //   1. devolver la política de insert del bucket `report-photos`;
-  //   2. sacar de `create_report` el rechazo de `p_photo` (y restaurar la
-  //      validación de longitud y de prefijo de URL que tenía);
-  //   3. recién ahí, construir la moderación/denuncia de abuso — que sin
-  //      fotos no hacía falta, pero con fotos sí.
+  // ⚠️ LAS FOTOS YA VOLVIERON, PERO POR OTRA PUERTA (v15.0). No hace falta
+  // reactivar esto para tenerlas: son opcionales y se adjuntan DESPUÉS de
+  // publicar, con `attachPhotoRemote()` -> Edge Function `attach-photo`. Ese
+  // camino no necesita que el bucket tenga políticas ni que `create_report`
+  // acepte fotos, y por eso no reabrió nada de lo que se cerró en v14.1.
+  //
+  // Este flag sigue siendo lo que era: el flujo con la foto ANTES de
+  // publicar, que exige sacarla en el lugar y en el momento. Se dejó
+  // apagado a propósito — la gente reporta manejando, y ese orden retrasa el
+  // aviso a los demás además de empujar a fotografiar en movimiento.
+  //
+  // Si aun así se quisiera reactivar, sigue sin alcanzar con esta línea:
+  //   1. `create_report` sigue rechazando `p_photo` (v14.1), así que hay que
+  //      sacarle ese rechazo y restaurar la validación de longitud y prefijo;
+  //   2. `uploadPhoto()` sube directo al bucket, que NO tiene políticas: o se
+  //      reabre (desaconsejado, era el agujero de v14.1) o se lo reescribe
+  //      para pasar por `attach-photo`, que es lo que ya hace el camino nuevo.
+  // La moderación ya no es un pendiente: existe desde v15.0 (denuncias con
+  // `flag_photo`, ver más abajo).
   // OJO: las suites mockean la red, así que van a seguir en verde aunque el
   // servidor rechace. Esto se prueba contra la base real (tests/README.md).
   const FLUJO_CON_FOTO = window.__ametFlujoConFoto === true;
@@ -2043,6 +2189,37 @@
     });
   }
 
+  // Adjuntar a un reporte ya publicado. NO usa renderSheet: el reporte ya
+  // está en el mapa y el usuario acaba de volver de la cámara, así que
+  // abrirle una hoja modal encima sería ruido. Un toast alcanza.
+  async function adjuntarFotoA(id, file){
+    showToast('Subiendo foto…');
+    let dataUrl;
+    try{
+      dataUrl = await compressImage(file);
+    }catch(err){
+      showToast('No se pudo procesar la imagen.', true);
+      return;
+    }
+    const res = await attachPhotoRemote(id, dataUrl);
+    if(res.ok){
+      const r = reportsCache[id];
+      if(r){
+        r.photo = res.photo;
+        upsertMarker(id, r);
+        refreshDetail(id);
+      }
+      showToast('Foto agregada');
+      return;
+    }
+    const MOTIVO = {
+      no_token: 'Solo puedes agregarle foto a un reporte tuyo.',
+      not_owner: 'Solo puedes agregarle foto a un reporte tuyo.',
+      network: 'Sin conexión. Intenta de nuevo cuando tengas señal.'
+    };
+    showToast(MOTIVO[res.reason] || 'No se pudo agregar la foto.', true);
+  }
+
   function askForPhoto(){
     renderSheet(`
       <h2>Primero la foto</h2>
@@ -2056,10 +2233,20 @@
     document.getElementById('open-camera-btn').addEventListener('click', () => cameraInput.click());
   }
 
+  // Cuando no es null, la próxima foto se ADJUNTA a ese reporte en vez de
+  // arrancar el flujo de publicar. Un solo input para los dos caminos.
+  let attachTargetId = null;
+
   cameraInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     cameraInput.value = '';
     if(!file) return;
+    if(attachTargetId){
+      const id = attachTargetId;
+      attachTargetId = null;
+      await adjuntarFotoA(id, file);
+      return;
+    }
     renderSheet(`
       <h2>Procesando foto</h2>
       <div class="row-center"><div class="radar-sweep small"></div><span style="font-size:13px;color:var(--muted)">Comprimiendo imagen…</span></div>
@@ -2116,11 +2303,23 @@
   function showUndoToast(id){
     const t = document.createElement('div');
     t.className = 'toast toast-action';
-    t.innerHTML = `<span>Reporte publicado</span><button type="button" class="toast-btn">Deshacer</button>`;
+    // La foto también se ofrece acá, no solo en la hoja de detalle. Es la
+    // puerta rápida para quien va de acompañante o ya está detenido; la que
+    // no tiene reloj en contra es la del detalle, porque este toast dura 6s
+    // y nadie debería apurarse por una foto que es opcional.
+    t.innerHTML = `<span>Reporte publicado</span>` +
+      `<button type="button" class="toast-btn" data-toast="foto">📷 Foto</button>` +
+      `<button type="button" class="toast-btn" data-toast="undo">Deshacer</button>`;
     document.getElementById('app').appendChild(t);
     const quitar = () => t.remove();
     const timer = setTimeout(quitar, UNDO_MS);
-    t.querySelector('.toast-btn').addEventListener('click', async () => {
+    t.querySelector('[data-toast="foto"]').addEventListener('click', () => {
+      clearTimeout(timer);
+      quitar();
+      attachTargetId = id;
+      cameraInput.click();
+    });
+    t.querySelector('[data-toast="undo"]').addEventListener('click', async () => {
       clearTimeout(timer);
       quitar();
       removeMarker(id);

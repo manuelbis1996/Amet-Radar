@@ -152,6 +152,14 @@
     transition:background .15s, border-color .15s;
   }
   .row-delete:hover{ background:rgba(255,93,58,.14); border-color:var(--alert); }
+  /* Fila con la foto denunciada: además de ir arriba de todo, se marca, para
+     que se vea que está ahí por eso y no por ser la más reciente. */
+  tr.denunciada td{ background:rgba(255,93,58,.07); }
+  tr.denunciada td:first-child{ box-shadow:inset 3px 0 0 var(--alert); }
+  .flag-tag{
+    display:inline-block; margin-top:4px; font-family:var(--font-mono);
+    font-size:10px; color:var(--alert); white-space:nowrap;
+  }
   .empty-row td{ text-align:center; color:var(--muted-2); padding:26px; }
   .table-wrap{ overflow-x:auto; }
 
@@ -543,16 +551,27 @@
 
   function renderReportsTable(){
     const tbody = document.getElementById('reports-tbody');
-    const rows = [...reportsCache].sort((a, b) => b.ts - a.ts);
+    // Las fotos denunciadas van PRIMERO, no ordenadas por fecha como el
+    // resto. Moderar es la única tarea del panel que corre contra reloj: si
+    // alguien subió algo que no va, está visible en el mapa de todo el mundo
+    // hasta que se saque. Con el orden por antigüedad a secas habría que
+    // buscarla, y una denuncia de hace rato quedaría hundida abajo.
+    const rows = [...reportsCache].sort((a, b) => {
+      const fa = a.photo ? (a.photo_flags || 0) : 0;
+      const fb = b.photo ? (b.photo_flags || 0) : 0;
+      if(fa !== fb) return fb - fa;
+      return b.ts - a.ts;
+    });
     if(rows.length === 0){
       tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No hay reportes activos</td></tr>';
       return;
     }
     tbody.innerHTML = rows.map(r => {
       const cat = CATEGORIES[r.category] || { emoji:'❔', label:r.category, hex:'#8a92a1' };
+      const denuncias = r.photo ? (r.photo_flags || 0) : 0;
       return `
-        <tr data-id="${r.id}">
-          <td>${r.photo ? `<img class="thumb" src="${r.photo}" alt="Foto del reporte">` : ''}</td>
+        <tr data-id="${r.id}"${denuncias ? ' class="denunciada"' : ''}>
+          <td>${r.photo ? `<img class="thumb" src="${r.photo}" alt="Foto del reporte">${denuncias ? `<span class="flag-tag" title="Denuncias de esta foto">⚑ ${denuncias}</span>` : ''}` : ''}</td>
           <td><span class="cat-tag" style="background:${cat.hex}">${cat.emoji} ${cat.label}</span></td>
           <td class="note">${r.note ? escapeHtml(r.note) : '—'}</td>
           <td>${timeAgo(r.ts)}</td>

@@ -49,13 +49,25 @@ const SOLO_LECTURA = process.argv.includes('--solo-lectura');
 // `push_subscriptions` para comprobar que no hay nadie cerca (no hay política
 // de SELECT, y está bien que no la haya), así que la única defensa es elegir
 // un punto donde no pueda haber nadie.
-const SONDA_LAT = 18.49;
-const SONDA_LNG = -71.63;
+// Con jitter, y no es cosmético: el dedupe de `create_report` rechaza otro
+// reporte de la misma categoría a menos de 150 m en 30 minutos. Con un punto
+// fijo, dos corridas seguidas (o una corrida más una prueba a mano) chocan
+// entre sí y la segunda falla entera por `duplicate` sin que haya nada roto.
+// Ya pasó mientras se escribía esto. El recuadro es todo agua del lago.
+const SONDA_LAT = 18.44 + Math.random() * 0.10;
+const SONDA_LNG = -71.70 + Math.random() * 0.14;
 // Y aun así, con guarda: el radio es configurable hasta 50 km desde el panel,
 // y con un valor grande la sonda alcanzaría Neiba o Duvergé. Si está por
 // encima de esto, los chequeos que publican se saltean en vez de arriesgar
 // que a alguien real le suene el teléfono por una prueba.
 const RADIO_MAX_SEGURO = 8000;
+
+// JPEG 1x1 de verdad: `attach-photo` exige un data: URL de image/jpeg y lo
+// decodifica, así que unos bytes cualquiera no sirven.
+const JPEG_DATA_URL = 'data:image/jpeg;base64,' +
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a' +
+  'HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAA' +
+  'AAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
 
 const fails = [];
 const check = (n, c, extra = '') => {
@@ -203,9 +215,14 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
     const privadas = [
       ['_delete_report', { p_id: 'x' }, '42501'],
       ['_client_ip', {}, '42501'],
+      // Adjuntar una foto pasa por el Edge Function attach-photo, que la
+      // llama con la service_role key. Si esta quedara expuesta a anon,
+      // cualquiera podría ponerle una foto a un reporte ajeno sin token.
+      ['_attach_photo', { p_id: 'x', p_token: 'x', p_photo: 'x' }, '42501'],
       // De trigger, invocadas por la base. Nunca callables por REST.
       ['delete_report_photo', {}, 'PGRST202'],
-      ['notify_nearby_reports', {}, 'PGRST202']
+      ['notify_nearby_reports', {}, 'PGRST202'],
+      ['clear_report_photo', {}, 'PGRST202']
     ];
     for (const [fn, args, esperado] of privadas) {
       const r = await rpc(fn, args);
@@ -264,6 +281,21 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
     const u = await rpc('unsubscribe_push', { p_endpoint: '%' });
     check('unsubscribe_push no filtra si un endpoint existe', u.json === true,
       JSON.stringify(u.json));
+  }
+
+  console.log('');
+  console.log('-- flag_photo: denunciar sin filtrar información --');
+  {
+    // Un id que no existe tiene que responder igual que uno que existe pero
+    // no tiene foto: si contestara distinto, se podría sondear la base para
+    // averiguar qué reportes tienen foto sin poder leerlos.
+    const inexistente = await rpc('flag_photo', { p_id: 'report_1_noexiste' });
+    check('denunciar un id inexistente no revela nada ni rompe',
+      inexistente.json && inexistente.json.flags === 0 && inexistente.json.hidden === false,
+      JSON.stringify(inexistente.json));
+    const nulo = await rpc('flag_photo', { p_id: null });
+    check('denunciar con id null tampoco',
+      nulo.json && nulo.json.flags === 0, JSON.stringify(nulo.json));
   }
 
   console.log('');
@@ -368,6 +400,54 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
         check('vote_report suma exactamente 1, no lo que mande el cliente',
           filas[0] && filas[0].confirms === 1 && filas[0].removed === false,
           JSON.stringify(filas[0]));
+
+        // -- foto opcional: adjuntar, servir, moderar (v15.0)
+        const conToken = (token) => pedir('POST', '/functions/v1/attach-photo',
+          { id: sonda.id, token, photo: JPEG_DATA_URL });
+
+        const ajena = await conToken('token-equivocado');
+        check('adjuntar una foto con el token equivocado se rechaza',
+          ajena.status === 403 && ajena.json && ajena.json.ok === false,
+          'status=' + ajena.status + ' ' + JSON.stringify(ajena.json));
+
+        const propia = await conToken(sonda.token);
+        check('adjuntar con el token correcto funciona',
+          propia.status === 200 && propia.json && propia.json.ok === true,
+          'status=' + propia.status + ' ' + JSON.stringify(propia.json).slice(0, 90));
+
+        if (propia.json && propia.json.photo) {
+          const img = await fetch(propia.json.photo);
+          check('la foto queda servida públicamente', img.status === 200,
+            'status=' + img.status);
+          // El cache-control corto es parte de la moderación, no una mejora
+          // de rendimiento: Storage sirve detrás de un CDN, y con el default
+          // (3600 s) una foto ya borrada se sigue entregando hasta una hora
+          // por su URL directa. Verificado contra producción.
+          const cc = img.headers.get('cache-control') || '';
+          const seg = Number((/max-age=(\d+)/.exec(cc) || [])[1]);
+          check('y con un cache corto, para que moderarla sirva de algo',
+            Number.isFinite(seg) && seg <= 600, 'cache-control: ' + cc);
+        }
+
+        // Reemplazar la foto tiene que ser imposible: si no, se podría
+        // adjuntar algo inocente, esperar a que junte confirmaciones y recién
+        // entonces cambiarla.
+        const otraVez = await conToken(sonda.token);
+        check('no se puede REEMPLAZAR una foto ya publicada',
+          otraVez.status === 403, 'status=' + otraVez.status);
+
+        let denuncia;
+        for (let i = 0; i < 3; i++) denuncia = await rpc('flag_photo', { p_id: sonda.id });
+        check('tres denuncias esconden la foto',
+          denuncia.json && denuncia.json.hidden === true && denuncia.json.flags === 3,
+          JSON.stringify(denuncia.json));
+
+        v = await pedir('GET', `/rest/v1/reports?id=eq.${sonda.id}&select=photo,photo_flags`);
+        check('la fila queda sin foto, pero el reporte sobrevive',
+          v.json && v.json[0] && v.json[0].photo === null && v.json[0].photo_flags === 3,
+          JSON.stringify(v.json && v.json[0]));
+        nota('Se denuncia la IMAGEN, no el aviso de que hay un retén: el');
+        nota('reporte puede ser perfectamente válido con una foto que no.');
 
         // -- propiedad: el token es la única llave
         const ajeno = await rpc('delete_own_report', { p_id: sonda.id, p_token: 'token-equivocado' });
