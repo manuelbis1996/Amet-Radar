@@ -62,10 +62,21 @@ necesitar credenciales.
 
 **Verde ahí no alcanza.** Las suites mockean la red y nunca llegan a Postgres,
 así que no dicen nada sobre RLS, funciones de la base ni triggers — que es por
-donde se colaron los bugs más caros de este proyecto. Cualquier cambio que
-toque eso hay que probarlo además contra la base real con el rol `anon`. El
-detalle, con la lista de esos bugs y cómo probarlos, está en
-[tests/README.md](tests/README.md).
+donde se colaron los bugs más caros de este proyecto.
+
+Para eso está la otra mitad, que verifica la base real:
+
+```bash
+node tests/check-base-real.js                 # todo
+node tests/check-base-real.js --solo-lectura  # sin publicar la sonda
+```
+
+No pide ningún secret (usa la publishable key que ya es pública), y corre solo
+una vez por semana con
+[.github/workflows/base-real.yml](.github/workflows/base-real.yml). Va aparte
+de `run.js` a propósito, y publica una sonda en producción que borra sola. Lo
+que todavía necesita SQL a mano, y la lista de bugs históricos que motivaron
+todo esto, está en [tests/README.md](tests/README.md).
 
 ## Cómo funciona
 

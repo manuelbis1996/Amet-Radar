@@ -18,8 +18,17 @@ const RAIZ = path.join(DIR, '..');
 const PORT = process.env.TEST_PORT || 8171;
 
 const filtros = process.argv.slice(2);
+// Convención: `check-*-real.js` pega contra la base REAL de Supabase y queda
+// FUERA de esta corrida. No es capricho — el CI manda el dominio de Supabase a
+// 127.0.0.1 justamente para que ninguna suite toque producción por accidente,
+// así que acá fallaría siempre; y el check que protege `main` no puede
+// depender de que un servicio externo esté arriba. Se corren a mano o por el
+// workflow `base-real.yml`:
+//
+//   node tests/check-base-real.js [--solo-lectura]
 const suites = fs.readdirSync(DIR)
   .filter(f => f.startsWith('check-') && f.endsWith('.js'))
+  .filter(f => !f.endsWith('-real.js'))
   .filter(f => filtros.length === 0 || filtros.some(x => f.includes(x)))
   .sort();
 

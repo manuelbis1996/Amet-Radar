@@ -74,8 +74,89 @@ hueco**, y todos tenían el cliente en verde cuando explotaron.
 | `app_config` tenía `update` abierto para `anon`, y `purge_expired_reports()` lee su umbral de ahí: dos peticiones vaciaban la base | Nada de eso pasa por el navegador |
 | El dedupe corría antes del chequeo de id, así que el reintento de la cola offline recibía `duplicate` sobre un reporte que **sí** se había publicado (v14.0) | El mock contesta lo que se le diga |
 
-Para cualquier cambio que toque RLS, funciones de la base, triggers, grants o
-Edge Functions, hay que verificar también así:
+### `check-base-real.js` — parte de esto ya está automatizado
+
+Buena parte de esa verificación dejó de ser manual:
+
+```bash
+node tests/check-base-real.js                 # todo
+node tests/check-base-real.js --solo-lectura  # sin publicar la sonda
+```
+
+**No pide ningún secret.** Usa la misma publishable key que ya está en
+`amet-radar.html`, o sea que mira el sistema con los mismos permisos que
+tendría cualquiera que lea el código fuente de la página — que es exactamente
+el atacante contra el que se cerró todo. Si algún día pide credenciales, algo
+se desvió.
+
+Corre solo, semanalmente y a pedido, por `.github/workflows/base-real.yml`.
+**Queda fuera de `run.js` a propósito**: la convención es que
+`check-*-real.js` no entra en esa corrida, porque el CI manda el dominio de
+Supabase a `127.0.0.1` para que ninguna suite toque producción por accidente,
+y porque el check que protege `main` no puede depender de que un servicio
+externo esté arriba.
+
+Qué cubre: que leer siga abierto (si esto falla, lo demás son falsos
+positivos); que `POST`/`PATCH`/`DELETE` directos estén cerrados en `reports`,
+`app_config`, `push_subscriptions` y el bucket; que `report_events`,
+`rate_limit_salt` y las funciones privadas no le respondan a `anon`; que
+`create_report` y `subscribe_push` validen la entrada; y un **ciclo de sonda**
+que publica un reporte propio para poder comprobar de forma concluyente que un
+`DELETE` directo no se lo lleva, que un `PATCH` no infla los votos, que
+`vote_report` suma de a uno y devuelve una sola fila, y que la propiedad se
+valida por token.
+
+Tres trampas que este archivo encapsula, y que ya dieron un rojo falso y un
+verde falso mientras se escribía:
+
+- **Un `PATCH`/`DELETE` contra una tabla sin política devuelve `204`, no
+  `401`.** RLS hace que no matchee ninguna fila y PostgREST contesta lo mismo
+  que si no hubiera habido nada que tocar: el status **no distingue
+  "bloqueado" de "no había nada"**. Por eso el payload lleva un valor que
+  además viola un `CHECK` de la columna — así un `400` delata que la política
+  volvió, y de paso nada se escribe si eso pasa. (El `POST` sí da `401`,
+  porque ahí RLS rechaza la fila nueva explícitamente.)
+- **Un `404` de PostgREST no quiere decir "no tenés permiso"**, quiere decir
+  "no encontré una función con esa firma". Llamar a `_client_ip()` con
+  `{p_id:'x'}` da `404` por firma que no matchea, y el chequeo pasaría en
+  verde aunque la función estuviera abierta a todo el mundo. Por eso cada
+  función se llama con su firma real y se mira el **código de Postgres**
+  (`42501` = permiso denegado; `PGRST202` = no está en el schema cache, que es
+  lo esperable en las de trigger).
+- **Probar el borrado con un id inventado da un verde falso**, por lo mismo
+  del primer punto. Hay que borrar algo que sabemos que existe y después mirar
+  si sigue existiendo: para eso está la sonda.
+
+**La sonda escribe en producción**, así que tiene dos guardas. Se publica en
+el medio del **Lago Enriquillo** (dentro de la caja de RD, que `create_report`
+exige, pero es agua salada y no vive nadie), y si `push_radius_meters` está
+por encima de 8 km el ciclo **se saltea entero** en vez de arriesgar que a
+alguien real le suene el teléfono por una prueba — este archivo no puede leer
+`push_subscriptions` para comprobar que no hay nadie cerca, y está bien que no
+pueda. Se borra sola en un `finally`; si ni eso funciona, imprime el id para
+sacarla a mano (y se autoexpira igual al llegar a `max_age_minutes`).
+
+Se comprobó que la guarda **no es decorativa**, con una mutación real y
+reversible: dándole `execute` sobre `_client_ip()` a `anon`, el chequeo pasa a
+`FALLA` con `status=200`; al revocarlo, vuelve a verde.
+
+### Lo que sigue necesitando SQL a mano
+
+`check-base-real.js` solo tiene la anon key, así que hay cosas que
+estructuralmente no puede ver:
+
+- que un `DELETE`/`PATCH` directo **no se lleve una suscripción push**. La
+  tabla no tiene política de SELECT (bien) y `unsubscribe_push` devuelve
+  `true` aunque el endpoint no exista (también bien, si no se podría averiguar
+  si un endpoint está dado de alta), o sea que no hay ningún oráculo desde
+  afuera. Ojo al probarlo por SQL: **contar filas con el rol `anon` puesto
+  siempre da 0**; hay que hacer `reset role` antes de verificar.
+- el **tope por IP** de `create_report` (haría falta emitir 31 reportes).
+- cualquier cosa que dependa de la `service_role` key o de mirar el plan de
+  una consulta.
+
+Para eso, y para cualquier cambio que toque RLS, funciones de la base,
+triggers, grants o Edge Functions:
 
 ```sql
 begin;

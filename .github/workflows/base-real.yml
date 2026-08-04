@@ -1,0 +1,56 @@
+name: Base real
+
+# Corre los chequeos contra la base REAL de Supabase (tests/check-base-real.js).
+#
+# POR QUÉ ESTÁ SEPARADO DE `tests.yml`, que es lo que uno esperaría:
+#
+# 1. `tests.yml` manda el dominio de Supabase a 127.0.0.1 a propósito, para que
+#    ningún test toque producción por accidente. Este workflow necesita
+#    exactamente lo contrario, así que meterlos juntos sería contradictorio.
+# 2. `tests.yml` es el check que exige la regla de protección de `main`. Si
+#    dependiera de que Supabase esté arriba, una caída del proveedor —o el
+#    proyecto pausado por inactividad en el plan Free— dejaría de poder
+#    mergearse cualquier PR, aunque el código esté perfecto. El gate tiene que
+#    depender solo del repo.
+# 3. Este corre contra PRODUCCIÓN y publica una sonda. Hacer eso en cada push
+#    de cada rama sería ruido sobre la base real sin ganar nada: lo que
+#    verifica no cambia con cada commit, cambia cuando alguien toca RLS, un
+#    grant o una función — y eso pasa pocas veces.
+#
+# NO NECESITA NINGÚN SECRET: usa la publishable key, que ya es pública dentro
+# de amet-radar.html. Justamente por eso vale lo que verifica — mira el sistema
+# con los mismos permisos que tendría cualquiera que lea el código de la página.
+
+on:
+  workflow_dispatch:
+    inputs:
+      solo_lectura:
+        description: 'Solo lectura (no publica la sonda en producción)'
+        type: boolean
+        default: false
+  schedule:
+    # Lunes 12:00 UTC (08:00 en RD). Semanal alcanza: esto no vigila el código,
+    # vigila la configuración de la base, que cambia pocas veces y siempre a
+    # mano.
+    - cron: '0 12 * * 1'
+
+jobs:
+  base-real:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No instala nada: el script usa solo el fetch nativo de Node y `crypto`.
+      - name: Chequeos contra la base real
+        run: |
+          if [ "${{ inputs.solo_lectura }}" = "true" ]; then
+            node tests/check-base-real.js --solo-lectura
+          else
+            node tests/check-base-real.js
+          fi
