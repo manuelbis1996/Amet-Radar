@@ -33,7 +33,11 @@ async function abrirPanel(browser, opciones = {}) {
   const errores = [];
   page.on('pageerror', e => errores.push(String(e)));
 
-  await page.route('**/maplibre-gl.js', r => r.fulfill({ contentType:'application/javascript', body: STUB }));
+  // opciones.sinMapa simula el caso real que rompía el panel entero: la
+  // librería no carga (CDN caído) o el dispositivo no tiene WebGL.
+  await page.route('**/maplibre-gl.js', r => opciones.sinMapa
+    ? r.fulfill({ contentType:'application/javascript', body:'/* no cargó */' })
+    : r.fulfill({ contentType:'application/javascript', body: STUB }));
   await page.route('**/maplibre-gl.css', r => r.fulfill({ contentType:'text/css', body:'' }));
   await page.route('**/fonts.googleapis.com/**', r => r.fulfill({ contentType:'text/css', body:'' }));
   await page.route('**/tiles.openfreemap.org/**', r => r.abort());
@@ -73,10 +77,10 @@ async function abrirPanel(browser, opciones = {}) {
 
     // Mover el pin a un punto lejos del centro por defecto, que es lo que hace
     // el admin: publicar donde NO está.
-    await page.evaluate(() => {
-      const m = window.__markers[window.__markers.length - 1];
-      m.setLngLat({ lng: -70.4800, lat: 19.2900 });
-    });
+    // Mover el pin tiene que escribir las coordenadas en el formulario, que
+    // es de donde publica.
+    await page.fill('#pub-lat', '19.29000');
+    await page.fill('#pub-lng', '-70.48000');
     await page.click('.cat-choice[data-cat="accidente"]');
     await page.check('#pub-approx');
     await page.click('#publish-btn');
@@ -124,6 +128,31 @@ async function abrirPanel(browser, opciones = {}) {
     await page.waitForTimeout(600);
     const texto = await page.$eval('#publish-error', el => el.textContent.trim());
     check('el tope por hora tiene su propio mensaje', /tope de reportes por hora/i.test(texto), texto);
+    await ctx.close();
+  }
+
+  // ---- 4. Si MapLibre no carga, el panel NO se cae y se publica igual ----
+  // Regresión concreta: initAdminMap() vivía dentro del try de loadDashboard,
+  // así que una excepción del mapa (sin WebGL, CDN caído) dejaba el panel sin
+  // parámetros ni tabla de reportes, solo con un toast genérico.
+  {
+    const { ctx, page, rpcs, errores } = await abrirPanel(browser, { sinMapa: true });
+
+    check('sin mapa, el resto del panel igual carga (parámetros)',
+      (await page.inputValue('#cfg-maxage')) === '120', await page.inputValue('#cfg-maxage'));
+    check('sin mapa, la tabla de reportes igual se dibuja',
+      !!(await page.$('#reports-tbody tr')));
+    const avisoVisible = await page.$eval('#map-fallback', el => !el.hidden);
+    check('se avisa que el mapa no cargó, en vez de dejar una caja muda', avisoVisible);
+
+    await page.fill('#pub-lat', '19.31000');
+    await page.fill('#pub-lng', '-70.51000');
+    await page.click('#publish-btn');
+    await page.waitForTimeout(600);
+    check('sin mapa, publicar sigue funcionando con las coordenadas a mano',
+      rpcs.length === 1 && Math.abs(rpcs[0].p_lat - 19.31) < 0.0001,
+      JSON.stringify(rpcs[0] && { lat:rpcs[0].p_lat, lng:rpcs[0].p_lng }));
+    check('y sin errores de JS sueltos', errores.length === 0, JSON.stringify(errores));
     await ctx.close();
   }
 

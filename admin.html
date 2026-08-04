@@ -86,9 +86,16 @@
 
   /* ---- Publicar un reporte desde el panel ---- */
   .hint{ margin:-6px 0 12px; font-size:12px; color:var(--muted); }
-  #admin-map{ height:300px; border-radius:10px; overflow:hidden; border:1px solid var(--line); margin-bottom:10px; }
-  #pin-coords{ font-family:var(--font-mono); font-size:12px; color:var(--muted); margin-bottom:14px; }
-  #pin-coords b{ color:var(--signal); }
+  #admin-map{
+    height:300px; border-radius:10px; overflow:hidden; border:1px solid var(--line);
+    margin-bottom:12px; display:flex; align-items:center; justify-content:center;
+  }
+  /* Si MapLibre no carga (CDN caído, sin WebGL), la caja no puede quedar
+     vacía y muda: se avisa y se publica con las coordenadas a mano. */
+  #map-fallback{ color:var(--muted); font-size:13px; text-align:center; padding:0 24px; }
+  #map-fallback[hidden]{ display:none; }
+  .coord-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0 16px; margin-bottom:4px; }
+  .coord-grid input{ font-family:var(--font-mono); }
   /* El pin lo posiciona MapLibre escribiendo transform en el elemento, así
      que cualquier transform propio va en un hijo (misma razón que en
      amet-radar.html). anchor:'bottom' -> la punta es el punto real. */
@@ -142,8 +149,17 @@
       <h2>Publicar reporte</h2>
       <p class="hint">Arrastra el pin o toca el mapa para elegir el punto. No hace falta estar cerca: se publica donde marques.</p>
       <div class="error-box" id="publish-error" hidden></div>
-      <div id="admin-map"></div>
-      <div id="pin-coords">Punto: <b id="pin-latlng">—</b></div>
+      <div id="admin-map"><div id="map-fallback" hidden>No se pudo cargar el mapa. Escribe las coordenadas a mano y publica igual.</div></div>
+      <div class="coord-grid">
+        <div class="field">
+          <label for="pub-lat">Latitud</label>
+          <input type="number" id="pub-lat" step="0.00001" value="19.22140">
+        </div>
+        <div class="field">
+          <label for="pub-lng">Longitud</label>
+          <input type="number" id="pub-lng" step="0.00001" value="-70.52950">
+        </div>
+      </div>
 
       <label id="cat-label">Categoría</label>
       <div class="cat-choices" id="cat-choices" role="group" aria-labelledby="cat-label"></div>
@@ -505,6 +521,11 @@
 
   let adminMap = null, pinMarker = null;
   let categoriaElegida = 'reten_fijo';
+  // Fuente de verdad del punto: los inputs. El pin los actualiza al moverse y
+  // ellos mueven el pin al editarse, pero publicar SIEMPRE lee de acá — así el
+  // formulario sigue funcionando aunque el mapa no haya cargado.
+  const inputLat = () => document.getElementById('pub-lat');
+  const inputLng = () => document.getElementById('pub-lng');
 
   function hexTint(hex, alpha){
     const n = parseInt(hex.slice(1), 16);
@@ -528,45 +549,86 @@
     });
   }
 
-  function mostrarCoords(lngLat){
-    document.getElementById('pin-latlng').textContent =
-      `${lngLat.lat.toFixed(5)}, ${lngLat.lng.toFixed(5)}`;
+  function puntoActual(){
+    return { lat: Number(inputLat().value), lng: Number(inputLng().value) };
+  }
+  function escribirPunto(lat, lng){
+    inputLat().value = lat.toFixed(5);
+    inputLng().value = lng.toFixed(5);
+  }
+
+  function mostrarFallbackMapa(){
+    const aviso = document.getElementById('map-fallback');
+    if(aviso) aviso.hidden = false;
   }
 
   // El mapa se crea recién acá y no al cargar la página: mientras el
   // dashboard está `hidden` el contenedor mide 0x0 y MapLibre se dibuja mal.
+  //
+  // TODO EL CUERPO VA EN UN try: si MapLibre no cargó (CDN caído) o el
+  // dispositivo no tiene WebGL, `new maplibregl.Map()` TIRA — y como esto se
+  // llama desde loadDashboard(), esa excepción se llevaba puesto el panel
+  // entero (ni parámetros ni tabla de reportes, solo "Error cargando el
+  // panel"). El mapa es una comodidad; publicar no puede depender de él.
   function initAdminMap(){
-    if(adminMap || typeof maplibregl === 'undefined') return;
-    adminMap = new maplibregl.Map({
-      container: 'admin-map',
-      style: 'https://tiles.openfreemap.org/styles/bright',
-      center: [DEFAULT_CENTER[1], DEFAULT_CENTER[0]],  // MapLibre usa [lng, lat]
-      zoom: 12,
-      maxBounds: RD_BOUNDS,
-      minZoom: 8,
-      attributionControl: false
-    });
-    adminMap.addControl(new maplibregl.AttributionControl({ compact:true }));
+    if(adminMap) return;
+    try{
+      if(typeof maplibregl === 'undefined') throw new Error('maplibre no cargó');
+      adminMap = new maplibregl.Map({
+        container: 'admin-map',
+        style: 'https://tiles.openfreemap.org/styles/bright',
+        center: [DEFAULT_CENTER[1], DEFAULT_CENTER[0]],  // MapLibre usa [lng, lat]
+        zoom: 12,
+        maxBounds: RD_BOUNDS,
+        minZoom: 8,
+        attributionControl: false
+      });
+      adminMap.addControl(new maplibregl.AttributionControl({ compact:true }));
 
-    const el = document.createElement('div');
-    el.className = 'pick-pin';
-    el.innerHTML = `<svg viewBox="0 0 26 34" aria-hidden="true"><path d="M13 0C5.8 0 0 5.8 0 13c0 9.2 13 21 13 21s13-11.8 13-21C26 5.8 20.2 0 13 0z" fill="#ffb020"/><circle cx="13" cy="13" r="5" fill="#12141a"/></svg>`;
-    pinMarker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
-      .setLngLat([DEFAULT_CENTER[1], DEFAULT_CENTER[0]])
-      .addTo(adminMap);
-    pinMarker.on('dragend', () => mostrarCoords(pinMarker.getLngLat()));
-    adminMap.on('click', (e) => { pinMarker.setLngLat(e.lngLat); mostrarCoords(e.lngLat); });
-    mostrarCoords(pinMarker.getLngLat());
-    // El contenedor acaba de hacerse visible; sin esto el mapa queda cortado.
-    setTimeout(() => adminMap.resize(), 60);
+      const el = document.createElement('div');
+      el.className = 'pick-pin';
+      el.innerHTML = `<svg viewBox="0 0 26 34" aria-hidden="true"><path d="M13 0C5.8 0 0 5.8 0 13c0 9.2 13 21 13 21s13-11.8 13-21C26 5.8 20.2 0 13 0z" fill="#ffb020"/><circle cx="13" cy="13" r="5" fill="#12141a"/></svg>`;
+      pinMarker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
+        .setLngLat([DEFAULT_CENTER[1], DEFAULT_CENTER[0]])
+        .addTo(adminMap);
+
+      pinMarker.on('dragend', () => {
+        const ll = pinMarker.getLngLat();
+        escribirPunto(ll.lat, ll.lng);
+      });
+      adminMap.on('click', (e) => {
+        pinMarker.setLngLat(e.lngLat);
+        escribirPunto(e.lngLat.lat, e.lngLat.lng);
+      });
+      // Editar las coordenadas a mano mueve el pin.
+      [inputLat(), inputLng()].forEach(inp => inp.addEventListener('change', () => {
+        const { lat, lng } = puntoActual();
+        if(Number.isFinite(lat) && Number.isFinite(lng) && pinMarker){
+          pinMarker.setLngLat([lng, lat]);
+          adminMap.easeTo({ center:[lng, lat], duration: 300 });
+        }
+      }));
+
+      // El contenedor acaba de hacerse visible; sin esto el mapa queda cortado.
+      setTimeout(() => { try{ adminMap.resize(); }catch(e){} }, 60);
+    }catch(err){
+      console.error('No se pudo iniciar el mapa del panel', err);
+      adminMap = null;
+      pinMarker = null;
+      mostrarFallbackMapa();
+    }
   }
 
   async function publicarReporte(){
     const errBox = document.getElementById('publish-error');
     const btn = document.getElementById('publish-btn');
     errBox.hidden = true;
-    if(!pinMarker){ return; }
-    const { lat, lng } = pinMarker.getLngLat();
+    const { lat, lng } = puntoActual();
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)){
+      errBox.textContent = 'Las coordenadas no son válidas.';
+      errBox.hidden = false;
+      return;
+    }
     btn.disabled = true;
     btn.textContent = 'Publicando…';
     try{
@@ -612,6 +674,8 @@
   async function loadDashboard(){
     try{
       renderCatChoices();
+      // Fuera del try de abajo a propósito: initAdminMap ya se protege sola,
+      // pero que quede explícito que el panel no depende del mapa.
       initAdminMap();
       await loadConfigForm();
       await fetchReports();
