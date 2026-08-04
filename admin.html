@@ -99,6 +99,15 @@
   /* El pin lo posiciona MapLibre escribiendo transform en el elemento, así
      que cualquier transform propio va en un hijo (misma razón que en
      amet-radar.html). anchor:'bottom' -> la punta es el punto real. */
+  /* Marcador de un reporte YA existente. A propósito distinto del pin de
+     arriba (gota ámbar): estos son círculos con el color de su categoría,
+     para que no se confunda "dónde voy a publicar" con "qué ya hay". */
+  .rep-dot{
+    width:26px; height:26px; border-radius:50%; display:flex;
+    align-items:center; justify-content:center; font-size:13px;
+    border:2px solid #12141a; box-shadow:0 2px 5px rgba(0,0,0,.45);
+  }
+  .rep-dot.approx{ border-style:dashed; opacity:.85; }
   .pick-pin{ width:26px; height:34px; cursor:grab; }
   .pick-pin svg{ width:100%; height:100%; filter:drop-shadow(0 2px 4px rgba(0,0,0,.5)); }
   .cat-choices{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; margin-bottom:14px; }
@@ -425,6 +434,7 @@
       showToast('Reporte eliminado');
       await fetchReports();
       renderReportsTable();
+      renderMapaReportes();
       loadStats();
     }catch(err){
       showToast('No se pudo eliminar el reporte', true);
@@ -619,6 +629,27 @@
     }
   }
 
+  // Reportes existentes sobre el mapa. Se redibujan enteros en cada refresco
+  // (son pocos y se autoexpiran); no vale la pena un diff incremental.
+  let repMarkers = [];
+  function renderMapaReportes(){
+    if(!adminMap) return;   // el mapa puede no haber cargado; la tabla igual sirve
+    repMarkers.forEach(m => { try{ m.remove(); }catch(e){} });
+    repMarkers = [];
+    for(const r of reportsCache){
+      if(typeof r.lat !== 'number' || typeof r.lng !== 'number') continue;
+      const cat = CATEGORIES[r.category] || { emoji:'❔', label:r.category, hex:'#8a92a1' };
+      const el = document.createElement('div');
+      el.className = 'rep-dot' + (r.approx ? ' approx' : '');
+      el.style.background = cat.hex;
+      el.textContent = cat.emoji;
+      el.title = `${cat.label} · ${timeAgo(r.ts)}` + (r.approx ? ' · zona aproximada' : '');
+      repMarkers.push(new maplibregl.Marker({ element: el })
+        .setLngLat([r.lng, r.lat])
+        .addTo(adminMap));
+    }
+  }
+
   async function publicarReporte(){
     const errBox = document.getElementById('publish-error');
     const btn = document.getElementById('publish-btn');
@@ -659,6 +690,7 @@
       showToast('Reporte publicado');
       await fetchReports();
       renderReportsTable();
+      renderMapaReportes();
       loadStats();
     }catch(err){
       errBox.textContent = 'Error de conexión con el servidor';
@@ -680,6 +712,7 @@
       await loadConfigForm();
       await fetchReports();
       renderReportsTable();
+      renderMapaReportes();
       loadStats();
     }catch(err){
       showToast('Error cargando el panel', true);

@@ -399,6 +399,23 @@ por medio.
   - **Sin `owner_hash`**: el "borrar el mío" del cliente no aplica: estos
     reportes se borran desde la tabla del propio panel, que usa el endpoint de
     admin y puede borrar cualquiera.
+  - **El mapa muestra también los reportes que ya existen**, como círculos con
+    el color de su categoría (los de zona aproximada, con borde punteado).
+    Van a propósito distintos de la gota ámbar que marca *dónde vas a
+    publicar*, para no confundir "lo que hay" con "lo que voy a poner" — sin
+    eso era fácil publicar un duplicado encima de otro. Se redibujan enteros
+    en cada refresco (son pocos y se autoexpiran).
+  - **Nada del panel puede depender del mapa.** `initAdminMap()` se protege
+    sola y no propaga: si MapLibre no cargó o el dispositivo no tiene WebGL,
+    `new maplibregl.Map()` **tira**, y cuando esa llamada vivía dentro del
+    `try` de `loadDashboard()` la excepción se llevaba puesto el panel entero
+    (ni parámetros ni tabla, solo un toast genérico). Además se avisa dentro
+    de la caja en vez de dejarla vacía y muda.
+  - **Publicar no depende del mapa**: las coordenadas viven en dos inputs que
+    son la fuente de verdad. El pin las escribe al moverse y ellas mueven el
+    pin al editarse, pero publicar **siempre** lee del formulario. Así se
+    puede publicar aunque el mapa no cargue nunca, y de paso hay una vía por
+    teclado para elegir el punto.
   - **El mapa se crea recién al entrar al panel**, no al cargar la página:
     mientras el dashboard está `hidden` el contenedor mide 0x0 y MapLibre se
     dibuja mal. Por eso `initAdminMap()` se llama desde `loadDashboard()` y
