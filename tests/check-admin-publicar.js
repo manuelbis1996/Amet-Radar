@@ -60,6 +60,12 @@ async function abrirPanel(browser, opciones = {}) {
   await page.route('**/functions/v1/admin-login', r =>
     r.fulfill({ status:200, contentType:'application/json', body:'{"ok":true}' }));
 
+  const borrados = [];
+  await page.route('**/functions/v1/admin-delete-report', r => {
+    borrados.push(JSON.parse(r.request().postData() || '{}'));
+    return r.fulfill({ status:200, contentType:'application/json', body:'{"ok":true}' });
+  });
+
   const rpcs = [];
   await page.route('**/rest/v1/rpc/create_report', r => {
     rpcs.push(JSON.parse(r.request().postData() || '{}'));
@@ -72,7 +78,7 @@ async function abrirPanel(browser, opciones = {}) {
   await page.click('#login-btn');
   await page.waitForSelector('#dashboard:not([hidden])', { timeout:8000 });
   await page.waitForTimeout(400);
-  return { ctx, page, rpcs, errores };
+  return { ctx, page, rpcs, errores, borrados };
 }
 
 (async () => {
@@ -88,10 +94,16 @@ async function abrirPanel(browser, opciones = {}) {
 
     // Mover el pin a un punto lejos del centro por defecto, que es lo que hace
     // el admin: publicar donde NO está.
-    // Mover el pin tiene que escribir las coordenadas en el formulario, que
-    // es de donde publica.
-    await page.fill('#pub-lat', '19.29000');
-    await page.fill('#pub-lng', '-70.48000');
+    // Tocar el mapa elige el punto: escribe las coordenadas y recién ahí
+    // aparece el pin (antes estaba siempre puesto en el centro).
+    check('no hay pin antes de elegir un punto',
+      (await page.$$eval('.pick-pin', e => e.length)) === 0);
+    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.4800, lat:19.2900 } }));
+    await page.waitForTimeout(200);
+    check('tocar el mapa pone el pin y llena las coordenadas',
+      (await page.$$eval('.pick-pin', e => e.length)) === 1 &&
+      (await page.inputValue('#pub-lat')) === '19.29000',
+      await page.inputValue('#pub-lat'));
     await page.click('.cat-choice[data-cat="accidente"]');
     await page.check('#pub-approx');
     await page.click('#publish-btn');
@@ -137,6 +149,8 @@ async function abrirPanel(browser, opciones = {}) {
       r.fulfill({ contentType:'application/json',
         body: JSON.stringify(REPORTES.concat([{ id:'r-nuevo', lat:19.2600, lng:-70.5000,
           photo:null, note:'', ts: Date.now(), category:'control', confirms:0, denies:0, approx:false }])) }));
+    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.50, lat:19.26 } }));
+    await page.waitForTimeout(150);
     await page.click('#publish-btn');
     await page.waitForTimeout(700);
     check('tras publicar, el reporte nuevo se dibuja sin recargar la página',
@@ -146,11 +160,48 @@ async function abrirPanel(browser, opciones = {}) {
     await ctx.close();
   }
 
+  // ---- 1.ter Borrar un reporte tocando su marcador, y quitar el punto ----
+  {
+    const { ctx, page, borrados } = await abrirPanel(browser);
+
+    check('al abrir no hay ficha de reporte visible',
+      await page.$eval('#rep-popover', el => el.hidden));
+
+    await page.$$eval('.rep-dot', els => els[0].click());
+    await page.waitForTimeout(250);
+    check('tocar un marcador abre su ficha',
+      !(await page.$eval('#rep-popover', el => el.hidden)));
+    check('la ficha dice de qué categoría es',
+      /Retén fijo/.test(await page.$eval('#rp-cat', el => el.textContent)),
+      await page.$eval('#rp-cat', el => el.textContent));
+
+    page.on('dialog', d => d.accept());   // el confirm de borrar
+    await page.click('#rp-delete');
+    await page.waitForTimeout(700);
+    check('se puede eliminar desde el mapa, sin pasar por la tabla',
+      borrados.length === 1 && borrados[0].id === 'r-uno', JSON.stringify(borrados));
+
+    // Quitar el punto elegido
+    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.50, lat:19.25 } }));
+    await page.waitForTimeout(200);
+    check('el botón de quitar punto aparece al elegir uno',
+      !(await page.$eval('#pin-clear', el => el.hidden)));
+    await page.click('#pin-clear');
+    await page.waitForTimeout(200);
+    check('quitar el punto borra el pin y vacía las coordenadas',
+      (await page.$$eval('.pick-pin', e => e.length)) === 0 &&
+      (await page.inputValue('#pub-lat')) === '');
+    await ctx.close();
+  }
+
   // ---- 2. Rechazo del servidor: se muestra el motivo, no un éxito falso ----
   {
     const { ctx, page } = await abrirPanel(browser, {
       respuesta: { ok:false, reason:'duplicate', id:null }
     });
+    // Hay que elegir un punto antes: el formulario ya no arranca con uno.
+    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.53, lat:19.22 } }));
+    await page.waitForTimeout(150);
     await page.click('#publish-btn');
     await page.waitForTimeout(600);
 
@@ -167,6 +218,8 @@ async function abrirPanel(browser, opciones = {}) {
     const { ctx, page } = await abrirPanel(browser, {
       respuesta: { ok:false, reason:'rate_limit', id:null }
     });
+    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.53, lat:19.22 } }));
+    await page.waitForTimeout(150);
     await page.click('#publish-btn');
     await page.waitForTimeout(600);
     const texto = await page.$eval('#publish-error', el => el.textContent.trim());

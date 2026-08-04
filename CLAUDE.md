@@ -425,6 +425,31 @@ por medio.
     avisa en pantalla; no es una zona de pruebas.
   - **`admin.html` no está en el app shell de `sw.js`**, así que tocarlo no
     exige subir `APP_VERSION`/`CACHE_NAME`.
+- **El pin aparece solo cuando elegís un punto** (v14.4): antes el mapa
+  arrancaba con una gota ámbar clavada en el centro de La Vega y los inputs
+  ya rellenos, o sea que "publicar" siempre estaba armado apuntando a un
+  lugar que nadie eligió — un toque de más y se publicaba un retén en el
+  centro por accidente. Ahora `puntoActual()` devuelve `null` con los inputs
+  vacíos, el pin se crea recién al tocar el mapa (`ponerPin()`), y
+  `publicarReporte()` se niega con "Elige un punto primero" si no hay
+  ninguno. Una barra sobre el mapa (`.map-bar`) dice el estado y trae
+  **Quitar punto** (`quitarPin()`, que también vacía los inputs); publicar
+  con éxito llama a `quitarPin()` para no dejar el formulario cargado
+  apuntando a lo que ya se publicó.
+- **Borrar desde el propio mapa** (v14.4): tocar el círculo de un reporte
+  abre `#rep-popover`, una tarjeta flotante sobre el mapa con categoría,
+  hace cuánto, votos, si es zona aproximada y un botón **Eliminar** que
+  reusa el mismo `deleteReport(id)` de la tabla (o sea el Edge Function
+  `admin-delete-report`, no hay vía nueva). Moderar mirando la tabla obliga
+  a cruzar a mano coordenadas contra el mapa; el caso real es "ese pin de
+  ahí está mal", y ahí es donde tiene que estar el botón.
+  - **Los reportes vencidos se dibujan apagados** (`.rep-dot.vencido`: gris
+    y al 45%) y el popover lo dice: *"vencido, los usuarios ya no lo ven"*.
+    El panel trae **todas** las filas y la app solo muestra las de menos de
+    `max_age_minutes`, así que sin esta marca el mapa del panel y el de la
+    app se ven distintos y parece un bug. **Esto NO es sincronización**: el
+    panel sigue sin sondear (se refresca al recargar o al publicar/borrar),
+    a diferencia de la app que sondea cada 8s.
 - **Por qué no quedó en Netlify Functions + Blobs**: la primera versión de
   este panel (antes de este commit) se construyó sobre un backend propio en
   Netlify Functions con Netlify Blobs como reemplazo de un `data/*.json` —
