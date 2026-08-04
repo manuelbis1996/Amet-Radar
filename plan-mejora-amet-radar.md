@@ -168,17 +168,33 @@ Se evaluaron y descartaron dos alternativas: desplegar con `wrangler` desde el
 workflow (redundante con `main` protegido, agrega un token que puede vencer y
 duplica el mecanismo de despliegue) y una rama `release` intermedia (no
 necesita token, pero agrega una rama para resolver lo mismo).
-- Esfuerzo: un clic. **Es lo de mayor prioridad que queda.**
+- Esfuerzo: un clic. ✅ **Hecho**: la regla de rama ya está activa.
 
-**🟡 Las suites no ven la base, y eso ya costó caro**
+**✅ Las suites no ven la base — resuelto en buena parte** (`check-base-real.js`)
 Mockean la red y nunca llegan a Postgres: verde ahí no dice nada sobre RLS,
-RPC ni triggers. Todos los bugs caros del proyecto se colaron por ese hueco
-(la lista está en `tests/README.md`). Hoy la verificación contra la base real
-es manual, con `begin; set local role anon; ...; rollback;`. Automatizar
-aunque sea un puñado de esos chequeos contra una base de pruebas cerraría el
-agujero de verdad.
-- Esfuerzo: medio-alto (requiere un proyecto Supabase de pruebas o
-  `supabase start` local).
+RPC ni triggers, y todos los bugs caros del proyecto se colaron por ese hueco
+(la lista está en `tests/README.md`). Ahora hay un segundo script que pega
+contra la base real y corre solo una vez por semana.
+
+**Lo que se hizo distinto de lo que decía este plan.** Acá estaba anotado como
+esfuerzo medio-alto "porque requiere un proyecto Supabase de pruebas o
+`supabase start` local". No hizo falta ninguna de las dos cosas, y evitarlas
+resultó ser *mejor*, no un atajo: una base de pruebas verifica una copia de la
+configuración, y lo que hay que vigilar es **la de producción**, que es la que
+se toca a mano desde el panel de Supabase y la que puede desviarse sin que
+nadie lo note. Corriendo con la publishable key —pública por diseño— se mira
+el sistema con los permisos exactos del atacante contra el que se cerró todo,
+sin gestionar ningún secret.
+
+El costo de esa decisión es que el script escribe en producción para poder
+comprobar el borrado de forma concluyente (con un id inventado, un `DELETE`
+bloqueado y uno que no encuentra nada devuelven **los dos 204**). Por eso la
+sonda va en el medio del Lago Enriquillo y el tramo se saltea si el radio de
+push es grande.
+
+- Queda pendiente lo que estructuralmente no se puede ver con la anon key:
+  que un `DELETE` directo no se lleve una suscripción push (esa tabla no tiene
+  oráculo desde afuera, a propósito) y el tope por IP. Sigue siendo SQL a mano.
 
 **🟢 Vigilar que `server.js` no vuelva a acumular lógica de API**
 Hoy es puro servidor estático. Si alguien le agrega rutas `/api/*`, diverge en
@@ -195,9 +211,11 @@ silencio del modelo real en Supabase.
    mergear~~ ✅ hecho (regla de rama creada; ya no se puede pushear directo)
 4. ~~Radio de las notificaciones push configurable~~ ✅ hecho (v14.5) — era
    el último número que exigía redesplegar un Edge Function para cambiarlo
-5. **Automatizar algunos chequeos contra la base real** — es donde
-   históricamente aparecen los bugs. **Es lo de mayor prioridad que queda.**
-6. **Realtime**, cuando el egreso vuelva a ser el problema.
+5. ~~**Automatizar chequeos contra la base real**~~ ✅ hecho
+   (`tests/check-base-real.js` + workflow semanal)
+6. **Realtime**, cuando el egreso vuelva a ser el problema. **Es lo de mayor
+   prioridad que queda**, y es condicional: no hay nada que hacer hasta que el
+   egreso moleste.
 7. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
    editar reporte propio).
 

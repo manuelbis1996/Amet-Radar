@@ -148,6 +148,21 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   el doble de MapLibre que comparten todas (el sandbox bloquea el CDN y los
   tiles). **`tests` está en `.assetsignore`**: sin eso, con
   `assets.directory: "./"`, estos archivos se publicarían como servibles.
+- `tests/check-base-real.js` — el complemento de las 13: pega contra la base
+  **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
+  mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
+  entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
+  fuera de esa corrida (el CI manda el dominio de Supabase a `127.0.0.1` para
+  que nada toque producción por accidente, y el check que protege `main` no
+  puede depender de un servicio externo). Corre semanalmente y a pedido por
+  `.github/workflows/base-real.yml`. **Publica una sonda en el Lago
+  Enriquillo** y la borra sola; se saltea ese tramo si `push_radius_meters`
+  supera los 8 km, para no hacerle sonar el teléfono a nadie real por una
+  prueba. Ver "Qué cubre y qué no" en `tests/README.md`, que documenta las
+  tres trampas de PostgREST que dieron un rojo falso y un verde falso al
+  escribirlo (un `PATCH` bloqueado devuelve **204**, un `404` puede ser una
+  firma que no matchea, y probar el borrado con un id inventado da un verde
+  falso).
 - `GET  {SUPABASE_URL}/rest/v1/reports?select=*` — todas las filas.
 - **Publicar ya NO es un `POST /rest/v1/reports`** desde v14.0: esa política
   de insert también se eliminó. Se publica con
