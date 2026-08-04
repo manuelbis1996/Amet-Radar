@@ -668,6 +668,16 @@ esa fila. Ojo al probar: contar filas **con el rol `anon` puesto siempre da
 0**, porque no hay política de SELECT — hay que hacer `reset role` antes de
 verificar, o parece que la función no insertó nada.
 
+**Y verificado también en un teléfono real, que es la mitad que ni las suites
+ni las pruebas de SQL alcanzan**: el camino completo (permiso →
+`pushManager.subscribe` → `subscribe_push` → llega la notificación → tocarla
+abre el reporte) funciona con la v14.2 desplegada. Del lado de la base se
+confirmó que `subscribe_push` **actualizó la fila en lugar en vez de duplicar**
+—la suscripción del dispositivo ya existía y el total no subió—, que es
+justamente lo que el `on conflict do update` tenía que hacer y lo que el
+`DELETE`+`POST` anterior no hacía. Vale la pena repetir esta prueba cada vez
+que se toque el flujo de push: las suites lo cubren solo contra mocks.
+
 **Trampa al verificar que quedó cerrado, que casi da un falso negativo**: un
 `DELETE` o un `PATCH` por REST contra una tabla sin políticas **sigue
 devolviendo 204**. No es que esté permitido: RLS hace que no matchee ninguna
