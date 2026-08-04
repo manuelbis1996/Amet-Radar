@@ -12,116 +12,239 @@
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
 <style>
   :root{
-    --ink: #12141a;
-    --panel: #191d24;
-    --panel-2: #20252e;
-    --line: #2a303b;
+    --bg: #0d0f14;
+    --bg-soft: #12151c;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --line: #262d3a;
+    --line-soft: #1f2530;
     --amber: #ffb020;
-    --signal: #f4f1ea;
-    --muted: #8a92a1;
+    --amber-dim: rgba(255,176,32,.14);
+    --signal: #eef1f6;
+    --muted: #8b94a5;
+    --muted-2: #626b7c;
     --teal: #34c9a8;
     --alert: #ff5d3a;
     --blue: #4f9bf0;
+    --radius: 14px;
     --font-display: 'Big Shoulders Display', sans-serif;
     --font-body: 'IBM Plex Sans', sans-serif;
     --font-mono: 'IBM Plex Mono', monospace;
   }
   *{ box-sizing:border-box; }
-  html,body{ margin:0; padding:0; min-height:100%; background:var(--ink); font-family:var(--font-body); color:var(--signal); }
-  h1,h2{ font-family:var(--font-display); text-transform:uppercase; letter-spacing:0.4px; margin:0; }
-  #app{ max-width:960px; margin:0 auto; padding:20px 16px 60px; }
-
-  header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
-  header h1{ font-size:22px; }
-  header p{ margin:2px 0 0; font-size:12px; color:var(--muted); font-family:var(--font-mono); }
-  #logout-btn{ background:transparent; border:1px solid var(--line); color:var(--muted); border-radius:8px; padding:8px 14px; font-family:var(--font-display); font-size:12px; text-transform:uppercase; cursor:pointer; }
-  #logout-btn:hover{ color:var(--signal); border-color:var(--alert); }
-
-  .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:20px; }
-  .card h2{ font-size:15px; margin-bottom:14px; color:var(--amber); }
-
-  #login-screen{ max-width:340px; margin:80px auto 0; }
-  #login-screen p.sub{ color:var(--muted); font-size:13px; margin:0 0 18px; font-family:var(--font-mono); }
-  label{ display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.3px; margin-bottom:6px; font-family:var(--font-display); }
-  input[type=password], input[type=number]{
-    width:100%; background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
-    color:var(--signal); padding:10px 12px; font-family:var(--font-body); font-size:14px; margin-bottom:14px;
+  html,body{
+    margin:0; padding:0; min-height:100%; color:var(--signal);
+    font-family:var(--font-body); background:var(--bg);
+    background-image:
+      radial-gradient(900px 400px at 12% -8%, rgba(255,176,32,.07), transparent 60%),
+      radial-gradient(700px 380px at 92% 4%, rgba(79,155,240,.06), transparent 60%);
+    background-attachment:fixed;
   }
-  .btn{ border:none; border-radius:10px; padding:11px 18px; font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:0.3px; text-transform:uppercase; cursor:pointer; }
-  .btn-primary{ background:var(--amber); color:var(--ink); }
-  .btn-primary:disabled{ background:var(--line); color:var(--muted); cursor:default; }
-  .error-box{ background:rgba(255,93,58,0.12); border:1px solid var(--alert); color:#ffb3a0; padding:10px 12px; border-radius:8px; font-size:12px; margin-bottom:14px; }
+  h1,h2{ font-family:var(--font-display); text-transform:uppercase; letter-spacing:.5px; margin:0; }
+  #app{ max-width:1180px; margin:0 auto; padding:0 20px 72px; }
+
+  /* ---- Cabecera ---- */
+  header{
+    position:sticky; top:0; z-index:50;
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:18px 0 16px; margin-bottom:24px;
+    background:linear-gradient(180deg, var(--bg) 62%, transparent);
+    backdrop-filter:blur(8px);
+  }
+  header h1{ font-size:24px; line-height:1; }
+  header p{ margin:4px 0 0; font-size:11px; color:var(--muted-2); font-family:var(--font-mono); letter-spacing:.4px; }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .brand .dot{
+    width:10px; height:10px; border-radius:50%; background:var(--amber); flex:none;
+    box-shadow:0 0 0 4px var(--amber-dim);
+  }
+  #logout-btn{
+    background:transparent; border:1px solid var(--line); color:var(--muted);
+    border-radius:10px; padding:9px 15px; font-family:var(--font-display);
+    font-size:12px; text-transform:uppercase; cursor:pointer; letter-spacing:.4px;
+    transition:color .15s, border-color .15s, background .15s;
+  }
+  #logout-btn:hover{ color:var(--signal); border-color:var(--alert); background:rgba(255,93,58,.08); }
+
+  /* ---- Tarjetas ---- */
+  .card{
+    background:linear-gradient(180deg, var(--panel), var(--bg-soft));
+    border:1px solid var(--line); border-radius:var(--radius);
+    padding:22px; margin-bottom:22px;
+    box-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 10px 30px -18px rgba(0,0,0,.9);
+  }
+  .card h2{
+    font-size:14px; margin-bottom:4px; color:var(--amber);
+    display:flex; align-items:center; gap:9px;
+  }
+  .card h2::before{ content:''; width:3px; height:14px; border-radius:2px; background:var(--amber); }
+  .card > .hint{ margin:0 0 18px; font-size:12.5px; color:var(--muted); line-height:1.5; }
+
+  /* ---- Login ---- */
+  #login-screen{ max-width:360px; margin:14vh auto 0; }
+  #login-screen h1{ font-size:30px; }
+  #login-screen p.sub{ color:var(--muted); font-size:13px; margin:6px 0 22px; font-family:var(--font-mono); }
+  label{
+    display:block; font-size:10.5px; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.6px; margin-bottom:7px; font-family:var(--font-display);
+  }
+  input[type=password], input[type=number]{
+    width:100%; background:var(--panel-2); border:1px solid var(--line); border-radius:10px;
+    color:var(--signal); padding:11px 13px; font-family:var(--font-body); font-size:14px;
+    margin-bottom:14px; transition:border-color .15s, box-shadow .15s;
+  }
+  input[type=password]:focus, input[type=number]:focus{
+    outline:none; border-color:var(--amber); box-shadow:0 0 0 3px var(--amber-dim);
+  }
+  .btn{
+    border:none; border-radius:11px; padding:12px 20px; font-family:var(--font-display);
+    font-weight:700; font-size:13px; letter-spacing:.5px; text-transform:uppercase;
+    cursor:pointer; transition:transform .12s, filter .15s, background .15s;
+  }
+  .btn:active{ transform:translateY(1px); }
+  .btn-primary{ background:var(--amber); color:#12141a; }
+  .btn-primary:hover{ filter:brightness(1.08); }
+  .btn-primary:disabled{ background:var(--line); color:var(--muted-2); cursor:default; filter:none; }
+  .error-box{
+    background:rgba(255,93,58,.11); border:1px solid rgba(255,93,58,.5); color:#ffb3a0;
+    padding:11px 13px; border-radius:10px; font-size:12.5px; margin-bottom:14px; line-height:1.45;
+  }
   .error-box[hidden]{ display:none; }
 
   #dashboard[hidden]{ display:none; }
 
-  .stat-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:12px; }
-  .stat-tile{ background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px; }
-  .stat-tile b{ display:block; font-family:var(--font-display); font-size:24px; color:var(--amber); }
-  .stat-tile span{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.3px; }
+  /* ---- Estadísticas ---- */
+  .stat-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; }
+  .stat-tile{
+    position:relative; background:var(--panel-2); border:1px solid var(--line-soft);
+    border-radius:12px; padding:14px 14px 13px; overflow:hidden;
+  }
+  .stat-tile::before{ content:''; position:absolute; inset:0 auto 0 0; width:2px; background:var(--amber); opacity:.65; }
+  .stat-tile b{ display:block; font-family:var(--font-display); font-size:27px; line-height:1.1; color:var(--signal); }
+  .stat-tile span{ font-size:10.5px; color:var(--muted-2); text-transform:uppercase; letter-spacing:.5px; }
   .cat-breakdown{ margin-top:14px; display:flex; flex-wrap:wrap; gap:8px; }
-  .cat-pill{ font-size:11px; padding:4px 10px; border-radius:20px; background:var(--panel-2); border:1px solid var(--line); color:var(--muted); font-family:var(--font-mono); }
+  .cat-pill{
+    font-size:11px; padding:5px 11px; border-radius:20px; background:var(--panel-2);
+    border:1px solid var(--line-soft); color:var(--muted); font-family:var(--font-mono);
+  }
 
+  /* ---- Tabla ---- */
   table{ width:100%; border-collapse:collapse; font-size:13px; }
-  th{ text-align:left; font-family:var(--font-display); font-size:11px; text-transform:uppercase; color:var(--muted); padding:8px 6px; border-bottom:1px solid var(--line); }
-  td{ padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th{
+    text-align:left; font-family:var(--font-display); font-size:10.5px; text-transform:uppercase;
+    color:var(--muted-2); padding:9px 8px; border-bottom:1px solid var(--line); letter-spacing:.5px;
+  }
+  td{ padding:11px 8px; border-bottom:1px solid var(--line-soft); vertical-align:middle; }
+  tbody tr{ transition:background .12s; }
+  tbody tr:hover{ background:rgba(255,255,255,.022); }
+  tbody tr:last-child td{ border-bottom:none; }
   td.note{ color:var(--muted); max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .thumb{ width:44px; height:33px; object-fit:cover; border-radius:4px; display:block; }
-  .cat-tag{ font-size:10px; padding:2px 8px; border-radius:10px; color:var(--ink); white-space:nowrap; font-family:var(--font-mono); }
-  .row-delete{ background:transparent; border:1px solid rgba(255,93,58,0.4); color:var(--alert); border-radius:8px; padding:6px 10px; font-size:11px; cursor:pointer; font-family:var(--font-display); text-transform:uppercase; }
-  .row-delete:hover{ background:rgba(255,93,58,0.12); }
-  .empty-row td{ text-align:center; color:var(--muted); padding:20px; }
+  td.num{ font-family:var(--font-mono); color:var(--muted); white-space:nowrap; }
+  .thumb{ width:44px; height:33px; object-fit:cover; border-radius:5px; display:block; }
+  .cat-tag{
+    font-size:10px; padding:3px 9px; border-radius:20px; color:#12141a;
+    white-space:nowrap; font-family:var(--font-mono); font-weight:600;
+  }
+  .row-delete{
+    background:transparent; border:1px solid rgba(255,93,58,.35); color:var(--alert);
+    border-radius:9px; padding:6px 11px; font-size:10.5px; cursor:pointer;
+    font-family:var(--font-display); text-transform:uppercase; letter-spacing:.4px;
+    transition:background .15s, border-color .15s;
+  }
+  .row-delete:hover{ background:rgba(255,93,58,.14); border-color:var(--alert); }
+  .empty-row td{ text-align:center; color:var(--muted-2); padding:26px; }
   .table-wrap{ overflow-x:auto; }
 
-  .config-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0 16px; }
+  /* ---- Parámetros ---- */
+  .config-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:0 18px; }
   .config-grid .field{ display:flex; flex-direction:column; }
+
   .toast{
-    position:fixed; top:16px; left:50%; transform:translateX(-50%);
-    background:var(--teal); color:#08211c; padding:10px 18px; border-radius:24px;
-    font-family:var(--font-display); font-size:12px; letter-spacing:0.3px; z-index:1000;
-    box-shadow:0 4px 12px rgba(0,0,0,0.35); max-width:80%; text-align:center;
+    position:fixed; top:18px; left:50%; transform:translateX(-50%);
+    background:var(--teal); color:#08211c; padding:11px 20px; border-radius:24px;
+    font-family:var(--font-display); font-size:12px; letter-spacing:.4px; z-index:1000;
+    box-shadow:0 8px 24px -8px rgba(0,0,0,.7); max-width:80%; text-align:center;
   }
   .toast.warn{ background:var(--alert); color:#fff; }
   .sr-only{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 
-  /* ---- Publicar un reporte desde el panel ---- */
-  .hint{ margin:-6px 0 12px; font-size:12px; color:var(--muted); }
+  /* ---- Publicar: mapa + formulario ---- */
+  .publish-layout{ display:grid; grid-template-columns:1fr; gap:20px; }
+  @media (min-width:900px){ .publish-layout{ grid-template-columns:1.35fr 1fr; } }
+
+  .map-wrap{ position:relative; }
   #admin-map{
-    height:300px; border-radius:10px; overflow:hidden; border:1px solid var(--line);
-    margin-bottom:12px; display:flex; align-items:center; justify-content:center;
+    height:380px; border-radius:12px; overflow:hidden; border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; background:var(--panel-2);
   }
-  /* Si MapLibre no carga (CDN caído, sin WebGL), la caja no puede quedar
-     vacía y muda: se avisa y se publica con las coordenadas a mano. */
-  #map-fallback{ color:var(--muted); font-size:13px; text-align:center; padding:0 24px; }
+  #map-fallback{ color:var(--muted); font-size:13px; text-align:center; padding:0 24px; line-height:1.5; }
   #map-fallback[hidden]{ display:none; }
-  .coord-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0 16px; margin-bottom:4px; }
-  .coord-grid input{ font-family:var(--font-mono); }
-  /* El pin lo posiciona MapLibre escribiendo transform en el elemento, así
-     que cualquier transform propio va en un hijo (misma razón que en
-     amet-radar.html). anchor:'bottom' -> la punta es el punto real. */
-  /* Marcador de un reporte YA existente. A propósito distinto del pin de
-     arriba (gota ámbar): estos son círculos con el color de su categoría,
-     para que no se confunda "dónde voy a publicar" con "qué ya hay". */
+  /* Cintillo con el estado del punto elegido, encima del mapa. */
+  .map-bar{
+    position:absolute; left:12px; right:12px; bottom:12px; z-index:5;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    background:rgba(13,15,20,.86); backdrop-filter:blur(8px);
+    border:1px solid var(--line); border-radius:11px; padding:9px 12px;
+    font-size:12px; color:var(--muted); font-family:var(--font-mono);
+  }
+  .map-bar b{ color:var(--signal); }
+  .map-bar .spacer{ flex:1; }
+  .ghost-btn{
+    background:transparent; border:1px solid var(--line); color:var(--muted);
+    border-radius:8px; padding:5px 10px; font-size:10.5px; cursor:pointer;
+    font-family:var(--font-display); text-transform:uppercase; letter-spacing:.4px;
+    transition:color .15s, border-color .15s;
+  }
+  .ghost-btn:hover{ color:var(--signal); border-color:var(--muted); }
+  .ghost-btn.danger{ color:var(--alert); border-color:rgba(255,93,58,.35); }
+  .ghost-btn.danger:hover{ background:rgba(255,93,58,.14); border-color:var(--alert); }
+
+  /* Ficha del reporte al tocar su marcador. */
+  #rep-popover{
+    position:absolute; left:12px; right:12px; top:12px; z-index:10;
+    background:rgba(13,15,20,.94); backdrop-filter:blur(10px);
+    border:1px solid var(--line); border-radius:12px; padding:13px 14px;
+    box-shadow:0 16px 40px -18px rgba(0,0,0,.95);
+  }
+  #rep-popover[hidden]{ display:none; }
+  #rep-popover .rp-top{ display:flex; align-items:center; gap:9px; margin-bottom:8px; }
+  #rep-popover .rp-meta{ font-size:11.5px; color:var(--muted); font-family:var(--font-mono); margin-bottom:11px; }
+  #rep-popover .rp-actions{ display:flex; gap:8px; }
+
+  /* Marcador de un reporte existente. Distinto a propósito del pin de
+     publicar: círculo con el color de su categoría vs. gota ámbar. */
   .rep-dot{
-    width:26px; height:26px; border-radius:50%; display:flex;
-    align-items:center; justify-content:center; font-size:13px;
-    border:2px solid #12141a; box-shadow:0 2px 5px rgba(0,0,0,.45);
+    width:28px; height:28px; border-radius:50%; display:flex;
+    align-items:center; justify-content:center; font-size:14px; cursor:pointer;
+    border:2px solid #0d0f14; box-shadow:0 2px 6px rgba(0,0,0,.5);
+    transition:transform .12s;
   }
-  .rep-dot.approx{ border-style:dashed; opacity:.85; }
-  .pick-pin{ width:26px; height:34px; cursor:grab; }
-  .pick-pin svg{ width:100%; height:100%; filter:drop-shadow(0 2px 4px rgba(0,0,0,.5)); }
-  .cat-choices{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; margin-bottom:14px; }
+  .rep-dot:hover{ transform:scale(1.14); }
+  .rep-dot.approx{ border-style:dashed; opacity:.9; }
+  .rep-dot.sel{ box-shadow:0 0 0 3px var(--signal); }
+  .rep-dot.vencido{ filter:grayscale(1); opacity:.45; }
+  /* MapLibre posiciona el marcador escribiendo transform en el elemento, así
+     que cualquier transform propio va en un hijo. anchor:'bottom' -> la punta
+     del pin es el punto real. */
+  .pick-pin{ width:28px; height:36px; cursor:grab; }
+  .pick-pin svg{ width:100%; height:100%; filter:drop-shadow(0 3px 6px rgba(0,0,0,.6)); }
+
+  .coord-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }
+  .coord-grid input{ font-family:var(--font-mono); font-size:13px; }
+  .cat-choices{ display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-bottom:16px; }
   .cat-choice{
-    background:var(--panel-2); border:1px solid var(--line); border-radius:10px;
-    color:var(--signal); padding:10px; font-size:12px; cursor:pointer; text-align:left;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:11px;
+    color:var(--signal); padding:11px; font-size:12px; cursor:pointer; text-align:left;
     font-family:var(--font-body); display:flex; align-items:center; gap:8px;
+    transition:border-color .15s, background .15s;
   }
+  .cat-choice:hover{ border-color:var(--muted-2); }
   .cat-choice[aria-pressed="true"]{ border-color:var(--cat); background:var(--cat-tint); }
-  .check-row{ display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:13px; color:var(--muted); }
-  .check-row input{ width:16px; height:16px; accent-color:var(--amber); }
+  .check-row{ display:flex; align-items:flex-start; gap:9px; margin-bottom:16px; font-size:12.5px; color:var(--muted); }
+  .check-row input{ width:16px; height:16px; accent-color:var(--amber); margin-top:1px; flex:none; }
   .warn-note{
-    margin:12px 0 0; font-size:12px; color:#ffd7a0; background:rgba(255,176,32,.10);
-    border:1px solid rgba(255,176,32,.35); border-radius:8px; padding:9px 11px;
+    margin:14px 0 0; font-size:12px; color:#ffd7a0; background:rgba(255,176,32,.09);
+    border:1px solid rgba(255,176,32,.3); border-radius:10px; padding:10px 12px; line-height:1.5;
   }
 </style>
 </head>
@@ -141,9 +264,12 @@
 
   <div id="dashboard" hidden>
     <header>
-      <div>
-        <h1>AMET Radar — Admin</h1>
-        <p>Panel de control</p>
+      <div class="brand">
+        <span class="dot" aria-hidden="true"></span>
+        <div>
+          <h1>AMET Radar</h1>
+          <p>Panel de administración</p>
+        </div>
       </div>
       <button id="logout-btn" aria-label="Cerrar sesión del panel">Cerrar sesión</button>
     </header>
@@ -156,31 +282,57 @@
 
     <div class="card">
       <h2>Publicar reporte</h2>
-      <p class="hint">Arrastra el pin o toca el mapa para elegir el punto. No hace falta estar cerca: se publica donde marques.</p>
+      <p class="hint">Toca el mapa para elegir el punto — no hace falta estar cerca. Los círculos de colores son los reportes que ya existen; tócalos para ver el detalle o eliminarlos.</p>
       <div class="error-box" id="publish-error" hidden></div>
-      <div id="admin-map"><div id="map-fallback" hidden>No se pudo cargar el mapa. Escribe las coordenadas a mano y publica igual.</div></div>
-      <div class="coord-grid">
-        <div class="field">
-          <label for="pub-lat">Latitud</label>
-          <input type="number" id="pub-lat" step="0.00001" value="19.22140">
+
+      <div class="publish-layout">
+        <div class="map-wrap">
+          <div id="admin-map"><div id="map-fallback" hidden>No se pudo cargar el mapa. Escribe las coordenadas a mano y publica igual.</div></div>
+
+          <div id="rep-popover" hidden>
+            <div class="rp-top">
+              <span class="cat-tag" id="rp-cat"></span>
+            </div>
+            <div class="rp-meta" id="rp-meta"></div>
+            <div class="rp-actions">
+              <button type="button" class="ghost-btn danger" id="rp-delete">Eliminar</button>
+              <button type="button" class="ghost-btn" id="rp-close">Cerrar</button>
+            </div>
+          </div>
+
+          <div class="map-bar">
+            <span id="pin-estado">Ningún punto elegido</span>
+            <span class="spacer"></span>
+            <button type="button" class="ghost-btn" id="pin-clear" hidden>Quitar punto</button>
+          </div>
         </div>
-        <div class="field">
-          <label for="pub-lng">Longitud</label>
-          <input type="number" id="pub-lng" step="0.00001" value="-70.52950">
+
+        <div>
+          <div class="coord-grid">
+            <div class="field">
+              <label for="pub-lat">Latitud</label>
+              <input type="number" id="pub-lat" step="0.00001" placeholder="19.22140">
+            </div>
+            <div class="field">
+              <label for="pub-lng">Longitud</label>
+              <input type="number" id="pub-lng" step="0.00001" placeholder="-70.52950">
+            </div>
+          </div>
+
+          <label id="cat-label">Categoría</label>
+          <div class="cat-choices" id="cat-choices" role="group" aria-labelledby="cat-label"></div>
+
+          <div class="check-row">
+            <input type="checkbox" id="pub-approx">
+            <label for="pub-approx" style="margin:0; text-transform:none; font-family:var(--font-body); font-size:12.5px; letter-spacing:0; color:var(--muted);">
+              Zona aproximada — círculo de 150 m en vez de un punto exacto
+            </label>
+          </div>
+
+          <button class="btn btn-primary" id="publish-btn" style="width:100%;" aria-label="Publicar reporte en el punto marcado">Publicar en ese punto</button>
         </div>
       </div>
 
-      <label id="cat-label">Categoría</label>
-      <div class="cat-choices" id="cat-choices" role="group" aria-labelledby="cat-label"></div>
-
-      <div class="check-row">
-        <input type="checkbox" id="pub-approx">
-        <label for="pub-approx" style="margin:0; text-transform:none; font-family:var(--font-body); font-size:13px; letter-spacing:0;">
-          Zona aproximada — se dibuja un círculo de 150 m en vez de un punto exacto
-        </label>
-      </div>
-
-      <button class="btn btn-primary" id="publish-btn" aria-label="Publicar reporte en el punto marcado">Publicar en ese punto</button>
       <p class="warn-note">Esto publica un reporte real: se ve en el mapa de todos y <b>manda una notificación push</b> a quien esté suscrito a menos de 2 km.</p>
     </div>
 
@@ -560,11 +712,55 @@
   }
 
   function puntoActual(){
-    return { lat: Number(inputLat().value), lng: Number(inputLng().value) };
+    const lat = Number(inputLat().value), lng = Number(inputLng().value);
+    if(inputLat().value === '' || inputLng().value === '') return null;
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+  }
+
+  // El pin NO está siempre: se crea al elegir un punto y se destruye al
+  // quitarlo. Antes aparecía fijo en el centro apenas abrías el panel, lo que
+  // sugería un punto elegido que nadie había elegido y competía visualmente
+  // con los marcadores de los reportes.
+  function ponerPin(lat, lng){
+    if(!adminMap) return;
+    if(!pinMarker){
+      const el = document.createElement('div');
+      el.className = 'pick-pin';
+      el.innerHTML = `<svg viewBox="0 0 26 34" aria-hidden="true"><path d="M13 0C5.8 0 0 5.8 0 13c0 9.2 13 21 13 21s13-11.8 13-21C26 5.8 20.2 0 13 0z" fill="#ffb020"/><circle cx="13" cy="13" r="5" fill="#0d0f14"/></svg>`;
+      pinMarker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
+        .setLngLat([lng, lat]).addTo(adminMap);
+      pinMarker.on('dragend', () => {
+        const ll = pinMarker.getLngLat();
+        escribirPunto(ll.lat, ll.lng);
+      });
+    } else {
+      pinMarker.setLngLat([lng, lat]);
+    }
+  }
+  function quitarPin(){
+    if(pinMarker){ try{ pinMarker.remove(); }catch(e){} pinMarker = null; }
+    inputLat().value = '';
+    inputLng().value = '';
+    reflejarEstadoPunto();
+  }
+  function reflejarEstadoPunto(){
+    const p = puntoActual();
+    const est = document.getElementById('pin-estado');
+    const clr = document.getElementById('pin-clear');
+    if(p){
+      est.innerHTML = `Punto elegido: <b>${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</b>`;
+      clr.hidden = false;
+    } else {
+      est.textContent = adminMap ? 'Toca el mapa para elegir el punto' : 'Escribe las coordenadas para elegir el punto';
+      clr.hidden = true;
+    }
   }
   function escribirPunto(lat, lng){
     inputLat().value = lat.toFixed(5);
     inputLng().value = lng.toFixed(5);
+    ponerPin(lat, lng);
+    reflejarEstadoPunto();
   }
 
   function mostrarFallbackMapa(){
@@ -595,28 +791,20 @@
       });
       adminMap.addControl(new maplibregl.AttributionControl({ compact:true }));
 
-      const el = document.createElement('div');
-      el.className = 'pick-pin';
-      el.innerHTML = `<svg viewBox="0 0 26 34" aria-hidden="true"><path d="M13 0C5.8 0 0 5.8 0 13c0 9.2 13 21 13 21s13-11.8 13-21C26 5.8 20.2 0 13 0z" fill="#ffb020"/><circle cx="13" cy="13" r="5" fill="#12141a"/></svg>`;
-      pinMarker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
-        .setLngLat([DEFAULT_CENTER[1], DEFAULT_CENTER[0]])
-        .addTo(adminMap);
-
-      pinMarker.on('dragend', () => {
-        const ll = pinMarker.getLngLat();
-        escribirPunto(ll.lat, ll.lng);
-      });
+      // Sin pin al abrir: aparece recién cuando se elige un punto.
       adminMap.on('click', (e) => {
-        pinMarker.setLngLat(e.lngLat);
+        cerrarPopover();
         escribirPunto(e.lngLat.lat, e.lngLat.lng);
       });
-      // Editar las coordenadas a mano mueve el pin.
       [inputLat(), inputLng()].forEach(inp => inp.addEventListener('change', () => {
-        const { lat, lng } = puntoActual();
-        if(Number.isFinite(lat) && Number.isFinite(lng) && pinMarker){
-          pinMarker.setLngLat([lng, lat]);
-          adminMap.easeTo({ center:[lng, lat], duration: 300 });
+        const p = puntoActual();
+        if(p){
+          ponerPin(p.lat, p.lng);
+          adminMap.easeTo({ center:[p.lng, p.lat], duration: 300 });
+        } else if(pinMarker){
+          quitarPin();
         }
+        reflejarEstadoPunto();
       }));
 
       // El contenedor acaba de hacerse visible; sin esto el mapa queda cortado.
@@ -632,34 +820,72 @@
   // Reportes existentes sobre el mapa. Se redibujan enteros en cada refresco
   // (son pocos y se autoexpiran); no vale la pena un diff incremental.
   let repMarkers = [];
+  let repSeleccionado = null;
+
+  function cerrarPopover(){
+    repSeleccionado = null;
+    const pop = document.getElementById('rep-popover');
+    if(pop) pop.hidden = true;
+    document.querySelectorAll('.rep-dot.sel').forEach(e => e.classList.remove('sel'));
+  }
+
+  function abrirPopover(r, el){
+    repSeleccionado = r.id;
+    document.querySelectorAll('.rep-dot.sel').forEach(e => e.classList.remove('sel'));
+    el.classList.add('sel');
+    const cat = CATEGORIES[r.category] || { emoji:'❔', label:r.category, hex:'#8a92a1' };
+    const tag = document.getElementById('rp-cat');
+    tag.textContent = `${cat.emoji} ${cat.label}`;
+    tag.style.background = cat.hex;
+    const maxAge = Number(document.getElementById('cfg-maxage').value) || 120;
+    const vencido = (Date.now() - r.ts) / 60000 > maxAge;
+    document.getElementById('rp-meta').innerHTML =
+      `${timeAgo(r.ts)} · 👍 ${r.confirms||0} · 👎 ${r.denies||0}` +
+      (r.approx ? ' · zona aproximada' : '') +
+      (vencido ? ' · <b>vencido, los usuarios ya no lo ven</b>' : '');
+    document.getElementById('rep-popover').hidden = false;
+  }
+
   function renderMapaReportes(){
     if(!adminMap) return;   // el mapa puede no haber cargado; la tabla igual sirve
     repMarkers.forEach(m => { try{ m.remove(); }catch(e){} });
     repMarkers = [];
+    cerrarPopover();
+    const maxAge = Number(document.getElementById('cfg-maxage').value) || 120;
     for(const r of reportsCache){
       if(typeof r.lat !== 'number' || typeof r.lng !== 'number') continue;
       const cat = CATEGORIES[r.category] || { emoji:'❔', label:r.category, hex:'#8a92a1' };
+      const vencido = (Date.now() - r.ts) / 60000 > maxAge;
       const el = document.createElement('div');
-      el.className = 'rep-dot' + (r.approx ? ' approx' : '');
+      el.className = 'rep-dot' + (r.approx ? ' approx' : '') + (vencido ? ' vencido' : '');
       el.style.background = cat.hex;
       el.textContent = cat.emoji;
-      el.title = `${cat.label} · ${timeAgo(r.ts)}` + (r.approx ? ' · zona aproximada' : '');
+      el.title = `${cat.label} · ${timeAgo(r.ts)}` + (r.approx ? ' · zona aproximada' : '') +
+                 (vencido ? ' · vencido' : '');
+      el.addEventListener('click', (ev) => { ev.stopPropagation(); abrirPopover(r, el); });
       repMarkers.push(new maplibregl.Marker({ element: el })
         .setLngLat([r.lng, r.lat])
         .addTo(adminMap));
     }
   }
 
+  document.getElementById('rp-close').addEventListener('click', cerrarPopover);
+  document.getElementById('rp-delete').addEventListener('click', () => {
+    if(repSeleccionado) deleteReport(repSeleccionado);
+  });
+  document.getElementById('pin-clear').addEventListener('click', quitarPin);
+
   async function publicarReporte(){
     const errBox = document.getElementById('publish-error');
     const btn = document.getElementById('publish-btn');
     errBox.hidden = true;
-    const { lat, lng } = puntoActual();
-    if(!Number.isFinite(lat) || !Number.isFinite(lng)){
-      errBox.textContent = 'Las coordenadas no son válidas.';
+    const punto = puntoActual();
+    if(!punto){
+      errBox.textContent = 'Elige un punto primero: toca el mapa o escribe las coordenadas.';
       errBox.hidden = false;
       return;
     }
+    const { lat, lng } = punto;
     btn.disabled = true;
     btn.textContent = 'Publicando…';
     try{
@@ -688,6 +914,7 @@
         return;
       }
       showToast('Reporte publicado');
+      quitarPin();
       await fetchReports();
       renderReportsTable();
       renderMapaReportes();
@@ -706,6 +933,7 @@
   async function loadDashboard(){
     try{
       renderCatChoices();
+      reflejarEstadoPunto();
       // Fuera del try de abajo a propósito: initAdminMap ya se protege sola,
       // pero que quede explícito que el panel no depende del mapa.
       initAdminMap();
