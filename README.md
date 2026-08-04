@@ -48,7 +48,7 @@ Lo más rápido es un túnel, `npx localtunnel --port 8000`.
 ## Pruebas
 
 ```bash
-node tests/run.js                 # las 13 suites
+node tests/run.js                 # las 14 suites
 node tests/run.js seguridad area  # solo las que coincidan
 ```
 
@@ -113,11 +113,16 @@ Los reportes se autoexpiran, así que el mapa siempre muestra cosas recientes.
 - **Compartir** con la hoja nativa del sistema; el link de un reporte muestra
   una tarjeta de preview propia en WhatsApp y redes, generada por el Worker.
 - **PWA instalable**, con el shell cacheado por el service worker.
-- **Sin fotos ni notas.** El flujo con foto sigue completo en el código pero
-  no tiene entrada en la interfaz, y desde v14.1 el servidor rechaza fotos y
-  notas: como nadie podía adjuntarlas, lo único que entraba por ahí era abuso
-  por API. Reactivarlo exige reabrir el servidor **y** construir moderación —
-  ver el comentario de `FLUJO_CON_FOTO` en `amet-radar.html`.
+- **Foto opcional, después de publicar.** Reportar nunca la pide: el reporte
+  sale primero y la foto se agrega cuando se puede, desde el aviso de 6
+  segundos o desde la hoja de detalle del reporte propio. El orden es a
+  propósito, porque la gente reporta manejando. Los pines con foto llevan una
+  cámara para distinguirse de un aviso a secas.
+- **Denunciar una foto** desde la hoja de detalle: con suficientes denuncias
+  se quita sola, del mapa y de Storage. El reporte sobrevive — lo que se
+  denuncia es la imagen, no el aviso de que hay un retén.
+- **Sin notas.** Ningún flujo las escribe y el servidor las rechaza; las de
+  reportes viejos se siguen mostrando.
 - **Solo se reporta una categoría** (retén fijo). Las otras tres siguen
   existiendo para dibujar reportes viejos y para el texto de las
   notificaciones.
@@ -149,8 +154,8 @@ cualquiera encuentre la pantalla de moderación.
 | `_worker.js`, `wrangler.jsonc`, `.assetsignore` | Despliegue en Cloudflare Workers y preview de links |
 | `sw.js`, `manifest.json`, `icon-*.png` | PWA |
 | `supabase/migrations/` | Historial del esquema de la base |
-| `supabase/functions/` | Edge Functions (push, panel admin, borrado de fotos) |
-| `tests/` | Las 13 suites de Playwright |
+| `supabase/functions/` | Edge Functions (push, panel admin, adjuntar y borrar fotos) |
+| `tests/` | Las 14 suites de Playwright |
 | `.github/` | CI (corre las suites en cada push y PR) y plantilla de PR |
 
 ## Más detalle

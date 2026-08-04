@@ -17,9 +17,23 @@
 //
 // SEGURIDAD. El trigger la llama con la anon key, que es pública, así que
 // hay que asumir que cualquiera puede invocarla con el id que quiera. Por
-// eso la función **se niega a borrar la foto de un reporte que todavía
-// existe**: solo limpia huérfanas. Con esa invariante, el peor uso posible
-// es apurar el borrado de algo que ya iba a desaparecer.
+// eso la función **solo borra fotos que ningún reporte esté usando**. Con esa
+// invariante, el peor uso posible es apurar el borrado de algo que ya iba a
+// desaparecer.
+//
+// "HUÉRFANA" SE AMPLIÓ, sin debilitar la invariante. Antes preguntaba solo si
+// el reporte existía; ahora pregunta si existe **y sigue apuntando a una
+// foto**. Los dos casos que quedan cubiertos:
+//
+//   * el reporte se borró          -> no hay fila            -> huérfana
+//   * la moderación quitó la foto  -> hay fila con photo null -> huérfana
+//   * el reporte tiene su foto     -> hay fila con photo      -> SE NIEGA
+//
+// El segundo caso es el que hizo falta al reabrir las fotos: cuando
+// flag_photo() llega al umbral pone `photo = null`, pero eso solo la esconde
+// de la app — el bucket es público y el objeto se sigue sirviendo por su URL
+// a quien la tenga. Sin este borrado, "ocultar" no serviría de nada contra
+// quien ya la vio.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -52,21 +66,25 @@ Deno.serve(async (req) => {
     return json({ error: "id inválido" }, 400);
   }
 
-  // La invariante que hace segura a esta función: solo huérfanas.
-  const { data: sigueVivo, error: errLookup } = await supabase
+  // La invariante que hace segura a esta función: solo fotos que ningún
+  // reporte esté usando. El `not.is.null` es la parte que importa — sin él,
+  // una foto que la moderación acaba de quitar de la fila nunca se borraría
+  // de Storage y se seguiría sirviendo por su URL directa.
+  const { data: enUso, error: errLookup } = await supabase
     .from("reports")
     .select("id")
     .eq("id", id)
+    .not("photo", "is", null)
     .maybeSingle();
 
   if (errLookup) {
     console.error("Error consultando el reporte", errLookup);
     return json({ error: "no se pudo verificar el reporte" }, 500);
   }
-  if (sigueVivo) {
-    // No es un huérfano: alguien está pidiendo borrar la foto de un reporte
-    // que sigue publicado. Se ignora.
-    return json({ skipped: "el reporte todavía existe" }, 409);
+  if (enUso) {
+    // Alguien está pidiendo borrar la foto de un reporte que la está usando.
+    // Se ignora.
+    return json({ skipped: "el reporte todavía usa esa foto" }, 409);
   }
 
   const { error } = await supabase.storage.from(BUCKET).remove([`${id}.jpg`]);

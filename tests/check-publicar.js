@@ -114,7 +114,11 @@ async function nuevaPagina(browser){
   check('el flujo se cierra al publicar', overlayCerrado);
   const toast = await textoYa(page, '.toast', '(sin toast)');
   check('avisa que se publicó', /publicado/i.test(toast), toast);
-  check('el aviso ofrece "Deshacer"', !!(await page.$('.toast-btn')));
+  check('el aviso ofrece "Deshacer"', !!(await page.$('[data-toast="undo"]')));
+  // Desde v15.0 el toast trae DOS acciones: la foto opcional y Deshacer.
+  // Por eso los selectores son específicos — con `.toast-btn` a secas se
+  // clickeaba la primera, que ya no es la que este test quiere.
+  check('y también la puerta rápida a la foto', !!(await page.$('[data-toast="foto"]')));
   const centrado = await page.evaluate(() => {
     const c = window.__map._calls.filter(x => x[0] === 'easeTo').pop();
     return c ? c[1] : null;
@@ -143,7 +147,7 @@ async function nuevaPagina(browser){
     const m = r.method();
     if((m === 'DELETE' || m === 'PATCH') && /\/rest\/v1\/reports/.test(r.url())) directos.push(m + ' ' + r.url());
   });
-  await page.click('.toast-btn');
+  await page.click('[data-toast="undo"]');
   await page.waitForTimeout(700);
   const despues = await page.$$eval('.amet-pin', e => e.length);
   check('"Deshacer" quita el marcador del mapa', despues === antes - 1, `${antes} -> ${despues}`);

@@ -56,6 +56,7 @@ código, revisá si el método está acá.
 | `check-voto.js` | Estado visible del voto y colores de categoría |
 | `check-vacio.js` | Píldora "Todo tranquilo por aquí": tamaño y que no tape nada |
 | `check-ux.js` | Detalles de diseño (botón Compartir destacado, estado vacío) |
+| `check-foto-opcional.js` | Fotos opcionales (v15.0): que publicar siga siendo **un toque** y la foto no meta ningún paso antes; que no viaje en `create_report` sino por `attach-photo` con el token; que la cámara del pin aparezca solo si hay foto; y que una denuncia que alcanza el umbral la saque de la vista |
 
 ## Lo que estas suites NO pueden ver
 
@@ -100,11 +101,14 @@ Qué cubre: que leer siga abierto (si esto falla, lo demás son falsos
 positivos); que `POST`/`PATCH`/`DELETE` directos estén cerrados en `reports`,
 `app_config`, `push_subscriptions` y el bucket; que `report_events`,
 `rate_limit_salt` y las funciones privadas no le respondan a `anon`; que
-`create_report` y `subscribe_push` validen la entrada; y un **ciclo de sonda**
-que publica un reporte propio para poder comprobar de forma concluyente que un
-`DELETE` directo no se lo lleva, que un `PATCH` no infla los votos, que
-`vote_report` suma de a uno y devuelve una sola fila, y que la propiedad se
-valida por token.
+`create_report`, `subscribe_push` y `flag_photo` validen la entrada; y un
+**ciclo de sonda** que publica un reporte propio para poder comprobar de forma
+concluyente que un `DELETE` directo no se lo lleva, que un `PATCH` no infla los
+votos, que `vote_report` suma de a uno y devuelve una sola fila, que la
+propiedad se valida por token, y todo el camino de la foto opcional (adjuntar
+con el token equivocado se rechaza, con el correcto no; la foto queda servida
+con cache corto; no se puede reemplazar; tres denuncias la esconden y el
+reporte sobrevive).
 
 Tres trampas que este archivo encapsula, y que ya dieron un rojo falso y un
 verde falso mientras se escribía:

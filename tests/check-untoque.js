@@ -89,10 +89,14 @@ const textoYa = (page, sel, def='(no está)') => page.evaluate(([s, d]) => {
 
   // ---- 3. La red de seguridad: Deshacer ----
   const toast = await textoYa(page, '.toast', '(sin toast)');
-  check('el aviso ofrece Deshacer', !!(await page.$('.toast-btn')), toast);
+  check('el aviso ofrece Deshacer', !!(await page.$('[data-toast="undo"]')), toast);
+  // v15.0: el toast también ofrece agregarle una foto al reporte recién
+  // publicado, sin obligar a nada. Es la puerta rápida; la que no tiene
+  // reloj en contra es la de la hoja de detalle.
+  check('y ofrece agregar una foto, sin obligar', !!(await page.$('[data-toast="foto"]')));
 
   const pinesAntes = await page.$$eval('.amet-pin, .amet-approx', e => e.length);
-  await page.click('.toast-btn');
+  await page.click('[data-toast="undo"]');
   await page.waitForTimeout(700);
   const pinesDespues = await page.$$eval('.amet-pin, .amet-approx', e => e.length);
   check('Deshacer quita el marcador', pinesDespues === pinesAntes - 1, `${pinesAntes} -> ${pinesDespues}`);

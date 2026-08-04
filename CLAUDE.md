@@ -118,8 +118,11 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
 - `supabase/functions/admin-update-config/index.ts` — Edge Function que
   edita `app_config` desde el panel admin, detrás del mismo `ADMIN_PASSWORD`
   y con validación de rangos (ver "app_config también borraba" abajo).
+- `supabase/functions/attach-photo/index.ts` — Edge Function que adjunta una
+  foto a un reporte YA publicado, validando la propiedad con el token. Es la
+  única vía: el bucket no tiene políticas (ver "Fotos opcionales" abajo).
 - `supabase/functions/delete-photo/index.ts` — Edge Function que borra de
-  Storage la foto de un reporte que ya no existe. **No es opcional ni un
+  Storage una foto que ningún reporte esté usando. **No es opcional ni un
   extra**: Supabase prohíbe borrar de `storage.objects` por SQL, así que
   esta es la única vía (ver "Borrar fotos" abajo).
 - `admin.html` — panel de administración (moderar reportes, ver
@@ -138,7 +141,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 13 suites de Playwright, versionadas en el repo. **Leer
+- `tests/` — las 14 suites de Playwright, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -148,7 +151,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   el doble de MapLibre que comparten todas (el sandbox bloquea el CDN y los
   tiles). **`tests` está en `.assetsignore`**: sin eso, con
   `assets.directory: "./"`, estos archivos se publicarían como servibles.
-- `tests/check-base-real.js` — el complemento de las 13: pega contra la base
+- `tests/check-base-real.js` — el complemento de las 14: pega contra la base
   **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
   mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
   entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
@@ -639,9 +642,90 @@ equivocado y con reportes sin `owner_hash`, y `true` con el correcto.
 `purge_expired_reports()` se lleva solo los vencidos. Y el trigger de la
 foto llegó a `delete-photo` con respuesta `200 {"ok":true}`.
 
-### Fotos y notas: cerradas del todo (v14.1) — leer antes de reactivar el flujo con foto
+### Fotos opcionales, adjuntas DESPUÉS de publicar (v15.0)
 
-**Estado actual: no se puede subir ninguna foto ni escribir ninguna nota.**
+**Las fotos volvieron, pero por otra puerta.** Ni la de antes de v13.0 (foto
+obligatoria, ANTES de publicar) ni la que v14.1 cerró. Migración:
+`20260804190000_optional_photos.sql`.
+
+**El orden es toda la decisión, no un detalle de implementación.** Reportar es
+UN toque y la gente lo hace manejando: cualquier paso antes de publicar
+retrasa el aviso a los demás justo cuando más urge, y encima empuja a sacar
+una foto en movimiento. Publicando primero, el reporte sirve desde el segundo
+cero y la foto se agrega cuando se puede — en el semáforo, o parado dos
+cuadras después. Se descartaron a propósito **mantener presionado** el botón
+(un gesto invisible no lo descubre nadie, menos manejando) y **dos botones**
+"Reportar" / "Reportar con foto" (es la pantalla de selección que se sacó en
+v13.0, obliga a decidir en el peor momento).
+
+**Lo que ese orden regala, y es la razón de que el cambio sea chico:**
+- **`create_report` NO se tocó.** Sigue rechazando `p_photo` y `p_note`, así
+  que todo el anti-spam de v14.0 queda exactamente como está.
+- **El bucket sigue SIN NINGUNA POLÍTICA.** El cliente no sube a Storage:
+  manda la foto al Edge Function `attach-photo`, que valida la propiedad y
+  escribe con la `service_role` key. O sea que **no se reabrió el agujero de
+  v14.1**. La invariante del esquema se mantiene: ninguna tabla acepta
+  escritura directa, todo pasa por una función.
+- **El piso del abuso sube solo**: para adjuntar hay que haber publicado
+  antes, y publicar ya está limitado por el dedupe de 150 m/30 min y el tope
+  por IP.
+
+**Las piezas nuevas**:
+
+| Pieza | Quién la llama | Qué hace |
+|---|---|---|
+| `attach-photo` (Edge Function) | cliente (`attachPhotoRemote`) | valida JPEG y tamaño, llama a `_attach_photo`, sube a Storage |
+| `_attach_photo(id, token, photo)` | solo `service_role` | un único UPDATE que valida propiedad **y** escribe la URL |
+| `flag_photo(id)` | cliente (`flag-photo`) | cuenta denuncias; al llegar a 3 pone `photo = null` |
+| `reports_photo_cleared` (trigger) | la base | avisa a `delete-photo` cuando `photo` pasa a null |
+
+**`_attach_photo` reserva y escribe en el MISMO UPDATE**, con `photo is null`
+en el WHERE. Dos consecuencias buscadas: es atómico (dos intentos simultáneos
+no pueden dejar dos objetos en Storage) y **no se puede reemplazar una foto ya
+publicada** — si no, alguien podría adjuntar algo inocente, esperar a que
+junte confirmaciones y recién entonces cambiarla. Por eso `attach-photo`
+reserva primero y sube después: al revés, un fallo del último paso dejaría un
+huérfano que nada limpia (el trigger solo mira cambios en la fila).
+
+**`delete-photo` amplió qué considera huérfana**, sin debilitar su invariante.
+Antes preguntaba si el reporte existía; ahora si existe **y sigue apuntando a
+una foto**. Así cubre los dos casos (reporte borrado, y foto quitada por la
+moderación) y sigue negándose a borrar una foto que un reporte esté usando.
+
+**El `cache-control` de 300 s es moderación, no rendimiento.** Storage sirve
+los objetos públicos detrás de un CDN: con el default de 3600 s, una foto que
+la moderación acaba de borrar **se sigue entregando por su URL directa hasta
+una hora**. Se detectó probando contra producción — `storage.objects` ya
+estaba vacío y el GET seguía dando 200. Con 300 s la ventana queda en 5
+minutos.
+
+**La cámara del pin va también en el círculo de zona.** El reporte de un toque
+es `approx: true`, o sea que se dibuja como círculo y no como pin: si la marca
+viviera solo en `paintPin`, justo el tipo de reporte más común de la app nunca
+mostraría que tiene foto. Se detectó con la suite nueva.
+
+**El umbral de denuncias (3) es una constante en el SQL, no `app_config`** —
+misma lección que los umbrales de `create_report`. Es deliberadamente bajo:
+sin cuentas de usuario alguien decidido puede juntar 3 y tirar abajo una foto
+legítima, pero el reporte sobrevive y la foto es un extra, mientras que una
+foto abusiva a la vista de todos es mucho más grave. Se elige errar hacia
+sacarla. El freno de "una denuncia por persona" es local
+(`amet_photo_flagged_v1`), igual que los votos: sin cuentas no hay nada mejor.
+
+**Verificado end-to-end contra producción**, no solo con mocks: adjuntar con
+token equivocado da 403 y con el correcto 200; la foto queda servida con
+`max-age=300`; reemplazarla se rechaza; tres denuncias la esconden y el
+trigger la borró de verdad de Storage (`storage.objects` en cero); el reporte
+sobrevive con `photo_flags = 3`. Todo eso está ahora en `check-base-real.js`,
+así que se revisa solo cada semana.
+
+### Fotos y notas: cerradas del todo (v14.1) — el estado del que se viene
+
+> Lo de abajo describe el estado **anterior a v15.0** y sigue siendo cierto
+> para el flujo con la foto ANTES de publicar (`FLUJO_CON_FOTO`), que sigue
+> apagado. Lo que cambió es que ahora hay otra vía, la de arriba.
+
+**Estado hasta v15.0: no se podía subir ninguna foto ni escribir ninguna nota.**
 Migración `20260803150000_close_photo_uploads.sql`. Es la respuesta al último
 bloqueante que quedaba ("moderación/reporte de abuso para las fotos"), y se
 resolvió **cerrando en vez de moderando**.
@@ -1473,6 +1557,9 @@ ordena alfabéticamente bien):
 17. `20260804150000_push_radius_config.sql` — columna `push_radius_meters` en
     `app_config`, con su `check` de rango (ver "Radio de las notificaciones
     push"). Aditiva y con default, así que no rompe nada por sí sola.
+18. `20260804190000_optional_photos.sql` — columna `photo_flags`, funciones
+    `_attach_photo` / `flag_photo` y el trigger `reports_photo_cleared` (ver
+    "Fotos opcionales"). Aditiva: no reabre ninguna política.
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
@@ -1482,8 +1569,8 @@ documentados donde corresponde pero listados acá juntos para no
 saltearse ninguno al migrar):
 - **Edge Functions**: `supabase/functions/notify-nearby/`,
   `supabase/functions/admin-login/`, `supabase/functions/admin-delete-report/`,
-  `supabase/functions/admin-update-config/` y
-  `supabase/functions/delete-photo/` hay que desplegarlas aparte
+  `supabase/functions/admin-update-config/`, `supabase/functions/delete-photo/`
+  y `supabase/functions/attach-photo/` hay que desplegarlas aparte
   (`deploy_edge_function` o Supabase CLI) — el código fuente sí está en
   el repo, solo el deploy es manual.
 - **Secrets de Edge Functions** (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,

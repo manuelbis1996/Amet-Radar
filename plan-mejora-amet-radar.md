@@ -1,7 +1,8 @@
 # Plan de Mejora — AMET Radar
 
 App de reportes comunitarios de retenes/AMET sobre **MapLibre GL**, con
-publicación de **un toque** (ubicación + categoría, sin foto ni nota), backend
+publicación de **un toque** (ubicación + categoría; la foto es opcional y se
+adjunta después), backend
 en Supabase y panel de administración. Desplegada en Cloudflare Workers.
 
 Este archivo lleva el registro de qué falta y por qué. Las versiones
@@ -26,8 +27,10 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
   (150 m / 30 min / misma categoría) como control real, más un tope por IP
   generoso (30/h) como cortafuegos. El límite de `localStorage` quedó solo
   como comodidad de UX.
-- **Fotos y notas cerradas** (v14.1): sin política de insert en el bucket y
-  `create_report` las rechaza. Era el último bloqueante conocido.
+- **Fotos opcionales, adjuntas después de publicar** (v15.0), con denuncia y
+  retiro automático. El bucket sigue sin políticas y `create_report` sigue
+  rechazando fotos: la subida pasa por el Edge Function `attach-photo`.
+  Las **notas** siguen cerradas.
 - **`app_config` cerrada** (v12.0): el `update` de `anon` permitía mover la
   definición de "vencido" y vaciar la base por una puerta lateral.
 - **Reportar es un toque** (v13.0), con "Deshacer" de 6 s como red de
@@ -36,8 +39,7 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
   decidido por el servidor.
 - **Fetch acotado al área visible** (v13.2) y columnas explícitas en el
   sondeo (v12.2): juntos, lo que más bajó el egreso.
-- **Fotos fuera de la fila** (Storage en vez de base64), aunque hoy el flujo
-  esté cerrado.
+- **Fotos fuera de la fila** (Storage en vez de base64).
 - **Notificaciones push por cercanía**, con el radio configurable desde el
   panel admin (2 km por default).
 - **Compartir**: deep link `?r=` + preview dinámico por reporte para bots,
@@ -45,7 +47,8 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 - **Panel de administración** (`admin.html`), con el borrado y la edición de
   parámetros detrás de Edge Functions con password.
 - **PWA instalable**; mapa limitado a República Dominicana.
-- **13 suites de Playwright** versionadas en `tests/`.
+- **14 suites de Playwright** versionadas en `tests/`, más
+  `check-base-real.js` contra la base real, con su workflow semanal.
 
 ---
 
@@ -107,13 +110,24 @@ nuevo.
 
 ## 3. Producto y funcionalidad
 
-**🟢 Moderación / denuncia de abuso — solo si vuelven las fotos**
-Estaba como bloqueante y se cerró de raíz en v14.1 quitando la posibilidad de
-subir fotos y escribir notas, que era por donde entraba el contenido abusivo.
-Mientras la app publique solo (ubicación, categoría, momento) **no hay
-contenido que moderar**. El día que se reactive `FLUJO_CON_FOTO` esto vuelve a
-ser un requisito y hay que construirlo **junto con** la reapertura, no después.
-- Esfuerzo: medio-alto. Bloqueante condicional.
+**✅ Fotos opcionales, con moderación — hecho** (v15.0)
+Las fotos volvieron, pero por otra puerta: son **opcionales** y se adjuntan
+**después** de publicar, no antes. Ese orden es todo el diseño — reportar
+sigue siendo un toque, que es lo que hace usable la app manejando.
+
+Y trajo la moderación con él, como decía este plan que había que hacer: se
+denuncia una foto desde la hoja de detalle y con 3 denuncias se quita sola,
+del mapa **y de Storage**. Se denuncia la imagen, no el reporte, que puede ser
+perfectamente válido.
+
+**Lo importante para el próximo cambio**: no hizo falta reabrir nada de lo que
+v14.1 cerró. `create_report` sigue rechazando fotos y el bucket sigue sin
+políticas — la subida pasa por el Edge Function `attach-photo`, que valida la
+propiedad con el token y escribe con la `service_role` key. La invariante del
+esquema se mantiene intacta: ninguna tabla acepta escritura directa.
+
+Sigue apagado el flujo con la foto **antes** de publicar (`FLUJO_CON_FOTO`), y
+conviene que siga así: obliga a sacarla en el momento, o sea manejando.
 
 **🟢 Editar un reporte propio**
 Quedó casi sin sentido: ya no hay nota que corregir ni categoría que elegir
@@ -138,8 +152,9 @@ El preview reusa `icon-512.png` en vez de un thumbnail del mapa. Cosmético.
 
 **🟢 Alternativa por teclado para elegir ubicación**
 El pin arrastrable depende del mapa táctil. Hoy solo se usa en el flujo con
-foto, que está apagado, así que en la práctica no bloquea a nadie — pero
-vuelve a importar si ese flujo se reactiva.
+foto *previa*, que está apagado, así que en la práctica no bloquea a nadie —
+pero vuelve a importar si ese flujo se reactiva. (El panel admin sí tiene vía
+por teclado: los inputs de coordenadas son la fuente de verdad.)
 - Esfuerzo: medio.
 
 ---
@@ -147,8 +162,9 @@ vuelve a importar si ese flujo se reactiva.
 ## 5. Calidad y DX
 
 **✅ Cero tests — resuelto**
-13 suites de Playwright versionadas en `tests/`, con `node tests/run.js` —
-incluida `check-admin-publicar.js`, la primera que cubre `admin.html`.
+14 suites de Playwright versionadas en `tests/`, con `node tests/run.js` —
+incluida `check-admin-publicar.js`, la primera que cubre `admin.html`. Aparte
+va `check-base-real.js`, que sí llega a Postgres.
 
 **✅ Cero CI — resuelto**
 `.github/workflows/tests.yml` corre `node tests/run.js` en cada push y cada
@@ -219,5 +235,6 @@ silencio del modelo real en Supabase.
 7. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
    editar reporte propio).
 
-**Condicional, fuera del orden**: si se reactiva el flujo con foto, la
-moderación deja de ser 🟢 y pasa a ser bloqueante en el mismo cambio.
+**Condicional, fuera del orden**: si algún día se reactiva `FLUJO_CON_FOTO`
+(la foto **antes** de publicar), hay que revisar la moderación de nuevo — la
+de v15.0 asume que solo el autor puede adjuntar, con su token.
