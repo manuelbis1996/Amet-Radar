@@ -130,7 +130,9 @@
   }
   .brand-dot{
     width:9px; height:9px; border-radius:50%; background:var(--brand); flex-shrink:0;
-    box-shadow:0 0 0 4px rgba(245,158,11,.18);
+    /* Halo derivado de --brand: quedó ámbar al pasar el acento a violeta
+       (v16.0) y el punto se veía de otro color que su propio halo. */
+    box-shadow:0 0 0 4px rgba(124,58,237,.18);
   }
   .brand-name{ font-size:15px; font-weight:700; letter-spacing:-.2px; white-space:nowrap; }
   .brand-count{
@@ -564,7 +566,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v16.0';
+  const APP_VERSION = 'v16.1';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1999,6 +2001,7 @@
     const overlayEl2 = document.getElementById('flow-overlay');
     const hojaAbierta = (detailEl2 && !detailEl2.hidden) || (overlayEl2 && !overlayEl2.hidden);
     t.className = 'toast' + (warn ? ' warn' : '') + (hojaAbierta ? ' top' : '');
+    t.setAttribute('role', 'status'); // que un lector de pantalla lo anuncie
     t.textContent = msg;
     document.getElementById('app').appendChild(t);
     setTimeout(()=> t.remove(), 2600);
@@ -2056,6 +2059,17 @@
   function removePickMarker(){
     if(pickMarker){ pickMarker.remove(); pickMarker = null; }
   }
+
+  // Escape cierra lo que un toque afuera también cerraría: primero el
+  // detalle si está abierto, si no la hoja del flujo — pero NUNCA una hoja
+  // marcada dismissible:false ("Publicando…"), por la misma razón que esas
+  // tampoco se cierran tocando afuera. En un teléfono no cambia nada; en
+  // desktop (donde también se usa, p. ej. el que modera) es lo esperado.
+  document.addEventListener('keydown', (e) => {
+    if(e.key !== 'Escape') return;
+    if(!detailEl.hidden){ closeDetail(); return; }
+    if(!overlay.hidden && overlay.dataset.dismissible !== 'false') closeOverlay();
+  });
 
   reportBtn.addEventListener('click', () => {
     if(!canReport()){
@@ -2373,6 +2387,7 @@
   function showUndoToast(id){
     const t = document.createElement('div');
     t.className = 'toast toast-action';
+    t.setAttribute('role', 'status'); // que un lector de pantalla lo anuncie
     // La foto también se ofrece acá, no solo en la hoja de detalle. Es la
     // puerta rápida para quien va de acompañante o ya está detenido; la que
     // no tiene reloj en contra es la del detalle, porque este toast dura 6s

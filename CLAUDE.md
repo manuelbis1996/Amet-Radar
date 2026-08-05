@@ -518,6 +518,29 @@ por medio.
     app se ven distintos y parece un bug. **Esto NO es sincronización**: el
     panel sigue sin sondear (se refresca al recargar o al publicar/borrar),
     a diferencia de la app que sondea cada 8s.
+- **Herramientas de moderación en la tabla** (v16.1): botón **Actualizar**
+  con la hora de la última actualización, y auto-refresco opcional de 30 s —
+  el panel sigue sin sondear solo por defecto, el auto es opt-in por sesión.
+  Filtros por categoría y por estado (activos / vencidos / con foto) que
+  achican **solo la tabla, nunca el mapa**: el mapa es el inventario completo
+  y filtrarlo haría parecer que algo se borró. Columna de coordenadas con
+  **«Ver»** (centra el mapa en ese reporte y abre su ficha — el cruce
+  tabla→mapa que antes se hacía a ojo) y **«Link»** (copia el mismo
+  `?r=<id>` que comparte la app, para difundir un reporte por WhatsApp desde
+  el panel). **Exportar CSV** exporta lo que la tabla muestra con los
+  filtros aplicados, con BOM (sin él Excel abre el archivo como Latin-1 y
+  rompe las tildes). **Purgar vencidos** pasa por la misma
+  `rpc/purge_expired_reports` pública que ya usa la app: solo puede borrar
+  filas vencidas, así que no necesita el password ni agrega superficie
+  nueva. Las estadísticas separan **activos de vencidos** (antes "Activos"
+  contaba todo, vencidos incluidos) y suman "última hora" y "con foto"; la
+  definición de "vencido" quedó unificada en `esVencido()` (tabla, mapa,
+  ficha y estadísticas leían `cfg-maxage` cada una con un fallback
+  distinto). El aviso de "manda push a menos de 2 km" muestra ahora el radio
+  real de `app_config.push_radius_meters` — estaba hardcodeado y podía
+  mentir desde que el radio es editable (v14.5). La miniatura de una foto
+  abre la imagen completa en otra pestaña. Cubierto por
+  `tests/check-admin-herramientas.js`.
 - **Por qué no quedó en Netlify Functions + Blobs**: la primera versión de
   este panel (antes de este commit) se construyó sobre un backend propio en
   Netlify Functions con Netlify Blobs como reemplazo de un `data/*.json` —
@@ -1520,6 +1543,10 @@ las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
     UI ya cerrada; y **"Marca el lugar"**, donde el overlay tiene
     `pointer-events:none` y el toque va al mapa a elegir el punto — no
     hizo falta ningún caso especial, sale solo de cómo ya estaba armado.
+    Desde v16.1 la tecla **Escape** hace lo mismo (primero el detalle si
+    está abierto, si no la hoja del flujo), respetando el mismo
+    `dismissible:false` — en un teléfono no cambia nada, en desktop es lo
+    esperado.
   - **El toast se va arriba cuando hay una hoja abierta** (`.toast.top`,
     v10.7): en su posición normal caía sobre el contenido de la hoja — al
     votar tapaba los propios botones de votar, o sea justo lo que acababa

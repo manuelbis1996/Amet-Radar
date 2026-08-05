@@ -163,6 +163,35 @@
   .empty-row td{ text-align:center; color:var(--muted-2); padding:26px; }
   .table-wrap{ overflow-x:auto; }
 
+  /* ---- Herramientas de la tabla de reportes ---- */
+  .table-tools{
+    display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin-bottom:15px;
+  }
+  .table-tools select{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
+    color:var(--signal); padding:6px 9px; font-family:var(--font-body); font-size:12px;
+    cursor:pointer;
+  }
+  .table-tools select:focus{ outline:none; border-color:var(--amber); }
+  .tools-sep{ flex:1; }
+  #last-update{ font-size:10.5px; color:var(--muted-2); font-family:var(--font-mono); white-space:nowrap; }
+  .auto-chk{
+    display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted);
+    cursor:pointer; user-select:none;
+  }
+  .auto-chk input{ width:14px; height:14px; accent-color:var(--amber); margin:0; }
+  /* Marca de reporte vencido en la tabla: el panel trae TODAS las filas y la
+     app solo muestra las de menos de max_age_minutes — sin esta marca la
+     tabla y lo que ve la gente parecen no coincidir. */
+  .exp-tag{
+    display:inline-block; margin-left:6px; font-size:9.5px; padding:2px 7px;
+    border-radius:20px; border:1px solid var(--line); color:var(--muted-2);
+    font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.4px;
+  }
+  td .ghost-btn{ padding:4px 9px; font-size:10px; }
+  .row-actions{ display:flex; gap:6px; flex-wrap:wrap; }
+  .thumb-link{ display:inline-block; line-height:0; }
+
   /* ---- Parámetros ---- */
   .config-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:0 18px; }
   .config-grid .field{ display:flex; flex-direction:column; }
@@ -342,15 +371,33 @@
         </div>
       </div>
 
-      <p class="warn-note">Esto publica un reporte real: se ve en el mapa de todos y <b>manda una notificación push</b> a quien esté suscrito a menos de 2 km.</p>
+      <p class="warn-note">Esto publica un reporte real: se ve en el mapa de todos y <b>manda una notificación push</b> a quien esté suscrito a menos de <b id="push-radius-note">2 km</b>.</p>
     </div>
 
     <div class="card">
       <h2>Reportes</h2>
+      <p class="hint">Filtra la tabla, exporta lo que muestra a CSV o purga los vencidos. «Ver» centra el mapa en ese reporte; «Link» copia el enlace para compartirlo.</p>
+      <div class="table-tools">
+        <button type="button" class="ghost-btn" id="refresh-btn">Actualizar</button>
+        <label class="auto-chk"><input type="checkbox" id="auto-refresh"> Auto cada 30 s</label>
+        <select id="filter-cat" aria-label="Filtrar por categoría">
+          <option value="">Todas las categorías</option>
+        </select>
+        <select id="filter-estado" aria-label="Filtrar por estado">
+          <option value="todos">Todos</option>
+          <option value="activos">Activos</option>
+          <option value="vencidos">Vencidos</option>
+          <option value="con_foto">Con foto</option>
+        </select>
+        <span class="tools-sep"></span>
+        <span id="last-update"></span>
+        <button type="button" class="ghost-btn" id="export-csv">Exportar CSV</button>
+        <button type="button" class="ghost-btn danger" id="purge-btn">Purgar vencidos</button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th><span class="sr-only">Foto</span></th><th>Categoría</th><th>Nota</th><th>Antigüedad</th><th>Votos</th><th><span class="sr-only">Acciones</span></th></tr>
+            <tr><th><span class="sr-only">Foto</span></th><th>Categoría</th><th>Nota</th><th>Antigüedad</th><th>Ubicación</th><th>Votos</th><th><span class="sr-only">Acciones</span></th></tr>
           </thead>
           <tbody id="reports-tbody"></tbody>
         </table>
@@ -450,6 +497,7 @@
   function showToast(msg, warn){
     const t = document.createElement('div');
     t.className = 'toast' + (warn ? ' warn' : '');
+    t.setAttribute('role', 'status'); // que un lector de pantalla lo anuncie
     t.textContent = msg;
     document.body.appendChild(t);
     setTimeout(()=> t.remove(), 2600);
@@ -525,21 +573,31 @@
     return reportsCache;
   }
 
+  // La misma definición de "vencido" en la tabla, las estadísticas y el mapa
+  // — antes cada una leía cfg-maxage con un fallback distinto (360 vs 120) y
+  // podían no coincidir entre sí.
+  function maxAgeMin(){ return Number(document.getElementById('cfg-maxage').value) || 360; }
+  function esVencido(r){ return (Date.now() - r.ts) / 60000 > maxAgeMin(); }
+
   async function loadStats(){
     const rows = reportsCache;
-    const maxAgeMinutes = Number(document.getElementById('cfg-maxage').value) || 360;
     const now = Date.now();
     const byCategory = {};
-    let newestTs = null, expired = 0;
+    let newestTs = null, expired = 0, conFoto = 0, ultimaHora = 0;
     for(const r of rows){
       byCategory[r.category] = (byCategory[r.category] || 0) + 1;
       if(newestTs === null || r.ts > newestTs) newestTs = r.ts;
-      if((now - r.ts) / 60000 > maxAgeMinutes) expired++;
+      if(esVencido(r)) expired++;
+      if(r.photo) conFoto++;
+      if((now - r.ts) < 3600000) ultimaHora++;
     }
     const grid = document.getElementById('stat-grid');
     grid.innerHTML = `
-      <div class="stat-tile"><b>${rows.length}</b><span>Activos</span></div>
-      <div class="stat-tile"><b>${expired}</b><span>Expirados</span></div>
+      <div class="stat-tile"><b>${rows.length}</b><span>Total en la base</span></div>
+      <div class="stat-tile"><b>${rows.length - expired}</b><span>Activos</span></div>
+      <div class="stat-tile"><b>${expired}</b><span>Vencidos</span></div>
+      <div class="stat-tile"><b>${ultimaHora}</b><span>Última hora</span></div>
+      <div class="stat-tile"><b>${conFoto}</b><span>Con foto</span></div>
       <div class="stat-tile"><b>${newestTs ? timeAgo(newestTs) : '—'}</b><span>Último reporte</span></div>
     `;
     const breakdown = document.getElementById('cat-breakdown');
@@ -549,6 +607,20 @@
     }).join('') || '<span class="cat-pill">Sin reportes</span>';
   }
 
+  // Filas que la tabla muestra con los filtros actuales. También es lo que
+  // exporta el CSV: se exporta lo que se ve, no otra cosa.
+  function filasFiltradas(){
+    const cat = document.getElementById('filter-cat').value;
+    const estado = document.getElementById('filter-estado').value;
+    return reportsCache.filter(r => {
+      if(cat && r.category !== cat) return false;
+      if(estado === 'activos' && esVencido(r)) return false;
+      if(estado === 'vencidos' && !esVencido(r)) return false;
+      if(estado === 'con_foto' && !r.photo) return false;
+      return true;
+    });
+  }
+
   function renderReportsTable(){
     const tbody = document.getElementById('reports-tbody');
     // Las fotos denunciadas van PRIMERO, no ordenadas por fecha como el
@@ -556,14 +628,14 @@
     // alguien subió algo que no va, está visible en el mapa de todo el mundo
     // hasta que se saque. Con el orden por antigüedad a secas habría que
     // buscarla, y una denuncia de hace rato quedaría hundida abajo.
-    const rows = [...reportsCache].sort((a, b) => {
+    const rows = filasFiltradas().sort((a, b) => {
       const fa = a.photo ? (a.photo_flags || 0) : 0;
       const fb = b.photo ? (b.photo_flags || 0) : 0;
       if(fa !== fb) return fb - fa;
       return b.ts - a.ts;
     });
     if(rows.length === 0){
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No hay reportes activos</td></tr>';
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="7">${reportsCache.length ? 'Ningún reporte coincide con el filtro' : 'No hay reportes activos'}</td></tr>`;
       return;
     }
     tbody.innerHTML = rows.map(r => {
@@ -571,17 +643,101 @@
       const denuncias = r.photo ? (r.photo_flags || 0) : 0;
       return `
         <tr data-id="${r.id}"${denuncias ? ' class="denunciada"' : ''}>
-          <td>${r.photo ? `<img class="thumb" src="${r.photo}" alt="Foto del reporte">${denuncias ? `<span class="flag-tag" title="Denuncias de esta foto">⚑ ${denuncias}</span>` : ''}` : ''}</td>
+          <td>${r.photo ? `<a class="thumb-link" href="${r.photo}" target="_blank" rel="noopener" title="Abrir foto completa"><img class="thumb" src="${r.photo}" alt="Foto del reporte"></a>${denuncias ? `<span class="flag-tag" title="Denuncias de esta foto">⚑ ${denuncias}</span>` : ''}` : ''}</td>
           <td><span class="cat-tag" style="background:${cat.hex}">${cat.emoji} ${cat.label}</span></td>
           <td class="note">${r.note ? escapeHtml(r.note) : '—'}</td>
-          <td>${timeAgo(r.ts)}</td>
+          <td>${timeAgo(r.ts)}${esVencido(r) ? '<span class="exp-tag" title="Los usuarios ya no lo ven">vencido</span>' : ''}</td>
+          <td class="num">${Number(r.lat).toFixed(5)}, ${Number(r.lng).toFixed(5)}</td>
           <td>👍 ${r.confirms||0} · 👎 ${r.denies||0}</td>
-          <td><button class="row-delete" data-id="${r.id}" aria-label="Eliminar reporte de ${cat.label}">Eliminar</button></td>
+          <td><div class="row-actions">
+            <button class="ghost-btn row-ver" data-id="${r.id}" aria-label="Ver en el mapa el reporte de ${cat.label}">Ver</button>
+            <button class="ghost-btn row-link" data-id="${r.id}" aria-label="Copiar enlace del reporte de ${cat.label}">Link</button>
+            <button class="row-delete" data-id="${r.id}" aria-label="Eliminar reporte de ${cat.label}">Eliminar</button>
+          </div></td>
         </tr>`;
     }).join('');
     tbody.querySelectorAll('.row-delete').forEach(btn => {
       btn.addEventListener('click', () => deleteReport(btn.dataset.id));
     });
+    tbody.querySelectorAll('.row-ver').forEach(btn => {
+      btn.addEventListener('click', () => verEnMapa(btn.dataset.id));
+    });
+    tbody.querySelectorAll('.row-link').forEach(btn => {
+      btn.addEventListener('click', () => copiarLink(btn.dataset.id));
+    });
+  }
+
+  // «Ver» de la tabla: centra el mapa en ese reporte y abre su ficha — cruza
+  // la tabla con el mapa, que antes había que hacer a ojo con las coordenadas.
+  function verEnMapa(id){
+    const m = repMarkersById[id];
+    if(!adminMap || !m){
+      showToast('El mapa no cargó; usa las coordenadas de la tabla', true);
+      return;
+    }
+    document.getElementById('admin-map').scrollIntoView({ behavior:'smooth', block:'center' });
+    adminMap.easeTo({ center:[m.r.lng, m.r.lat], zoom: Math.max(adminMap.getZoom(), 14), duration: 400 });
+    abrirPopover(m.r, m.el);
+  }
+
+  // El mismo formato de link que comparte la app (?r=<id>): sirve para
+  // difundir un reporte concreto por WhatsApp desde el panel.
+  function copiarLink(id){
+    const url = `${location.origin}/?r=${encodeURIComponent(id)}`;
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(
+        () => showToast('Enlace copiado'),
+        () => showToast(url)
+      );
+    } else {
+      showToast(url);
+    }
+  }
+
+  // Exporta lo que la tabla muestra (con los filtros aplicados) a CSV.
+  function exportarCsv(){
+    const rows = filasFiltradas();
+    if(rows.length === 0){ showToast('No hay filas para exportar', true); return; }
+    const esc = v => {
+      const s = v == null ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const head = ['id','categoria','lat','lng','fecha','confirms','denies','approx','vencido','foto','denuncias_foto','nota'];
+    const lineas = rows.map(r => [
+      r.id, r.category, r.lat, r.lng, new Date(r.ts).toISOString(),
+      r.confirms||0, r.denies||0, r.approx ? 'si' : 'no', esVencido(r) ? 'si' : 'no',
+      r.photo || '', r.photo ? (r.photo_flags||0) : 0, r.note || ''
+    ].map(esc).join(','));
+    // El BOM (\uFEFF) no es decorativo: sin él, Excel abre el CSV como
+    // Latin-1 y rompe las tildes de las notas.
+    const blob = new Blob(['\uFEFF' + head.join(',') + '\n' + lineas.join('\n')], { type:'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `amet-reportes-${new Date().toISOString().slice(0,16).replace(/[T:]/g,'-')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    showToast(`${rows.length} reporte${rows.length === 1 ? '' : 's'} exportado${rows.length === 1 ? '' : 's'}`);
+  }
+
+  // Purga por la MISMA rpc pública que usa la app (purge_expired_reports):
+  // solo puede borrar filas ya vencidas, así que no necesita el password ni
+  // agrega superficie nueva. La foto de cada fila la limpia el trigger.
+  async function purgarVencidos(){
+    const n = reportsCache.filter(esVencido).length;
+    if(n === 0){ showToast('No hay reportes vencidos para purgar'); return; }
+    if(!confirm(`¿Borrar de la base ${n} reporte${n === 1 ? '' : 's'} vencido${n === 1 ? '' : 's'}? Los usuarios ya no los ven.`)) return;
+    try{
+      const res = await fetch(`${RPC_URL}/purge_expired_reports`, {
+        method:'POST', headers: SUPABASE_HEADERS, body:'{}'
+      });
+      if(!res.ok) throw new Error('http');
+      showToast('Reportes vencidos purgados');
+      await refreshAll();
+    }catch(err){
+      showToast('No se pudieron purgar los vencidos', true);
+    }
   }
 
   // La foto la borra la función _delete_report de la base, junto con la
@@ -609,13 +765,21 @@
         return;
       }
       showToast('Reporte eliminado');
-      await fetchReports();
-      renderReportsTable();
-      renderMapaReportes();
-      loadStats();
+      await refreshAll();
     }catch(err){
       showToast('No se pudo eliminar el reporte', true);
     }
+  }
+
+  // Refresco completo del panel (tabla + mapa + estadísticas) con marca de
+  // hora, para saber si lo que se está mirando es de ahora o de hace rato.
+  async function refreshAll(){
+    await fetchReports();
+    renderReportsTable();
+    renderMapaReportes();
+    loadStats();
+    const el = document.getElementById('last-update');
+    if(el) el.textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-DO', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
   }
 
   const configForm = document.getElementById('config-form');
@@ -632,6 +796,18 @@
     document.getElementById('cfg-limit').value = cfg.report_limit ?? 3;
     document.getElementById('cfg-window').value = cfg.report_window_min ?? 60;
     document.getElementById('cfg-push-radius').value = cfg.push_radius_meters ?? 2000;
+    reflejarRadioPush(cfg.push_radius_meters ?? 2000);
+  }
+
+  // El aviso de "manda push a menos de X" muestra el radio REAL configurado:
+  // estaba hardcodeado en "2 km" y desde que push_radius_meters se edita en
+  // esta misma página podía estar mintiendo.
+  function reflejarRadioPush(metros){
+    const el = document.getElementById('push-radius-note');
+    if(!el || !Number.isFinite(metros)) return;
+    el.textContent = metros >= 1000
+      ? `${(metros/1000).toFixed(metros % 1000 ? 1 : 0)} km`
+      : `${metros} m`;
   }
 
   configForm.addEventListener('submit', async (e) => {
@@ -677,6 +853,12 @@
         return;
       }
       showToast('Parámetros actualizados');
+      reflejarRadioPush(body.push_radius_meters);
+      // max_age_minutes pudo cambiar, y con él qué cuenta como "vencido" en
+      // la tabla, las estadísticas y el mapa.
+      renderReportsTable();
+      renderMapaReportes();
+      loadStats();
     }catch(err){
       configError.textContent = 'Error de conexión con el servidor';
       configError.hidden = false;
@@ -846,7 +1028,10 @@
 
   // Reportes existentes sobre el mapa. Se redibujan enteros en cada refresco
   // (son pocos y se autoexpiran); no vale la pena un diff incremental.
+  // repMarkersById guarda además fila y elemento por id, para que el «Ver»
+  // de la tabla pueda centrar el mapa y abrir la ficha de ese reporte.
   let repMarkers = [];
+  let repMarkersById = {};
   let repSeleccionado = null;
 
   function cerrarPopover(){
@@ -864,8 +1049,7 @@
     const tag = document.getElementById('rp-cat');
     tag.textContent = `${cat.emoji} ${cat.label}`;
     tag.style.background = cat.hex;
-    const maxAge = Number(document.getElementById('cfg-maxage').value) || 120;
-    const vencido = (Date.now() - r.ts) / 60000 > maxAge;
+    const vencido = esVencido(r);
     document.getElementById('rp-meta').innerHTML =
       `${timeAgo(r.ts)} · 👍 ${r.confirms||0} · 👎 ${r.denies||0}` +
       (r.approx ? ' · zona aproximada' : '') +
@@ -877,12 +1061,12 @@
     if(!adminMap) return;   // el mapa puede no haber cargado; la tabla igual sirve
     repMarkers.forEach(m => { try{ m.remove(); }catch(e){} });
     repMarkers = [];
+    repMarkersById = {};
     cerrarPopover();
-    const maxAge = Number(document.getElementById('cfg-maxage').value) || 120;
     for(const r of reportsCache){
       if(typeof r.lat !== 'number' || typeof r.lng !== 'number') continue;
       const cat = CATEGORIES[r.category] || { emoji:'❔', label:r.category, hex:'#8a92a1' };
-      const vencido = (Date.now() - r.ts) / 60000 > maxAge;
+      const vencido = esVencido(r);
       const el = document.createElement('div');
       el.className = 'rep-dot' + (r.approx ? ' approx' : '') + (vencido ? ' vencido' : '');
       el.style.background = cat.hex;
@@ -893,6 +1077,7 @@
       repMarkers.push(new maplibregl.Marker({ element: el })
         .setLngLat([r.lng, r.lat])
         .addTo(adminMap));
+      repMarkersById[r.id] = { r, el };
     }
   }
 
@@ -942,10 +1127,7 @@
       }
       showToast('Reporte publicado');
       quitarPin();
-      await fetchReports();
-      renderReportsTable();
-      renderMapaReportes();
-      loadStats();
+      await refreshAll();
     }catch(err){
       errBox.textContent = 'Error de conexión con el servidor';
       errBox.hidden = false;
@@ -957,6 +1139,39 @@
 
   document.getElementById('publish-btn').addEventListener('click', publicarReporte);
 
+  // ---- Herramientas de la tabla ----
+  // El panel sigue sin sondear solo (a diferencia de la app, que sondea cada
+  // 8s): el refresco es a pedido, o con el auto-refresco de 30s si el admin
+  // lo activa para una sesión de moderación.
+  document.getElementById('refresh-btn').addEventListener('click', () => {
+    refreshAll().catch(() => showToast('No se pudo actualizar', true));
+  });
+  let autoTimer = null;
+  document.getElementById('auto-refresh').addEventListener('change', (e) => {
+    clearInterval(autoTimer);
+    autoTimer = null;
+    if(e.target.checked){
+      autoTimer = setInterval(() => {
+        if(authed) refreshAll().catch(() => {});
+      }, 30000);
+    }
+  });
+  document.getElementById('export-csv').addEventListener('click', exportarCsv);
+  document.getElementById('purge-btn').addEventListener('click', purgarVencidos);
+  document.getElementById('filter-cat').addEventListener('change', renderReportsTable);
+  document.getElementById('filter-estado').addEventListener('change', renderReportsTable);
+  // Las opciones del filtro salen de CATEGORIES, para no tener la lista dos
+  // veces (la opción "todas" ya está en el HTML).
+  (function llenarFiltroCategorias(){
+    const sel = document.getElementById('filter-cat');
+    for(const [key, cat] of Object.entries(CATEGORIES)){
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = `${cat.emoji} ${cat.label}`;
+      sel.appendChild(opt);
+    }
+  })();
+
   async function loadDashboard(){
     try{
       renderCatChoices();
@@ -965,10 +1180,7 @@
       // pero que quede explícito que el panel no depende del mapa.
       initAdminMap();
       await loadConfigForm();
-      await fetchReports();
-      renderReportsTable();
-      renderMapaReportes();
-      loadStats();
+      await refreshAll();
     }catch(err){
       showToast('Error cargando el panel', true);
     }
