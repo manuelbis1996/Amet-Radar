@@ -714,13 +714,21 @@ solo asertos:
   `CAM_SVG` la comparten el pin y el círculo, y el mismo ícono va en el botón
   del toast — así se lee como la misma acción en los tres lados.
 - **El círculo de zona lleva un núcleo (`.approx-core`) de 34 px con el emoji
-  de la categoría** (👮 para un retén fijo), más un piso de `APPROX_MIN_PX`
-  para el anillo. Sin eso el reporte **desaparecía al alejar el mapa**: el
-  círculo mide 150 m reales, así que a zoom 9-10 quedaba en unos 4 px — y como
-  el reporte de un toque es `approx`, era justo la mayoría de los reportes. El
-  anillo sigue diciendo "está en algún punto de esta zona"; el núcleo dice
-  "acá hay algo". El piso además devuelve el área táctil: 4 px no se pueden
-  tocar.
+  de la categoría** (👮 para un retén fijo). Sin eso el reporte **desaparecía
+  al alejar el mapa**: el círculo mide 150 m reales, así que a zoom 9-10
+  quedaba en unos 4 px — y como el reporte de un toque es `approx`, era justo
+  la mayoría de los reportes.
+
+**El anillo NO se estira: se deja de dibujar** (v15.2). La primera versión de
+esto le puso un piso en píxeles al círculo, y estaba mal. El anillo existe
+para decir *"el retén está en algún punto de estos 150 m"*: estirado sigue
+visible pero **ya no corresponde a 150 m reales**, o sea que comunica algo
+falso y exagera el área. Ahora, cuando el círculo real baja de
+`APPROX_RING_MIN_PX` (54 px, donde todavía rodea al núcleo con aire), se apaga
+el borde y el relleno (`.solo-nucleo`) y queda solo el núcleo, que no afirma
+ninguna distancia. El elemento igual nunca baja de `APPROX_TAP_MIN_PX` (44 px,
+el mínimo táctil): el marcador entero es el área de click. En la práctica el
+anillo se ve de zoom ~13.7 para arriba, medido con capturas a z15/14/13.5/13/11.
 
 **El toast necesitó `width:max-content`.** Es `position:absolute` con
 `left:50%`, o sea que el ancho disponible para el *shrink-to-fit* es solo la

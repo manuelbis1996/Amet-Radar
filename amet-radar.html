@@ -213,6 +213,11 @@
     position:relative;
   }
   .amet-approx.pending{ border-style:dotted; }
+  /* Alejando el mapa el anillo dejaría de representar los 150 m reales, así
+     que directamente no se dibuja: queda solo el núcleo. El elemento sigue
+     ocupando el mínimo táctil, invisible, para que el marcador se pueda
+     tocar igual. */
+  .amet-approx.solo-nucleo{ border-color:transparent; background:transparent; }
   /* El núcleo del reporte de zona: MISMA insignia que el pin, con el emoji de
      la categoría, y de TAMAÑO FIJO en píxeles.
 
@@ -562,7 +567,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v15.1';
+  const APP_VERSION = 'v15.2';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1167,19 +1172,29 @@
     return meters / metersPerPixel;
   }
 
-  // Piso en píxeles del círculo de zona. Cumple dos funciones a la vez:
-  //   * que el núcleo de 34px entre siempre adentro y no quede el anillo
-  //     dibujado por encima del emoji;
-  //   * que el marcador siga siendo tocable — el círculo entero es el área de
-  //     click, y a zoom bajo llegaba a medir 4px, o sea imposible de tocar.
-  // Alejando mucho el mapa el anillo exagera el área real de 150 m, y está
-  // bien: a esa escala el círculo ya no comunica una distancia, comunica
-  // "acá hay un reporte".
-  const APPROX_MIN_PX = 54;
+  // A partir de qué tamaño en pantalla vale la pena dibujar el anillo de zona.
+  //
+  // EL ANILLO MIENTE SI SE LE PONE UN PISO. Su única razón de ser es decir
+  // "el retén está en algún punto de estos 150 m": si se lo estira para que no
+  // desaparezca, deja de corresponder a 150 m reales y pasa a exagerar el área
+  // — o sea que comunica algo falso. Por eso, cuando el círculo real queda más
+  // chico que esto, NO se achica: se deja de dibujar y queda solo el núcleo
+  // con el emoji, que no afirma ninguna distancia.
+  //
+  // 54px es donde el anillo todavía rodea al núcleo de 34px con aire (10px por
+  // lado). Por debajo quedaría estrangulándolo, que es justo cuando se veía
+  // mal.
+  const APPROX_RING_MIN_PX = 54;
+  // El elemento nunca baja del mínimo táctil aunque el anillo no se dibuje:
+  // el marcador entero es el área de click, y sin esto a zoom bajo quedaba en
+  // unos pocos píxeles, imposible de tocar.
+  const APPROX_TAP_MIN_PX = 44;
 
   function sizeApproxCircle(entry){
-    const d = Math.max(APPROX_MIN_PX,
-                       2 * metersToPixels(APPROX_RADIUS_METERS, entry.lat, map.getZoom()));
+    const real = 2 * metersToPixels(APPROX_RADIUS_METERS, entry.lat, map.getZoom());
+    // `solo-nucleo` apaga el borde y el relleno; el núcleo sigue visible.
+    entry.el.classList.toggle('solo-nucleo', real < APPROX_RING_MIN_PX);
+    const d = Math.max(APPROX_TAP_MIN_PX, real);
     entry.el.style.width = `${d}px`;
     entry.el.style.height = `${d}px`;
   }
