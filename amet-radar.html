@@ -185,17 +185,22 @@
   }
   .amet-pin.stale .badge{ filter:grayscale(1); opacity:.7; }
   .amet-pin.pending .badge{ opacity:.6; border-style:dashed; }
-  /* Cámara chiquita sobre el pin: distingue de un vistazo el reporte que
-     tiene evidencia real del que es solo un aviso. El .badge es position
-     relative para poder colgarla de la esquina. */
+  /* Cámara sobre el marcador: distingue de un vistazo el reporte que tiene
+     evidencia real del que es solo un aviso.
+
+     Va con un SVG y NO con el emoji 📷: a 9px un emoji queda como una mancha
+     borrosa y encima se dibuja distinto en cada sistema. Un trazo hereda el
+     color, escala nítido y combina con los otros íconos de la app. El
+     contenedor del marcador es position:relative para colgarla de la esquina. */
   .amet-pin .badge{ position:relative; }
-  .amet-pin .pin-cam{
-    position:absolute; right:-5px; bottom:-4px;
+  .pin-cam{
+    position:absolute; right:-5px; bottom:-5px;
     width:17px; height:17px; border-radius:50%;
-    background:var(--surface); border:1.5px solid var(--surface);
-    font-size:9px; font-style:normal; line-height:14px; text-align:center;
-    box-shadow:0 1px 3px rgba(0,0,0,.3);
+    background:var(--surface); color:var(--text);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 1px 4px rgba(0,0,0,.4);
   }
+  .pin-cam svg{ width:10px; height:10px; display:block; }
 
   /* Zona aproximada de un reporte rápido (approx:true). Antes era un
      L.circle de Leaflet (SVG con radio en metros); MapLibre no tiene un
@@ -205,15 +210,26 @@
     border-radius:50%; box-sizing:border-box;
     border:2px dashed var(--approx-color, #f59e0b);
     background:var(--approx-fill, rgba(245,158,11,.18));
-    /* Para colgar la cámara del centro: el círculo cambia de tamaño con el
-       zoom (sizeApproxCircle), así que la marca se centra en vez de anclarse
-       a un borde que se mueve. */
     position:relative;
   }
   .amet-approx.pending{ border-style:dotted; }
-  .amet-approx .pin-cam{
+  /* El núcleo del reporte de zona: MISMA insignia que el pin, con el emoji de
+     la categoría, y de TAMAÑO FIJO en píxeles.
+
+     Es lo que hace que el reporte se vea alejando el mapa. El círculo de
+     alrededor mide 150 m reales, así que su tamaño en pantalla se desploma al
+     alejar (a zoom 10 son ~4 px: invisible), y justo los reportes de un toque
+     —que son la mayoría— desaparecían del mapa. El anillo sigue comunicando
+     "está en algún punto de esta zona"; el núcleo comunica "acá hay algo". */
+  .approx-core{
     position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:34px; height:34px; border-radius:50%;
+    border:3px solid var(--surface);
+    display:flex; align-items:center; justify-content:center;
+    font-size:15px; line-height:1;
+    box-shadow:0 2px 6px rgba(0,0,0,.3);
   }
+  .amet-approx.pending .approx-core{ opacity:.6; border-style:dashed; }
 
   .me-marker{ width:22px; height:22px; }
   .me-dot{
@@ -438,13 +454,34 @@
     animation: toast-in .22s ease;
   }
   .toast.warn{ background:var(--danger); color:#fff; }
-  .toast-action{ display:flex; align-items:center; gap:12px; padding:9px 10px 9px 18px; }
+  /* Con dos acciones (Foto y Deshacer) el ancho quedaba justo: el texto
+     empujaba a los botones y se veía apretado en pantallas de 390px. El texto
+     pasa a ser el que cede (flex:1 + min-width:0) y los botones nunca se
+     encogen; el gap baja de 12 a 8 y el toast puede usar un poco más de ancho
+     que uno normal. */
+  .toast-action{
+    display:flex; align-items:center; gap:8px;
+    padding:8px 10px 8px 16px; max-width:94%;
+    /* `width:max-content` NO es decorativo. El toast es position:absolute con
+       left:50%, así que el ancho disponible para el "shrink-to-fit" es solo lo
+       que queda a la derecha del 50% — la mitad de la pantalla. Con dos
+       acciones eso alcanzaba para que "Reporte publicado" se partiera en dos
+       líneas y el aviso quedara alto y torcido. Con max-content el ancho lo
+       decide el contenido y max-width sigue poniendo el techo. */
+    width:max-content;
+  }
+  .toast-action > span{ flex:0 1 auto; text-align:left; }
   .toast-btn{
+    flex:0 0 auto;
     border:none; background:transparent; color:var(--brand);
     font:inherit; font-size:13.5px; font-weight:700; cursor:pointer;
-    padding:7px 12px; border-radius:999px; white-space:nowrap;
+    padding:8px 11px; border-radius:999px; white-space:nowrap;
   }
   .toast-btn:active{ opacity:.6; }
+  /* El de la foto lleva el mismo ícono que el marcador, no el emoji: así se
+     lee como la misma acción en los dos lados. */
+  .toast-btn.con-icono{ display:inline-flex; align-items:center; gap:5px; }
+  .toast-btn.con-icono svg{ width:15px; height:15px; flex-shrink:0; }
   /* Con una hoja abierta, el toast en su posición normal cae justo encima
      del contenido de la hoja — al votar tapaba los propios botones de
      votar, que es exactamente lo que acababa de cambiar. En ese caso se
@@ -525,7 +562,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v15.0';
+  const APP_VERSION = 'v15.1';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1083,6 +1120,16 @@
   // en vez de fabricar un ícono nuevo se repinta el elemento existente.
   // `sig` evita reescribir el innerHTML en cada refresco de 8s cuando nada
   // cambió visualmente — sin eso, cada marcador parpadearía cada 8 segundos.
+  // Ícono de cámara compartido por el pin y por el círculo de zona. Es un SVG
+  // de trazo (mismo estilo que el resto de los íconos de la app) y no el emoji
+  // 📷: a este tamaño un emoji queda borroso y cambia de dibujo según el
+  // sistema.
+  const CAM_SVG =
+    '<i class="pin-cam" aria-hidden="true">' +
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>' +
+    '<circle cx="12" cy="13" r="4"/></svg></i>';
+
   // `hasPhoto` va en la firma (dataset.sig) además de dibujarse: sin eso, un
   // reporte al que se le acaba de adjuntar una foto no repintaría el pin, y
   // la cámara no aparecería hasta el próximo cambio de estado.
@@ -1096,8 +1143,19 @@
     // La cámara distingue de un vistazo el reporte que tiene evidencia real
     // del que es solo un aviso — que es justo lo que el mapa no comunicaba
     // cuando todos los pines eran el mismo emoji.
-    el.innerHTML = `<div class="badge" style="background:${cat.hex}"><span>${cat.emoji}</span>${hasPhoto?'<i class="pin-cam" aria-hidden="true">📷</i>':''}</div>`;
+    el.innerHTML = `<div class="badge" style="background:${cat.hex}"><span>${cat.emoji}</span>${hasPhoto?CAM_SVG:''}</div>`;
     return el;
+  }
+
+  // El núcleo del círculo de zona. Misma insignia que el pin (emoji de la
+  // categoría), de tamaño fijo, para que el reporte se vea aunque el círculo
+  // de 150 m quede diminuto al alejar el mapa. Con firma, igual que paintPin:
+  // sin eso se reescribiría el innerHTML en cada sondeo de 8s y parpadearía.
+  function paintApproxCore(el, cat, color, hasPhoto){
+    const sig = `${cat.emoji}|${color}|${hasPhoto?1:0}`;
+    if(el.dataset.sig === sig) return;
+    el.dataset.sig = sig;
+    el.innerHTML = `<div class="approx-core" style="background:${color}"><span>${cat.emoji}</span>${hasPhoto?CAM_SVG:''}</div>`;
   }
 
   // Radio en píxeles de pantalla que le corresponde a una distancia en
@@ -1109,8 +1167,19 @@
     return meters / metersPerPixel;
   }
 
+  // Piso en píxeles del círculo de zona. Cumple dos funciones a la vez:
+  //   * que el núcleo de 34px entre siempre adentro y no quede el anillo
+  //     dibujado por encima del emoji;
+  //   * que el marcador siga siendo tocable — el círculo entero es el área de
+  //     click, y a zoom bajo llegaba a medir 4px, o sea imposible de tocar.
+  // Alejando mucho el mapa el anillo exagera el área real de 150 m, y está
+  // bien: a esa escala el círculo ya no comunica una distancia, comunica
+  // "acá hay un reporte".
+  const APPROX_MIN_PX = 54;
+
   function sizeApproxCircle(entry){
-    const d = 2 * metersToPixels(APPROX_RADIUS_METERS, entry.lat, map.getZoom());
+    const d = Math.max(APPROX_MIN_PX,
+                       2 * metersToPixels(APPROX_RADIUS_METERS, entry.lat, map.getZoom()));
     entry.el.style.width = `${d}px`;
     entry.el.style.height = `${d}px`;
   }
@@ -1244,21 +1313,10 @@
     entry.el.classList.toggle('pending', pending);
     entry.el.style.setProperty('--approx-color', color);
     entry.el.style.setProperty('--approx-fill', hexTint(color, 0.18));
-    // La cámara va también en el círculo, no solo en el pin: el reporte de
-    // un toque es approx:true, o sea que es EL tipo más común de la app. Sin
-    // esto, justo el reporte que más gente publica nunca mostraría que tiene
-    // foto.
-    const tieneFoto = !!r.photo;
-    const cam = entry.el.querySelector('.pin-cam');
-    if(tieneFoto && !cam){
-      const i = document.createElement('i');
-      i.className = 'pin-cam';
-      i.setAttribute('aria-hidden', 'true');
-      i.textContent = '📷';
-      entry.el.appendChild(i);
-    } else if(!tieneFoto && cam){
-      cam.remove();
-    }
+    // El núcleo lleva el emoji de la categoría (👮 para un retén fijo) y, si
+    // hay, la cámara. La cámara tiene que estar acá y no solo en paintPin: el
+    // reporte de un toque es approx:true, o sea EL tipo más común de la app.
+    paintApproxCore(entry.el, cat, color, !!r.photo);
     sizeApproxCircle(entry);
   }
 
@@ -2308,7 +2366,10 @@
     // no tiene reloj en contra es la del detalle, porque este toast dura 6s
     // y nadie debería apurarse por una foto que es opcional.
     t.innerHTML = `<span>Reporte publicado</span>` +
-      `<button type="button" class="toast-btn" data-toast="foto">📷 Foto</button>` +
+      `<button type="button" class="toast-btn con-icono" data-toast="foto">` +
+        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
+        `<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>` +
+        `<circle cx="12" cy="13" r="4"/></svg>Foto</button>` +
       `<button type="button" class="toast-btn" data-toast="undo">Deshacer</button>`;
     document.getElementById('app').appendChild(t);
     const quitar = () => t.remove();

@@ -704,6 +704,30 @@ es `approx: true`, o sea que se dibuja como círculo y no como pin: si la marca
 viviera solo en `paintPin`, justo el tipo de reporte más común de la app nunca
 mostraría que tiene foto. Se detectó con la suite nueva.
 
+### El marcador de zona tiene un núcleo fijo (v15.1)
+
+Dos correcciones de diseño sobre lo anterior, las dos mirando capturas y no
+solo asertos:
+
+- **La cámara es un SVG de trazo, no el emoji 📷.** A 10 px un emoji queda como
+  una mancha borrosa y encima se dibuja distinto en cada sistema. La constante
+  `CAM_SVG` la comparten el pin y el círculo, y el mismo ícono va en el botón
+  del toast — así se lee como la misma acción en los tres lados.
+- **El círculo de zona lleva un núcleo (`.approx-core`) de 34 px con el emoji
+  de la categoría** (👮 para un retén fijo), más un piso de `APPROX_MIN_PX`
+  para el anillo. Sin eso el reporte **desaparecía al alejar el mapa**: el
+  círculo mide 150 m reales, así que a zoom 9-10 quedaba en unos 4 px — y como
+  el reporte de un toque es `approx`, era justo la mayoría de los reportes. El
+  anillo sigue diciendo "está en algún punto de esta zona"; el núcleo dice
+  "acá hay algo". El piso además devuelve el área táctil: 4 px no se pueden
+  tocar.
+
+**El toast necesitó `width:max-content`.** Es `position:absolute` con
+`left:50%`, o sea que el ancho disponible para el *shrink-to-fit* es solo la
+mitad derecha de la pantalla; con dos acciones eso alcanzaba para que "Reporte
+publicado" se partiera en dos líneas y el aviso quedara alto y torcido. Se vio
+capturando el toast y midiéndolo, no a ojo.
+
 **El umbral de denuncias (3) es una constante en el SQL, no `app_config`** —
 misma lección que los umbrales de `create_report`. Es deliberadamente bajo:
 sin cuentas de usuario alguien decidido puede juntar 3 y tirar abajo una foto
