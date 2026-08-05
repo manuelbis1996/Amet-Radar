@@ -1301,10 +1301,31 @@ las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
     `openDetail(id)`. La hoja NO se re-renderiza en el sondeo de 8s (te
     cortaría el scroll bajo el dedo); solo con `refreshDetail(id)` después
     de que vos mismo votás.
-  - **Tema automático** (`prefers-color-scheme`): claro de día, oscuro de
-    noche, para el resto de la UI (header, chips, hojas). El mapa en sí es
-    la excepción, a pedido: siempre usa un estilo claro de día y de noche
-    (ver "Mapa: MapLibre GL + OpenFreeMap" abajo).
+  - **Tema SIEMPRE CLARO** (v16.0). Había un tema oscuro automático por
+    `prefers-color-scheme` y se quitó a pedido. El argumento que lo cierra:
+    el mapa ya usaba tiles claros de día y de noche (decisión vieja, también
+    a pedido), así que de noche la interfaz quedaba oscura flotando sobre un
+    mapa blanco — dos lenguajes visuales en la misma pantalla. Se sacó el
+    bloque `@media`, las dos `<meta name="theme-color">` por esquema quedaron
+    en una sola blanca, y `manifest.json` pasó a `#ffffff` (afecta la pantalla
+    de arranque de la PWA instalada). **Si algún día vuelve el modo oscuro,
+    tiene que volver junto con un estilo de mapa oscuro, no por separado.**
+  - **El acento es violeta (`#7c3aed`), no ámbar** (v16.0). El ámbar anterior
+    era **exactamente** el `#f59e0b` de la categoría `reten_fijo`: el botón de
+    Reportar y el marcador más común del mapa eran del mismo color, o sea que
+    el acento de la acción competía con el dato. Eso contradecía la regla del
+    propio archivo ("un solo acento para la acción; el resto del color lo
+    aportan las categorías"). El violeta no se parece a ninguna de las cuatro.
+    - **Hay una segunda variable, `--brand-soft` (`#a78bfa`), y no es
+      decoración**: `--brand` también se usa como TEXTO sobre superficies
+      oscuras (los botones del toast, que se dibuja sobre `var(--text)`). El
+      violeta pleno ahí da 3.2:1, por debajo del mínimo legible — el ámbar
+      daba 8.5:1, así que el cambio de color habría metido una regresión de
+      accesibilidad silenciosa. `--brand-soft` da 6.6:1. **No usarla sobre
+      blanco**: al revés no contrasta.
+    - Cubierto por `check-ux.js`, que abre un contexto con `colorScheme:'dark'`
+      —única forma de que la guarda no sea decorativa— y además afirma que el
+      acento no vuelve a ser `#f59e0b`.
   - **Ningún control primario mide menos de 44px** (`--tap`), y todo lo
     que flota respeta `env(safe-area-inset-*)`.
   - Se sacó `maximum-scale=1.0` del viewport: bloqueaba el pinch-zoom, que

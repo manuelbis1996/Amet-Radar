@@ -3,8 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff">
 <meta name="description" content="Reportes comunitarios de retenes de tránsito en tiempo real en La Vega.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="AMET Radar">
@@ -30,9 +29,12 @@
     donde se va a usar casi siempre, muchas veces con una sola mano y de
     reojo mientras se maneja.
 
-    Tema automático (prefers-color-scheme): claro de día, para que se lea
-    con sol; oscuro de noche, para no encandilar. El mapa en sí es la
-    excepción: siempre usa tiles claros (a pedido), de día y de noche.
+    Tema SIEMPRE CLARO, a pedido. Había un tema oscuro automático por
+    prefers-color-scheme y se quitó: el mapa ya usaba tiles claros de día y
+    de noche, así que de noche la interfaz quedaba oscura flotando sobre un
+    mapa blanco — dos lenguajes distintos en la misma pantalla. Ahora hay
+    uno solo. Si algún día vuelve el modo oscuro, tiene que volver junto con
+    un estilo de mapa oscuro, no por separado.
 
     Reglas que se respetan en todo el archivo:
     - Ningún control primario mide menos de var(--tap) = 44px de alto.
@@ -41,7 +43,18 @@
       color lo aportan las categorías de reporte, nunca la decoración.
   */
   :root{
-    --brand:#f59e0b;   --on-brand:#1b1206;
+    /* Violeta, y NO ámbar como antes. El ámbar era exactamente el mismo
+       #f59e0b de la categoría "retén fijo", así que el botón de Reportar y
+       el marcador más común del mapa eran del mismo color: el acento de la
+       acción competía con el dato. El violeta no se parece a ninguna de las
+       cuatro categorías. */
+    --brand:#7c3aed;   --on-brand:#ffffff;
+    /* Variante clara para cuando el acento va como TEXTO sobre una
+       superficie oscura — hoy solo los botones del toast, que se dibuja
+       sobre var(--text). El violeta pleno ahí da 3.2:1 contra el fondo
+       (por debajo del mínimo legible); este da 6.7:1. No usarla sobre
+       blanco: al revés, no contrasta. */
+    --brand-soft:#a78bfa;
     --bg:#e9ecef;
     --surface:#ffffff;
     --surface-2:#f2f4f7;
@@ -56,22 +69,6 @@
     --font:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
     --r-md:14px; --r-lg:20px; --r-xl:26px;
     --tap:44px;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --brand:#ffb020; --on-brand:#14161a;
-      --bg:#0e1014;
-      --surface:#171a21;
-      --surface-2:#212630;
-      --text:#f2f3f5;
-      --muted:#9aa2ae;
-      --line:#2a2f3a;
-      --danger:#ff6b5e;
-      --info:#5b9cff;
-      --scrim:rgba(0,0,0,.58);
-      --shadow-1:0 1px 2px rgba(0,0,0,.42), 0 4px 16px rgba(0,0,0,.48);
-      --shadow-2:0 12px 36px rgba(0,0,0,.62);
-    }
   }
 
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -478,7 +475,7 @@
   .toast-action > span{ flex:0 1 auto; text-align:left; }
   .toast-btn{
     flex:0 0 auto;
-    border:none; background:transparent; color:var(--brand);
+    border:none; background:transparent; color:var(--brand-soft);
     font:inherit; font-size:13.5px; font-weight:700; cursor:pointer;
     padding:8px 11px; border-radius:999px; white-space:nowrap;
   }
@@ -567,7 +564,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v15.2';
+  const APP_VERSION = 'v16.0';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
