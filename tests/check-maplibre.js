@@ -129,11 +129,11 @@ const REPORTS = [
   await page.evaluate(() => { window.__map._zoom = 9; window.__map.fire('zoom'); });
   await page.waitForTimeout(80);
   const alejado = await page.$eval('.amet-approx', e => parseFloat(e.style.width));
-  // 44px es el mínimo táctil de la app (--tap): el círculo entero es el área
+  // 44px es el mínimo táctil de la app (--tap): el marcador entero es el área
   // de click, así que por debajo de eso el reporte no solo se ve mal, no se
   // puede tocar. Se afirma contra esa invariante y no contra el valor exacto
-  // de APPROX_MIN_PX, que es un número de diseño y puede moverse.
-  check('alejando el mapa el círculo no se hace invisible ni intocable',
+  // de la constante de diseño, que puede moverse.
+  check('alejando el mapa el marcador no se hace invisible ni intocable',
     alejado >= 44, alejado + 'px a zoom 9');
   const core = await page.$$eval('.approx-core', els => els.map(e => ({
     txt: e.textContent.trim(), w: getComputedStyle(e).width
@@ -142,6 +142,30 @@ const REPORTS = [
     core.length === 1 && core[0].txt.length > 0, JSON.stringify(core));
   check('y ese núcleo es de tamaño fijo, no depende del zoom',
     core[0] && core[0].w === '34px', core[0] && core[0].w);
+
+  // 3.ter) EL ANILLO NO SE ESTIRA: se deja de dibujar.
+  // Su única razón de ser es decir "está en algún punto de estos 150 m". Con
+  // un piso en píxeles seguiría visible pero ya no correspondería a 150 m
+  // reales, o sea que comunicaría algo falso. Alejado queda solo el núcleo,
+  // que no afirma ninguna distancia.
+  const lejos = await page.$eval('.amet-approx', e => ({
+    solo: e.classList.contains('solo-nucleo'),
+    borde: getComputedStyle(e).borderTopColor,
+    fondo: getComputedStyle(e).backgroundColor
+  }));
+  check('alejado, el anillo de 150 m no se dibuja (no se estira mintiendo)',
+    lejos.solo && /rgba\(0, 0, 0, 0\)|transparent/.test(lejos.borde),
+    JSON.stringify(lejos));
+
+  // Y al volver a acercar, reaparece.
+  await page.evaluate(() => { window.__map._zoom = 16; window.__map.fire('zoom'); });
+  await page.waitForTimeout(80);
+  const cerca = await page.$eval('.amet-approx', e => ({
+    solo: e.classList.contains('solo-nucleo'),
+    w: parseFloat(e.style.width)
+  }));
+  check('acercando vuelve el anillo, ya con el tamaño real de 150 m',
+    !cerca.solo && cerca.w > 100, JSON.stringify(cerca));
 
   // 4) el pin abre la hoja de detalle al tocarlo.
   // Se dispara el click directo sobre el elemento en vez de page.click():
