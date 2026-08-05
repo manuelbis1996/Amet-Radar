@@ -121,6 +121,28 @@ const REPORTS = [
   const after = await page.$eval('.amet-approx', e => parseFloat(e.style.width));
   check('el círculo crece al acercar el zoom (radio en metros, no fijo)', after > before * 3, `${before}px -> ${after}px`);
 
+  // 3.bis) el reporte de zona TIENE que seguir viéndose al alejar el mapa.
+  // El círculo mide 150 m reales, así que su tamaño en pantalla se desploma:
+  // a zoom 10 daba ~4px, o sea que los reportes de un toque —la mayoría—
+  // desaparecían del mapa. Ahora hay un piso en píxeles y, sobre todo, un
+  // núcleo de tamaño fijo con el emoji de la categoría.
+  await page.evaluate(() => { window.__map._zoom = 9; window.__map.fire('zoom'); });
+  await page.waitForTimeout(80);
+  const alejado = await page.$eval('.amet-approx', e => parseFloat(e.style.width));
+  // 44px es el mínimo táctil de la app (--tap): el círculo entero es el área
+  // de click, así que por debajo de eso el reporte no solo se ve mal, no se
+  // puede tocar. Se afirma contra esa invariante y no contra el valor exacto
+  // de APPROX_MIN_PX, que es un número de diseño y puede moverse.
+  check('alejando el mapa el círculo no se hace invisible ni intocable',
+    alejado >= 44, alejado + 'px a zoom 9');
+  const core = await page.$$eval('.approx-core', els => els.map(e => ({
+    txt: e.textContent.trim(), w: getComputedStyle(e).width
+  })));
+  check('la zona lleva un núcleo con el emoji de la categoría',
+    core.length === 1 && core[0].txt.length > 0, JSON.stringify(core));
+  check('y ese núcleo es de tamaño fijo, no depende del zoom',
+    core[0] && core[0].w === '34px', core[0] && core[0].w);
+
   // 4) el pin abre la hoja de detalle al tocarlo.
   // Se dispara el click directo sobre el elemento en vez de page.click():
   // el stub no posiciona los marcadores (MapLibre real usa transform), así
