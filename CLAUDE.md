@@ -115,6 +115,9 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
 - `supabase/functions/admin-delete-report/index.ts` — Edge Function que
   borra un reporte desde el panel admin, con la `service_role` key detrás
   del mismo `ADMIN_PASSWORD` (ver "Seguridad de escritura" abajo).
+- `supabase/functions/admin-metrics/index.ts` — Edge Function de SOLO LECTURA
+  que le da al panel lo que la anon key no puede ver: suscriptores push,
+  actividad diaria y objetos en Storage (ver "Estado del proyecto").
 - `supabase/functions/admin-update-config/index.ts` — Edge Function que
   edita `app_config` desde el panel admin, detrás del mismo `ADMIN_PASSWORD`
   y con validación de rangos (ver "app_config también borraba" abajo).
@@ -541,6 +544,45 @@ por medio.
   mentir desde que el radio es editable (v14.5). La miniatura de una foto
   abre la imagen completa en otra pestaña. Cubierto por
   `tests/check-admin-herramientas.js`.
+- **Estado del proyecto** (v16.4): tarjeta con lo que el panel **no podía
+  ver**, alimentada por el Edge Function nuevo `admin-metrics`.
+  - **El punto ciego era grande**: `push_subscriptions` no tiene política de
+    SELECT desde v14.2 (y está bien que no la tenga), así que el panel no podía
+    saber **cuánta gente tiene las notificaciones activadas** — el número de
+    crecimiento del proyecto era invisible desde la propia herramienta de
+    administración.
+  - **`admin-metrics` SOLO LEE**, a propósito. Separar las lecturas de las
+    escrituras lo hace trivial de auditar, y si el password se filtrara el peor
+    caso acá es ver unos números agregados. Tampoco registra intentos fallidos:
+    no escribe nada, y hacerlo gastaría los intentos del login real desde la
+    misma IP.
+  - **`daily_stats` existe porque el proyecto no guardaba NINGÚN histórico**, y
+    en los dos casos a propósito: `reports` se autoexpira a las
+    `max_age_minutes` y `report_events` se poda sola a las 2 h (solo sirve para
+    contar dentro de la ventana del tope por IP). Era imposible responder "¿se
+    usó más que la semana pasada?".
+  - **Qué guarda, y qué no**: un contador por día y nada más. Sin IP, sin
+    coordenadas y sin vínculo con ningún reporte, así que **no debilita la
+    decisión de privacidad** de `report_events` — con esa tabla en la mano no se
+    puede saber quién publicó qué ni dónde. Lo incrementa un trigger
+    `AFTER INSERT` sobre `reports` y **no** `create_report`, para no volver a
+    tocar el camino más delicado del sistema: así cuenta lo que se publicó de
+    verdad entre por donde entre, y un fallo del contador nunca puede tumbar
+    una publicación. **El contador sobrevive al borrado del reporte**, que es
+    justamente el punto (verificado con una sonda que se borró después).
+  - **Los días en cero se rellenan del lado del servidor.** Un día sin
+    actividad no tiene fila; dibujarlo así haría que el eje mienta y que dos
+    días separados se vean pegados.
+  - El gráfico es CSS puro: son 14 valores y el proyecto no tiene dependencias.
+- **Quitar solo la foto, sin borrar el reporte** (v16.4): hasta acá la única
+  moderación posible era eliminar el reporte entero, y eso mezcla dos cosas —
+  una foto puede ser abusiva sobre un aviso de retén perfectamente válido, y
+  borrarlo le quita a la gente la información que sí sirve.
+  `admin-delete-report` acepta ahora `solo_foto: true`, que pone `photo = null`;
+  el trigger `reports_photo_cleared` la saca de Storage solo, el mismo camino
+  que la moderación por denuncias. **No hay endpoint nuevo ni permiso nuevo.**
+  El botón aparece solo si el reporte tiene foto, en la tabla y en la ficha del
+  mapa.
 - **Por qué no quedó en Netlify Functions + Blobs**: la primera versión de
   este panel (antes de este commit) se construyó sobre un backend propio en
   Netlify Functions con Netlify Blobs como reemplazo de un `data/*.json` —
@@ -1640,6 +1682,9 @@ ordena alfabéticamente bien):
 18. `20260804190000_optional_photos.sql` — columna `photo_flags`, funciones
     `_attach_photo` / `flag_photo` y el trigger `reports_photo_cleared` (ver
     "Fotos opcionales"). Aditiva: no reabre ninguna política.
+19. `20260809210000_daily_stats.sql` — tabla `daily_stats` y el trigger
+    `reports_bump_stats` (ver "Estado del proyecto"). Aditiva y sin políticas:
+    solo la lee `admin-metrics` con la service_role key.
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
@@ -1649,8 +1694,9 @@ documentados donde corresponde pero listados acá juntos para no
 saltearse ninguno al migrar):
 - **Edge Functions**: `supabase/functions/notify-nearby/`,
   `supabase/functions/admin-login/`, `supabase/functions/admin-delete-report/`,
-  `supabase/functions/admin-update-config/`, `supabase/functions/delete-photo/`
-  y `supabase/functions/attach-photo/` hay que desplegarlas aparte
+  `supabase/functions/admin-update-config/`, `supabase/functions/delete-photo/`,
+  `supabase/functions/attach-photo/` y `supabase/functions/admin-metrics/`
+  hay que desplegarlas aparte
   (`deploy_edge_function` o Supabase CLI) — el código fuente sí está en
   el repo, solo el deploy es manual.
 - **Secrets de Edge Functions** (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
@@ -1781,8 +1827,15 @@ protección ya resuelve sin piezas nuevas.
   comparando la lista de "Ignoring asset" contra el árbol real del repo;
   la primera versión del archivo (con `.git/`) NO excluía nada y hubiera
   publicado el repo entero. Verificado que el resultado final sube
-  exactamente 6 archivos: `amet-radar.html`, `admin.html`,
-  `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`.
+  exactamente 7 archivos: `amet-radar.html`, `admin.html`,
+  `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`,
+  `icon-badge.png`. **`**/.wrangler` está en la lista**: el propio
+  `wrangler deploy --dry-run` crea ese directorio al bundlear y deja ahí
+  el `_worker.js` con su **sourcemap** — wrangler ignora el `.js` solo,
+  no el `.map`, así que sin esa línea un despliegue hecho a mano desde
+  una copia local publicaría el sourcemap del Worker. Desde el build de
+  Cloudflare no pasa (parte de un checkout limpio y `.wrangler` está en
+  `.gitignore`), por eso no se notaba.
 - **`amet-radar.html`**: los meta tags OG/Twitter genéricos del `<head>`
   (`og:url`, `og:image`, `twitter:image`) apuntan a
   `https://amet-radar.lavega.workers.dev/`.
