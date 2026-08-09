@@ -1,9 +1,10 @@
-const CACHE_NAME = 'amet-radar-v16.2';
+const CACHE_NAME = 'amet-radar-v16.3';
 const APP_SHELL = [
   './amet-radar.html',
   './manifest.json',
   './icon-192.png',
-  './icon-512.png'
+  './icon-512.png',
+  './icon-badge.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -70,7 +71,12 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(title, {
       body: data.body || 'Hay un reporte nuevo cerca de tu ubicación.',
       icon: 'icon-192.png',
-      badge: 'icon-192.png',
+      // El BADGE no es un ícono a color: Android usa solo su canal alfa y lo
+      // pinta como silueta monocroma en la barra de estado. Con icon-192.png
+      // —que es un cuadrado violeta opaco de punta a punta— salía un cuadrado
+      // blanco macizo, sin forma. icon-badge.png tiene fondo transparente y el
+      // dibujo simplificado para leerse a ~24dp.
+      badge: 'icon-badge.png',
       data: { id: data.id }
     })
   );
