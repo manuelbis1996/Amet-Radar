@@ -144,7 +144,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 14 suites de Playwright, versionadas en el repo. **Leer
+- `tests/` — las 16 suites de Playwright, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -154,7 +154,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   el doble de MapLibre que comparten todas (el sandbox bloquea el CDN y los
   tiles). **`tests` está en `.assetsignore`**: sin eso, con
   `assets.directory: "./"`, estos archivos se publicarían como servibles.
-- `tests/check-base-real.js` — el complemento de las 14: pega contra la base
+- `tests/check-base-real.js` — el complemento de las 16: pega contra la base
   **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
   mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
   entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
@@ -1254,6 +1254,35 @@ las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
     trajo el último fetch (`lastFetchBox`): esperar hasta 8s al próximo
     sondeo dejaría el mapa vacío justo después de panear, y eso se lee como
     que no hay reportes.
+- **Lo que se borra en un dispositivo tiene que irse de TODOS** (v16.4):
+  `renderVisibleMarkers` recorría `reportsCache` para decidir qué dibujar y
+  qué sacar, y eso solo alcanza para sacar lo que **todavía está en la
+  caché**. Un reporte borrado desde otro teléfono (o retirado por la
+  comunidad, o quitado desde el panel) sale de la caché en el siguiente
+  fetch, y con eso el bucle **deja de visitar su id**: el marcador quedaba
+  pegado en el mapa hasta recargar la página, con el contador del header
+  contándolo y su hoja de detalle todavía abrible. Reportado por el usuario.
+  - **El arreglo es un barrido en el sentido contrario**, de `markersById`
+    hacia `reportsCache`: todo marcador cuyo id ya no está en la caché se
+    quita. Va antes del bucle de siempre, no en su lugar — el bucle sigue
+    haciendo falta para los vencidos y para los que salen del área visible.
+  - **Los pendientes de la cola offline se saltean explícitamente**
+    (`pendingIds`). Existen a propósito como marcador **sin** estar en
+    `reportsCache` (todavía no llegaron al servidor), o sea que tienen
+    exactamente la forma de un huérfano: sin esa excepción, el barrido le
+    borraría al usuario su propio reporte justo mientras no hay señal. La
+    suite lo prueba con la RPC caída, no solo de palabra.
+  - **El token NO se descarta acá**, a diferencia del camino de vencimiento
+    (que sí llama a `dropToken`). Un reporte también "desaparece" de la
+    caché al quedar fuera del área que trae el sondeo, y ahí sigue
+    existiendo: tirar el token dejaría a su autor sin poder borrarlo nunca
+    más solo por haber paneado el mapa.
+  - **Si la hoja abierta era la de ese reporte, se cierra con un aviso**
+    ("Ese reporte ya no está."). El camino de vencimiento la cierra en
+    silencio; acá no alcanza, porque desde el punto de vista del usuario la
+    pantalla que estaba mirando se cerró sola sin ninguna razón visible.
+  - Cubierto por `tests/check-sync.js`, verificada **quitando el barrido**
+    para confirmar que se pone en rojo (4 chequeos) y no es decorativa.
 - **Persistencia**: los reportes viven en la tabla `reports` de Supabase
   (Postgres), no en `server.js` ni en un archivo. El cliente mantiene una
   copia en memoria (`reportsCache`) que refresca cada 8s vía `fetch` a la

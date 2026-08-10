@@ -48,6 +48,7 @@ código, revisá si el método está acá.
 | `check-antispam.js` | Que publicar vaya por `rpc/create_report` y **no** por el `POST` directo (cerrado en v14.0); que un rechazo `duplicate`/`rate_limit` tenga su mensaje, no gaste cupo local ni se encole; y que la cola offline reintente con el **mismo id** tratando `already_exists` como éxito |
 | `check-untoque.js` | Reportar es un solo toque: sin pantallas intermedias, categoría `reten_fijo`, `owner_hash` presente, y Deshacer borra en el servidor y devuelve el cupo |
 | `check-seguridad.js` | Que la app no emita ningún `DELETE`/`PATCH` directo contra `reports`, `app_config` ni el bucket; que votar vaya por RPC sin mandar totales; que borrar exija el token de propiedad |
+| `check-sync.js` | Que un reporte borrado desde OTRO dispositivo desaparezca de este: el marcador se va, el contador baja, la hoja de detalle abierta se cierra avisando — y que el barrido que hace eso **no se lleve puestos los reportes de la cola offline**, que existen como marcador sin estar en `reportsCache` |
 | `check-area.js` | Que el sondeo acote por área visible **y** que un link compartido a un reporte de otra ciudad siga abriendo (es la palanca de crecimiento del proyecto) |
 | `check-publicar.js` | Publicación completa con foto + deep link `?r=` |
 | `check-maplibre.js` | Migración a MapLibre: estilo, zoom, límites de RD, pines, círculo aproximado, seguimiento |
