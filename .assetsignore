@@ -14,6 +14,12 @@
 **/.github
 **/node_modules
 **/.DS_Store
+# .wrangler la crea el propio `wrangler deploy --dry-run` al bundlear, y
+# adentro deja el _worker.js con su sourcemap. Está en .gitignore, así que
+# no llega al build de producción (Cloudflare parte de un checkout limpio),
+# pero si alguien despliega a mano desde su copia se publicaría el
+# sourcemap del Worker. Wrangler ignora el .js solo, no el .map.
+**/.wrangler
 _worker.js
 wrangler.jsonc
 .assetsignore

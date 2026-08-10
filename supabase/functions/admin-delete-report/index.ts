@@ -1,4 +1,6 @@
-// Borra un reporte desde el panel de administración (admin.html).
+// Quita contenido de un reporte desde el panel (admin.html): el reporte
+// entero, o SOLO su foto (body.solo_foto) — que es lo que hace falta cuando la
+// imagen es abusiva pero el aviso del retén es válido.
 //
 // Existe porque la migración 20260801120000_lock_down_writes.sql le quitó a
 // anon la política de DELETE sobre public.reports: antes el panel borraba
@@ -102,7 +104,7 @@ Deno.serve(async (req) => {
     return json({ error: "Demasiados intentos. Intenta más tarde." }, 429);
   }
 
-  let body: { password?: string; id?: string };
+  let body: { password?: string; id?: string; solo_foto?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -116,6 +118,25 @@ Deno.serve(async (req) => {
 
   const id = String(body.id ?? "");
   if (!id) return json({ error: "falta el id del reporte" }, 400);
+
+  // MODO "SOLO LA FOTO". Hasta acá la única opción de moderación era borrar el
+  // reporte entero, y eso mezcla dos cosas distintas: una foto puede ser
+  // abusiva sobre un aviso de retén perfectamente válido. Quitarle la foto
+  // conserva el aviso, que es lo que le sirve a la gente.
+  //
+  // Poner `photo` en null alcanza: el trigger reports_photo_cleared se dispara
+  // solo y le pide a delete-photo que la saque de Storage — el mismo camino
+  // que usa la moderación por denuncias (ver "Fotos opcionales" en CLAUDE.md).
+  // Por eso acá NO hay que tocar el bucket a mano.
+  if (body.solo_foto === true) {
+    const { error: errFoto } = await supabase
+      .from("reports").update({ photo: null }).eq("id", id);
+    if (errFoto) {
+      console.error("Error quitando la foto", errFoto);
+      return json({ error: "No se pudo quitar la foto" }, 500);
+    }
+    return json({ ok: true, solo_foto: true }, 200);
+  }
 
   // Reusa la misma función de la base que usan delete_own_report y el
   // retiro comunitario, para que borrar la foto del bucket junto con la

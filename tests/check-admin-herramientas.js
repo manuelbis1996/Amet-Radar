@@ -75,6 +75,27 @@ async function abrirPanel(browser) {
     fetchesReportes++;
     return r.fulfill({ contentType:'application/json', body: JSON.stringify(REPORTES) });
   });
+  // admin-metrics: lo que la anon key no puede leer. Se devuelven 14 días con
+  // un hueco en el medio a propósito, para comprobar que el gráfico dibuja
+  // también los días en cero.
+  const porDia = Array.from({ length: 14 }, (_, i) => ({
+    dia: new Date(Date.now() - (13 - i) * 86400000).toISOString().slice(0, 10),
+    reportes: i === 5 ? 0 : i + 1,
+  }));
+  const metricas = [];
+  await page.route('**/functions/v1/admin-metrics', r => {
+    metricas.push(JSON.parse(r.request().postData() || '{}'));
+    return r.fulfill({ status:200, contentType:'application/json',
+      body: JSON.stringify({ ok:true, suscriptores:42, por_dia:porDia,
+                             fotos:3, ultimo_reporte: Date.now() - 4*60000 }) });
+  });
+
+  const borrados = [];
+  await page.route('**/functions/v1/admin-delete-report', r => {
+    borrados.push(JSON.parse(r.request().postData() || '{}'));
+    return r.fulfill({ status:200, contentType:'application/json', body:'{"ok":true}' });
+  });
+
   await page.route('**/functions/v1/admin-login', r =>
     r.fulfill({ status:200, contentType:'application/json', body:'{"ok":true}' }));
 
@@ -89,12 +110,12 @@ async function abrirPanel(browser) {
   await page.click('#login-btn');
   await page.waitForSelector('#dashboard:not([hidden])', { timeout:8000 });
   await page.waitForTimeout(400);
-  return { ctx, page, errores, purgas, contarFetches: () => fetchesReportes };
+  return { ctx, page, errores, purgas, metricas, borrados, contarFetches: () => fetchesReportes };
 }
 
 (async () => {
   const browser = await lanzar();
-  const { ctx, page, errores, purgas, contarFetches } = await abrirPanel(browser);
+  const { ctx, page, errores, purgas, contarFetches, metricas, borrados } = await abrirPanel(browser);
 
   // ---- 1. Estadísticas: activos y vencidos por separado ----
   {
@@ -231,6 +252,53 @@ async function abrirPanel(browser) {
   }
 
   check('sin errores de JS en toda la pasada', errores.length === 0, JSON.stringify(errores));
+
+  // ---- 10. Estado del proyecto: lo que la anon key no puede ver ----
+  // Es el hueco que tenía el panel: `push_subscriptions` no tiene política de
+  // SELECT, así que sin este endpoint era imposible saber cuánta gente tiene
+  // las notificaciones activadas — el número de crecimiento del proyecto.
+  check('se pidieron las métricas con el password',
+    metricas.length === 1 && typeof metricas[0].password === 'string',
+    JSON.stringify(metricas.map(m => Object.keys(m))));
+
+  const tiles = await page.$$eval('#metrics-grid .stat-tile',
+    els => els.map(e => e.textContent.replace(/\s+/g, ' ').trim()));
+  check('muestra los suscriptores push',
+    tiles.some(t => t.startsWith('42') && /Suscriptores/i.test(t)), JSON.stringify(tiles));
+  check('y cuántas fotos hay en Storage',
+    tiles.some(t => t.startsWith('3') && /Fotos/i.test(t)), JSON.stringify(tiles));
+
+  const barras = await page.$$eval('#metrics-chart .chart-col', els => els.map(e => ({
+    cero: e.classList.contains('cero'),
+    alto: e.querySelector('.chart-bar').style.height
+  })));
+  check('el gráfico dibuja los 14 días', barras.length === 14, 'barras=' + barras.length);
+  // Un día sin actividad NO puede desaparecer del gráfico: si se omitiera, el
+  // eje mentiría y dos días separados se verían pegados.
+  check('los días en cero se dibujan igual, marcados',
+    barras.filter(b => b.cero).length === 1 && barras[5].cero,
+    JSON.stringify(barras.map(b => b.cero ? 0 : 1)));
+  check('la barra más alta llega al 100%',
+    barras.some(b => b.alto === '100%'), JSON.stringify(barras.map(b => b.alto)));
+
+  // ---- 11. Moderar la foto sin borrar el aviso ----
+  // Antes la única opción era borrar el reporte entero, y eso mezcla dos
+  // cosas: la foto puede ser abusiva sobre un retén real.
+  const conFoto = await page.$$eval('#reports-tbody tr', filas => filas.map(f => ({
+    id: f.dataset.id, tieneBoton: !!f.querySelector('.row-unfoto')
+  })));
+  check('"Quitar foto" aparece solo en el reporte que tiene foto',
+    conFoto.filter(f => f.tieneBoton).length === 1 &&
+    conFoto.find(f => f.tieneBoton).id === 'r-foto',
+    JSON.stringify(conFoto));
+
+  // El manejador de diálogos ya está registrado más arriba (para la purga);
+  // agregar otro hace que Playwright falle con "already handled".
+  await page.click('.row-unfoto');
+  await page.waitForTimeout(500);
+  check('quitar la foto manda solo_foto:true, no un borrado',
+    borrados.length === 1 && borrados[0].solo_foto === true &&
+    borrados[0].id === 'r-foto', JSON.stringify(borrados));
 
   await ctx.close();
   await browser.close();

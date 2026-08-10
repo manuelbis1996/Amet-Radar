@@ -189,7 +189,8 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
       s.status === 200 && Array.isArray(s.json) && s.json.length === 0,
       'status=' + s.status + ' filas=' + (Array.isArray(s.json) ? s.json.length : '?'));
 
-    for (const tabla of ['report_events', 'rate_limit_salt', 'admin_login_attempts']) {
+    for (const tabla of ['report_events', 'rate_limit_salt', 'admin_login_attempts',
+                         'daily_stats']) {
       const t = await pedir('GET', `/rest/v1/${tabla}?select=*&limit=1`);
       const vacio = t.status !== 200 || (Array.isArray(t.json) && t.json.length === 0);
       check(`${tabla} no expone nada a anon`, vacio,
@@ -219,6 +220,9 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
       // llama con la service_role key. Si esta quedara expuesta a anon,
       // cualquiera podría ponerle una foto a un reporte ajeno sin token.
       ['_attach_photo', { p_id: 'x', p_token: 'x', p_photo: 'x' }, '42501'],
+      // El contador de daily_stats: si anon pudiera ejecutarlo, cualquiera
+      // podría inflar las métricas del panel.
+      ['bump_daily_stats', {}, 'PGRST202'],
       // De trigger, invocadas por la base. Nunca callables por REST.
       ['delete_report_photo', {}, 'PGRST202'],
       ['notify_nearby_reports', {}, 'PGRST202'],

@@ -192,6 +192,26 @@
   .row-actions{ display:flex; gap:6px; flex-wrap:wrap; }
   .thumb-link{ display:inline-block; line-height:0; }
 
+  /* ---- Gráfico de actividad ----
+     Barras en CSS puro, sin librería: son 14 valores y el proyecto no tiene
+     dependencias. Los días sin actividad llegan con 0 desde el endpoint, así
+     que la barra existe igual (con altura mínima) y el eje no miente. */
+  #metrics-chart{ margin-top:18px; }
+  .chart{ display:flex; align-items:flex-end; gap:5px; height:96px; }
+  .chart-col{ flex:1; display:flex; flex-direction:column; justify-content:flex-end;
+              align-items:center; gap:5px; min-width:0; }
+  .chart-bar{
+    width:100%; border-radius:4px 4px 0 0; background:var(--amber);
+    min-height:3px; transition:height .25s;
+  }
+  .chart-col.cero .chart-bar{ background:var(--line); }
+  .chart-col b{ font-family:var(--font-mono); font-size:10px; color:var(--muted); }
+  .chart-eje{ display:flex; gap:5px; margin-top:7px; }
+  .chart-eje span{
+    flex:1; text-align:center; font-size:9px; color:var(--muted-2);
+    font-family:var(--font-mono); min-width:0; overflow:hidden;
+  }
+
   /* ---- Parámetros ---- */
   .config-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:0 18px; }
   .config-grid .field{ display:flex; flex-direction:column; }
@@ -313,6 +333,15 @@
     </header>
 
     <div class="card">
+      <h2>Estado del proyecto</h2>
+      <p class="hint">Lo que la anon key no puede ver: sale de <code>admin-metrics</code>
+         con la service_role key, detrás del mismo password.</p>
+      <div class="error-box" id="metrics-error" hidden></div>
+      <div class="stat-grid" id="metrics-grid"></div>
+      <div id="metrics-chart"></div>
+    </div>
+
+    <div class="card">
       <h2>Estadísticas</h2>
       <div class="stat-grid" id="stat-grid"></div>
       <div class="cat-breakdown" id="cat-breakdown"></div>
@@ -333,6 +362,7 @@
             </div>
             <div class="rp-meta" id="rp-meta"></div>
             <div class="rp-actions">
+              <button type="button" class="ghost-btn" id="rp-unfoto" hidden>Quitar foto</button>
               <button type="button" class="ghost-btn danger" id="rp-delete">Eliminar</button>
               <button type="button" class="ghost-btn" id="rp-close">Cerrar</button>
             </div>
@@ -462,6 +492,9 @@
   // app_config sale max_age_minutes, que es lo que purge_expired_reports()
   // usa para decidir qué borrar (ver 20260802140000_lock_down_app_config.sql).
   const ADMIN_CONFIG_URL = `${SUPABASE_URL}/functions/v1/admin-update-config`;
+  // Métricas que la anon key NO puede leer (suscriptores, actividad diaria,
+  // objetos en Storage). Ver supabase/functions/admin-metrics.
+  const ADMIN_METRICS_URL = `${SUPABASE_URL}/functions/v1/admin-metrics`;
   const SUPABASE_HEADERS = {
     'apikey': SUPABASE_ANON_KEY,
     'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
@@ -652,10 +685,16 @@
           <td><div class="row-actions">
             <button class="ghost-btn row-ver" data-id="${r.id}" aria-label="Ver en el mapa el reporte de ${cat.label}">Ver</button>
             <button class="ghost-btn row-link" data-id="${r.id}" aria-label="Copiar enlace del reporte de ${cat.label}">Link</button>
+            ${r.photo ? `<button class="ghost-btn row-unfoto" data-id="${r.id}" aria-label="Quitar solo la foto del reporte de ${cat.label}">Quitar foto</button>` : ''}
             <button class="row-delete" data-id="${r.id}" aria-label="Eliminar reporte de ${cat.label}">Eliminar</button>
           </div></td>
         </tr>`;
     }).join('');
+    // Solo aparece si hay foto: ofrecer "Quitar foto" en un reporte que no
+    // tiene sería un botón que no hace nada.
+    tbody.querySelectorAll('.row-unfoto').forEach(btn => {
+      btn.addEventListener('click', () => deleteReport(btn.dataset.id, true));
+    });
     tbody.querySelectorAll('.row-delete').forEach(btn => {
       btn.addEventListener('click', () => deleteReport(btn.dataset.id));
     });
@@ -743,13 +782,20 @@
   // La foto la borra la función _delete_report de la base, junto con la
   // fila (mismo nombre de archivo <id>.jpg que usa uploadPhoto() en
   // amet-radar.html) — el panel ya no toca el bucket directo.
-  async function deleteReport(id){
-    if(!confirm('¿Eliminar este reporte?')) return;
+  // `soloFoto` quita la imagen y deja el reporte publicado. Es la diferencia
+  // entre moderar la foto y borrar el aviso: una imagen puede ser abusiva
+  // sobre un retén perfectamente real, y borrar el reporte entero le quitaría
+  // a la gente la información que sí sirve.
+  async function deleteReport(id, soloFoto){
+    const pregunta = soloFoto
+      ? '¿Quitar la foto? El reporte queda publicado.'
+      : '¿Eliminar este reporte?';
+    if(!confirm(pregunta)) return;
     try{
       const res = await fetch(ADMIN_DELETE_URL, {
         method: 'POST',
         headers: SUPABASE_HEADERS,
-        body: JSON.stringify({ password: getAdminPassword(), id })
+        body: JSON.stringify({ password: getAdminPassword(), id, solo_foto: !!soloFoto })
       });
       if(res.status === 401){
         // El password de admin cambió mientras la pestaña seguía abierta.
@@ -761,10 +807,11 @@
       }
       if(!res.ok){
         const data = await res.json().catch(() => ({}));
-        showToast(data.error || 'No se pudo eliminar el reporte', true);
+        showToast(data.error || (soloFoto ? 'No se pudo quitar la foto'
+                                          : 'No se pudo eliminar el reporte'), true);
         return;
       }
-      showToast('Reporte eliminado');
+      showToast(soloFoto ? 'Foto quitada' : 'Reporte eliminado');
       await refreshAll();
     }catch(err){
       showToast('No se pudo eliminar el reporte', true);
@@ -1053,7 +1100,10 @@
     document.getElementById('rp-meta').innerHTML =
       `${timeAgo(r.ts)} · 👍 ${r.confirms||0} · 👎 ${r.denies||0}` +
       (r.approx ? ' · zona aproximada' : '') +
-      (vencido ? ' · <b>vencido, los usuarios ya no lo ven</b>' : '');
+      (vencido ? ' · <b>vencido, los usuarios ya no lo ven</b>' : '') +
+      (r.photo ? ' · con foto' : '');
+    // Mismo criterio que en la tabla: el botón solo existe si hay foto.
+    document.getElementById('rp-unfoto').hidden = !r.photo;
     document.getElementById('rep-popover').hidden = false;
   }
 
@@ -1084,6 +1134,9 @@
   document.getElementById('rp-close').addEventListener('click', cerrarPopover);
   document.getElementById('rp-delete').addEventListener('click', () => {
     if(repSeleccionado) deleteReport(repSeleccionado);
+  });
+  document.getElementById('rp-unfoto').addEventListener('click', () => {
+    if(repSeleccionado) deleteReport(repSeleccionado, true);
   });
   document.getElementById('pin-clear').addEventListener('click', quitarPin);
 
@@ -1172,6 +1225,70 @@
     }
   })();
 
+  // ---- Estado del proyecto -------------------------------------------------
+  // Se carga aparte del resto y NUNCA propaga su error: si admin-metrics falla
+  // o todavía no está desplegado, el panel tiene que seguir funcionando igual.
+  // Es el mismo criterio que ya se aplicó con el mapa.
+  async function loadMetrics(){
+    const caja  = document.getElementById('metrics-grid');
+    const graf  = document.getElementById('metrics-chart');
+    const error = document.getElementById('metrics-error');
+    error.hidden = true;
+    caja.innerHTML = '<div class="stat-tile"><b>…</b><span>cargando</span></div>';
+    let data;
+    try{
+      const res = await fetch(ADMIN_METRICS_URL, {
+        method:'POST', headers: SUPABASE_HEADERS,
+        body: JSON.stringify({ password: getAdminPassword() })
+      });
+      if(res.status === 401){
+        // El password cambió con la pestaña abierta: mismo tratamiento que en
+        // el resto del panel.
+        sessionStorage.removeItem(SESSION_KEY); authed = false; showEntry();
+        showToast('Tu sesión venció. Entra de nuevo.', true);
+        return;
+      }
+      data = await res.json();
+      if(!res.ok || !data.ok) throw new Error(data.error || 'sin detalle');
+    }catch(err){
+      caja.innerHTML = '';
+      graf.innerHTML = '';
+      error.textContent = 'No se pudieron cargar las métricas: ' + err.message;
+      error.hidden = false;
+      return;
+    }
+
+    const ultimo = data.ultimo_reporte
+      ? timeAgo(data.ultimo_reporte)
+      : 'nunca';
+    const total14 = (data.por_dia || []).reduce((a,d) => a + d.reportes, 0);
+    caja.innerHTML = [
+      [data.suscriptores, 'Suscriptores push'],
+      [total14,           'Reportes en 14 días'],
+      [data.fotos,        'Fotos en Storage'],
+      [ultimo,            'Último reporte'],
+    ].map(([v,t]) =>
+      `<div class="stat-tile"><b>${escapeHtml(String(v))}</b><span>${t}</span></div>`
+    ).join('');
+
+    // El máximo se calcula sobre los datos, con piso en 1: si todos los días
+    // son 0, dividir por 0 daría NaN y las barras desaparecerían.
+    const dias = data.por_dia || [];
+    const max = Math.max(1, ...dias.map(d => d.reportes));
+    graf.innerHTML =
+      `<div class="chart">` +
+      dias.map(d => {
+        const alto = Math.round((d.reportes / max) * 100);
+        return `<div class="chart-col${d.reportes ? '' : ' cero'}" title="${d.dia}: ${d.reportes}">
+                  <b>${d.reportes || ''}</b>
+                  <div class="chart-bar" style="height:${alto}%"></div>
+                </div>`;
+      }).join('') +
+      `</div><div class="chart-eje">` +
+      dias.map(d => `<span>${d.dia.slice(8)}</span>`).join('') +
+      `</div>`;
+  }
+
   async function loadDashboard(){
     try{
       renderCatChoices();
@@ -1181,6 +1298,9 @@
       initAdminMap();
       await loadConfigForm();
       await refreshAll();
+      // Al final y sin await encadenado al try: las métricas son informativas,
+      // no pueden retrasar ni romper la carga del panel.
+      loadMetrics();
     }catch(err){
       showToast('Error cargando el panel', true);
     }
