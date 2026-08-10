@@ -566,7 +566,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v16.3';
+  const APP_VERSION = 'v16.4';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1421,6 +1421,29 @@
     const south = b.getSouth() - padLat, north = b.getNorth() + padLat;
     const west = b.getWest() - padLng, east = b.getEast() + padLng;
     const now = Date.now();
+
+    // BARRIDO DE HUÉRFANOS. El bucle de abajo recorre reportsCache, así que
+    // solo puede sacar del mapa lo que TODAVÍA está en la caché: un reporte
+    // que desapareció del servidor (lo borró su autor desde otro teléfono, lo
+    // retiró la comunidad, o lo quitó el panel) sale de la caché en el
+    // siguiente fetch y con eso el bucle deja de visitar su id — su marcador
+    // se quedaba dibujado para siempre, y el contador del header contándolo.
+    // Por eso hay que barrer al revés: de los marcadores hacia la caché.
+    //
+    // Los pendientes de la cola offline se saltean: existen como marcador a
+    // propósito sin estar en reportsCache (todavía no llegaron al servidor).
+    for(const id in markersById){
+      if(reportsCache[id] || pendingIds.has(id)) continue;
+      removeMarker(id);
+      // El token NO se borra acá, a diferencia del vencimiento: un reporte
+      // también "desaparece" al quedar fuera del área que trae el sondeo, y
+      // ahí sigue existiendo — tirar el token dejaría a su autor sin poder
+      // borrarlo nunca más solo por haber paneado el mapa.
+      if(detailId === id){
+        closeDetail();
+        showToast('Ese reporte ya no está.');
+      }
+    }
 
     for(const id in reportsCache){
       const r = reportsCache[id];
