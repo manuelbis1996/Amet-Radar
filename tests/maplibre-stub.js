@@ -27,6 +27,13 @@
     this._calls = []; // registro de jumpTo/panTo/easeTo/flyTo para los asserts
     this.touchZoomRotate = { disableRotation(){ self._rotationDisabled = true; } };
     window.__map = this;
+    // Desde v17.0 la app suelta el loader de arranque en el evento 'load' del
+    // mapa, en vez de esperar al GPS. Sin esto el stub nunca lo dispararía y
+    // toda esa lógica quedaría sin probar (y el loader tapando la pantalla en
+    // las suites). Se puede desactivar con window.__mapNoLoad = true para
+    // simular el caso real de "el estilo nunca carga", que es lo que cubre el
+    // tope de seguridad.
+    setTimeout(function(){ if(!window.__mapNoLoad) self.fire('load'); }, 0);
   }
   Map.prototype = Object.create(Evented.prototype);
   Map.prototype.getZoom = function(){ return this._zoom; };

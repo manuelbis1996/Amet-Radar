@@ -47,7 +47,7 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 - **Panel de administración** (`admin.html`), con el borrado y la edición de
   parámetros detrás de Edge Functions con password.
 - **PWA instalable**; mapa limitado a República Dominicana.
-- **14 suites de Playwright** versionadas en `tests/`, más
+- **18 suites de Playwright** versionadas en `tests/`, más
   `check-base-real.js` contra la base real, con su workflow semanal.
 
 ---
@@ -219,6 +219,45 @@ silencio del modelo real en Supabase.
 
 ---
 
+## 6. Arranque en frío y crecimiento
+
+**✅ El embudo del día 1 — hecho** (v17.0)
+Salió de mirar el proyecto desde afuera: técnicamente estaba terminado, pero el
+recorrido de alguien que recibe el link perdía gente por razones ajenas a si
+hay retenes. Se cerraron cinco: el loader que esperaba al GPS hasta 20 s;
+reportar imposible para siempre con el permiso denegado; el mapa vacío
+indistinguible de un backend caído; el voto que decía "gracias" aunque no
+llegara; y **el preview de WhatsApp roto justo para quien instala la PWA**
+(verificado contra producción). Más la oferta de avisos tras el primer reporte
+y poder compartir la app sin tener ningún reporte. Detalle en `CLAUDE.md`,
+"El arranque en frío (v17.0)".
+
+**🟡 Prompt de instalación (`beforeinstallprompt`)**
+La app es instalable pero nunca lo sugiere, y una PWA instalada es lo que hace
+que el push sirva de verdad. Quedó afuera de v17.0 a propósito: no es una
+línea sino una superficie (heurísticas de engagement en Chrome, persistir el
+descarte, y en iOS no existe el evento — hay que explicar "Compartir → Añadir a
+pantalla de inicio"). Además **no se puede probar con el mock**: el evento no
+dispara en Chromium headless.
+- Esfuerzo: medio. Es lo siguiente si v17.0 mueve la aguja.
+
+**🟡 No hay forma de enterarse de que algo se rompió**
+Si `notify-nearby` dejara de mandar notificaciones, nadie se entera: los
+triggers de `pg_net` descartan la respuesta, el panel no muestra salud (solo
+uso) y `check-base-real.js` publica la sonda pero **no verifica que el push
+salga**. El disparador más probable es deshabilitar las *legacy JWT keys* en
+Supabase: los tres triggers se autentican con la anon key vieja en formato JWT
+mientras la app usa la publishable nueva, así que ese switch **mata push y
+limpieza de fotos en silencio** sin tocar una línea de código.
+- Esfuerzo: bajo para lo que rinde. Mirar antes de sumar usuarios.
+
+**🟢 Sin backups, y `daily_stats` no se regenera**
+El plan Free no incluye backups ni PITR. `reports` se autoexpira igual y
+`app_config` son seis números, pero `push_subscriptions` y `daily_stats` no se
+recuperan solos — y `daily_stats` es el único histórico que tiene el proyecto.
+
+---
+
 ## Orden sugerido
 
 1. ~~CI que corra las suites en cada push~~ ✅ hecho
@@ -232,7 +271,10 @@ silencio del modelo real en Supabase.
 6. **Realtime**, cuando el egreso vuelva a ser el problema. **Es lo de mayor
    prioridad que queda**, y es condicional: no hay nada que hacer hasta que el
    egreso moleste.
-7. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
+7. ~~**El embudo del día 1**~~ ✅ hecho (v17.0)
+8. **Prompt de instalación** y **saber que el push sigue vivo** — los dos que
+   dejó abiertos v17.0, en ese orden.
+9. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
    editar reporte propio).
 
 **Condicional, fuera del orden**: si algún día se reactiva `FLUJO_CON_FOTO`

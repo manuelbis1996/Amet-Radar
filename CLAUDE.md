@@ -144,7 +144,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 16 suites de Playwright, versionadas en el repo. **Leer
+- `tests/` — las 18 suites de Playwright, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -154,7 +154,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   el doble de MapLibre que comparten todas (el sandbox bloquea el CDN y los
   tiles). **`tests` está en `.assetsignore`**: sin eso, con
   `assets.directory: "./"`, estos archivos se publicarían como servibles.
-- `tests/check-base-real.js` — el complemento de las 16: pega contra la base
+- `tests/check-base-real.js` — el complemento de las 18: pega contra la base
   **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
   mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
   entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
@@ -1194,6 +1194,149 @@ token** (`delete_own_report`), o sea que el "Deshacer" no se rompió.
 **Lo que NO se verificó**: cuánta gente real comparte IP por CGNAT en RD (no
 hay dato); y el comportamiento en producción bajo el cliente nuevo, porque
 las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
+
+## El arranque en frío (v17.0) — leer antes de tocar el loader, el voto o compartir
+
+Todo este bloque sale de una pregunta distinta a las anteriores: no "¿qué le
+falta al sistema?" sino "¿qué le pasa a un vecino de La Vega que reciba el link
+el día 1?". El sistema técnico estaba mucho más desarrollado que el bucle de
+producto que tiene que arrancarlo, y el recorrido perdía gente por razones que
+no tienen nada que ver con si hay retenes o no.
+
+### El loader se suelta con el mapa, no con el GPS
+
+`hideLoader()` solo se llamaba desde los caminos de geolocalización, así que
+con un GPS frío el usuario miraba **hasta 20 segundos** (el `timeout` de
+`watchPosition`) una pantalla opaca — con el mapa ya dibujado detrás,
+invisible. Ahora lo sueltan `map.on('load')` y un tope de `LOADER_MAX_MS`
+(3,5 s).
+
+- **El tope no es paranoia**: `load` **no dispara si el estilo falla**
+  (OpenFreeMap caído o bloqueado). Sin él cambiaríamos "20 s de pantalla
+  opaca" por "pantalla opaca para siempre".
+- **Y abre una regresión que hay que tapar en el mismo cambio**: antes el
+  `jumpTo` del primer fix ocurría **tapado** por el overlay. Con el mapa a la
+  vista, recentrar a ciegas le saltaría el mapa bajo el dedo a quien ya empezó
+  a mirar otra zona. Por eso existe `userMoved`, que se pone en el
+  `dragstart` **que ya existía** (el que apaga `following`). El `#locate-btn`
+  sigue siendo la vía para volver.
+- El texto dejó de decir "Buscando tu ubicación": ya no es lo que se espera.
+
+### Sin GPS se puede reportar igual (y el pin ya existía)
+
+`startQuickReport()` hacía `return` con un toast si no había `lastKnownLatLng`:
+con el permiso denegado, **el botón principal de la app no funcionaba nunca
+más** — no degradado, inutilizable. Ahora cae en `startManualPick()`, que
+estaba completo y probado (`check-pin.js`) pero era **código muerto en
+producción**, porque sus dos llamadores estaban detrás de `FLUJO_CON_FOTO`.
+
+- **No le agrega un toque al camino normal.** Con GPS se publica igual que
+  siempre. La rama nueva solo corre donde hoy el costo de reportar es
+  infinito: pasa de "imposible" a "dos toques". Es el mismo patrón que el
+  flujo con foto ya usaba para este caso.
+- **`startManualPick` acepta ahora un callback opcional** (`alConfirmar`), que
+  por defecto sigue siendo `askForCategory`. El flujo rápido le pasa
+  `publicarPunteado`. **Ojo**: `#adjust-loc` tiene que envolverlo en una
+  flecha — pasarlo pelado como listener le entregaría el `MouseEvent` como
+  callback.
+- **Un punto puesto a mano se publica con `approx: false`**, o sea como pin
+  exacto y no como círculo de 150 m. Es una afirmación deliberada, no una
+  lectura jitterada del GPS, y es lo que ya hacía el flujo con foto.
+- **Bug encontrado trazando esta ruta**: `overlay.classList.remove('picking')`
+  vivía dentro de `askForCategory()`. Cualquier camino que confirmara el pin
+  sin pasar por esa hoja dejaba la clase puesta, y "Publicando…" se dibujaba
+  **sin scrim, flotando sobre el mapa**. Se movió al confirmar.
+
+### El mapa vacío deja de ser indistinguible del backend caído
+
+`fetchAllReports()` hacía `console.error` silencioso en el `catch` y, peor, **la
+rama `!res.ok` no hacía absolutamente nada** — ni loguear. `reportsLoadedOnce`
+quedaba en `false`, así que ni la píldora salía: el usuario veía un mapa mudo.
+Y el mapa vacío **es el estado normal del día 1**, así que era imposible saber
+si la app andaba.
+
+- Se registra `lastFetchFailed` y la píldora dice "Sin conexión con el
+  servidor", con `mostrarPildora()` compartida por los dos estados.
+- **La píldora de vacío NO se tocó**: mismo lugar, mismo tamaño, mismo
+  auto-ocultado a los 7 s. Que el estado de error no sea una tarjeta grande y
+  central es deliberado — esa forma ya se probó y molestó dos veces.
+- Solo se avisa si además no hay nada dibujado: con marcadores en pantalla, un
+  sondeo fallido no molesta a nadie.
+- Se muestra **una vez por racha** y se re-arma cuando un sondeo vuelve a
+  responder, para que una red intermitente no lo repita cada 8 s.
+
+### El voto dejó de mentir cuando falla
+
+`voted.add(id); saveVoted(voted)` corría **antes** de `await voteReport(...)`, y
+como `voteReport` se traga la excepción y devuelve `null`, un voto que nunca
+llegó terminaba igual en "Gracias por confirmar" — con los botones
+`disabled` para siempre en ese dispositivo. Se perdía el voto **y** la
+posibilidad de reintentarlo, sin que nadie se enterara. Ahora se guarda después
+de una respuesta confirmada; si falla, se avisa en warn y `refreshDetail`
+vuelve a habilitar los botones. El `Set` `votando` frena el doble toque.
+
+### Compartir: el preview estaba roto justo para quien instala la PWA
+
+**Verificado contra producción** con una sonda real y un User-Agent de
+WhatsApp:
+
+```
+/?r=<id>                 ->  "👮 Retén fijo — AMET Radar"   OK
+/amet-radar.html?r=<id>  ->  "AMET Radar"                    genérico
+```
+
+El Worker (`_worker.js`) **solo corre en `/`**: la ruta `/amet-radar.html` la
+sirve el asset router sin invocarlo — el mismo mecanismo del bug del 307. Y la
+URL se armaba con `location.pathname`, así que quien tiene la PWA instalada
+(`start_url: "./amet-radar.html"`) compartía siempre la variante sin preview:
+la tarjeta linda le fallaba **a los usuarios más comprometidos, que son los que
+más comparten**.
+
+- **Arreglo: `urlBase()` arma siempre desde la raíz.** Se prefirió a
+  `run_worker_first` en `wrangler.jsonc` porque no toca la configuración de
+  despliegue (que ya mordió una vez) y no convierte cada apertura de la PWA en
+  una invocación del Worker. En local sigue andando: `server.js` ya resuelve
+  `/` → `amet-radar.html`.
+- **Se puede compartir la app, no solo un reporte** (`compartirApp()`, botón
+  `#share-app-btn` en la topbar y en la bienvenida). Antes solo se compartía
+  desde la ficha de un reporte, o sea que **el día 1, sin ningún reporte, la
+  app era incompartible** — el único día en que compartirla es todo.
+- `compartir()` es ahora una sola función con los dos respaldos de siempre
+  (hoja nativa → portapapeles → toast). El CSS `#push-toggle-btn` pasó a la
+  clase `.topbar-btn`, compartida por los dos botones.
+- Un link a un reporte ya vencido **lo dice**; antes `openReportById` hacía un
+  `return` mudo y se leía como que la app estaba rota.
+
+### Los avisos se ofrecen una vez, después del primer reporte
+
+El push es el único mecanismo de retención y era 100% por descubrimiento: la
+campana es un ícono sin etiqueta y nada la mencionaba.
+
+- **Respeta "onboarding discreto, sin banner/modal al abrir"**: no hay nada al
+  abrir. La oferta llega cuando la persona **ya publicó un reporte**, o sea en
+  el momento de mayor intención.
+- **Espera a que venza la ventana de Deshacer** (6 s): preguntar antes taparía
+  el botón de arrepentirse.
+- **No dispara `Notification.requestPermission()` sola.** Un permiso rechazado
+  por reflejo no se puede volver a pedir desde la app, así que la pregunta
+  blanda va primero. Clave: `amet_push_asked_v1`.
+- La bienvenida menciona los avisos y ofrece compartir. Y **quien llega por un
+  `?r=` ya no se queda sin bienvenida**: se difiere hasta que cierre la ficha
+  (antes se salteaba). El camino normal sigue siendo síncrono **a propósito**:
+  si la bienvenida se abre después del primer sondeo, la píldora de "Todo
+  tranquilo" alcanza a mostrarse, `renderSheet` la tapa y ya no vuelve.
+
+### Cobertura
+
+`tests/check-arranque.js` y `tests/check-crecimiento.js`, **las dos verificadas
+revirtiendo cada cambio** para confirmar que se ponen en rojo (siete
+reversiones, ninguna guarda decorativa). El stub de MapLibre ahora dispara
+`load`; `window.__mapNoLoad = true` simula el estilo que nunca carga.
+
+**Trampa al escribir estas suites**: `map._calls` guarda **arrays** `[metodo,
+arg]`, no objetos — un filtro por `c.tipo` pasa por vacío y da verde falso. Y
+los toasts duran 2,6 s: si se encadenan dos acciones, leer `.toast` devuelve el
+viejo.
 
 ## Decisiones de arquitectura ya tomadas
 - **Categorías de reporte**: `reten_fijo`, `reten_movil`, `accidente`, `control`
