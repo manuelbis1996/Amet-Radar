@@ -46,6 +46,23 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+function clientIp(req: Request): string {
+  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+}
+
+// El bloqueo SÍ se consulta, aunque acá no se registren fallos (ver abajo).
+// Es la misma tabla y la misma fila por IP que usan los otros tres endpoints
+// admin: si el login ya bloqueó a esa IP, este endpoint tiene que respetarlo.
+async function isLocked(ip: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("admin_login_attempts")
+    .select("lock_until")
+    .eq("ip", ip)
+    .maybeSingle();
+  if (!data?.lock_until) return false;
+  return new Date(data.lock_until).getTime() > Date.now();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -56,6 +73,17 @@ Deno.serve(async (req) => {
     return json({ error: "admin password not configured" }, 500);
   }
 
+  // SIN ESTO, ESTE ENDPOINT ERA UN ORÁCULO DE PASSWORD SIN LÍMITE. Era el
+  // único de los cuatro admin que no consultaba el bloqueo, así que se podía
+  // probar el ADMIN_PASSWORD a mansalva contra acá — sin tope y sin dejar
+  // rastro — y una vez encontrado usarlo en admin-delete-report, que sí
+  // borra. El rate-limit de los otros tres no protege nada si el password se
+  // descubre por otra puerta.
+  const ip = clientIp(req);
+  if (await isLocked(ip)) {
+    return json({ error: "Demasiados intentos. Intenta más tarde." }, 429);
+  }
+
   let body: { password?: string };
   try {
     body = await req.json();
@@ -63,8 +91,12 @@ Deno.serve(async (req) => {
     return json({ error: "body inválido" }, 400);
   }
   if (!timingSafeEqual(String(body.password ?? ""), ADMIN_PASSWORD)) {
-    // Sin registrar el intento: este endpoint no escribe nada, y hacerlo
-    // gastaría los intentos del login real desde la misma IP.
+    // El fallo NO se registra, a diferencia de los otros tres, y eso sigue
+    // siendo deliberado: este endpoint solo lee, y registrar acá gastaría
+    // los intentos del login real desde la misma IP (que en RD suele ser
+    // compartida por CGNAT). Lo que hacía falta era CONSULTAR el bloqueo,
+    // no alimentarlo: así la fuerza bruta contra acá se corta igual, porque
+    // para llegar a algo útil hay que pasar también por los que sí cuentan.
     return json({ error: "Password incorrecto" }, 401);
   }
 
