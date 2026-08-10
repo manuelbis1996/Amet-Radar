@@ -143,7 +143,11 @@
   .brand-count b{ font-size:14px; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
 
   .topbar-actions{ display:flex; align-items:center; gap:8px; }
-  #push-toggle-btn{
+  /* Estilo compartido por los botones de la topbar. Era #push-toggle-btn
+     cuando la campana estaba sola; al sumarse el de compartir se generalizó
+     a una clase para no duplicar la regla. Los selectores por id de abajo
+     (data-state) se mantienen: son solo de la campana. */
+  .topbar-btn{
     pointer-events:auto; flex-shrink:0; position:relative;
     width:var(--tap); height:var(--tap); border-radius:50%;
     background:var(--surface); border:none; color:var(--muted);
@@ -151,8 +155,8 @@
     display:flex; align-items:center; justify-content:center;
     cursor:pointer; transition:transform .14s ease, color .14s ease;
   }
-  #push-toggle-btn svg{ width:19px; height:19px; }
-  #push-toggle-btn:active{ transform:scale(.9); }
+  .topbar-btn svg{ width:19px; height:19px; }
+  .topbar-btn:active{ transform:scale(.9); }
   #push-toggle-btn[data-state="active"]{ color:var(--brand); }
   #push-toggle-btn[data-state="loading"]{ opacity:.5; cursor:default; }
   #locate-btn[data-state="active"]{ color:var(--brand); }
@@ -514,7 +518,9 @@
 <body>
 <div id="app">
   <div id="map">
-    <div id="map-loader"><div class="radar-sweep"></div><span>Buscando tu ubicación…</span></div>
+    <!-- Ya no dice "Buscando tu ubicación": desde v17.0 el loader se va con
+         el mapa, no con el GPS, así que prometer eso sería mentir. -->
+    <div id="map-loader"><div class="radar-sweep"></div><span>Cargando el mapa…</span></div>
   </div>
 
   <div id="empty-state" hidden>
@@ -529,7 +535,10 @@
         <span class="brand-count"><b id="stat-count">0</b>en vista</span>
       </div>
       <div class="topbar-actions">
-        <button id="push-toggle-btn" data-state="inactive" aria-label="Avisarme de retenes cerca" title="Avisarme de retenes cerca" hidden>
+        <button id="share-app-btn" class="topbar-btn" aria-label="Compartir AMET Radar" title="Compartir AMET Radar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51L8.59 10.49"/></svg>
+        </button>
+        <button id="push-toggle-btn" class="topbar-btn" data-state="inactive" aria-label="Avisarme de retenes cerca" title="Avisarme de retenes cerca" hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         </button>
       </div>
@@ -566,7 +575,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v16.4';
+  const APP_VERSION = 'v17.0';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -751,8 +760,20 @@
         reportsCache = next;
         reportsLoadedOnce = true;
         lastFetchBox = box;
+        lastFetchFailed = false;
+      } else {
+        // Esta rama NO HACÍA NADA hasta v17.0, ni siquiera loguear: si
+        // Supabase respondía 500, reportsLoadedOnce quedaba en false y el
+        // estado vacío ni siquiera llegaba a mostrarse. El usuario veía un
+        // mapa mudo, indistinguible de "no hay retenes" — que es justamente
+        // el estado normal del día 1.
+        console.error('Error cargando reportes: HTTP', res.status);
+        lastFetchFailed = true;
       }
-    }catch(e){ console.error('Error cargando reportes', e); }
+    }catch(e){
+      console.error('Error cargando reportes', e);
+      lastFetchFailed = true;
+    }
     return reportsCache;
   }
 
@@ -1215,6 +1236,8 @@
   const detailEl = document.getElementById('detail');
   const detailPanel = detailEl.querySelector('.detail-panel');
   let detailId = null;
+  // Votos con la llamada en vuelo, para que un doble toque no mande dos.
+  const votando = new Set();
 
   function findReport(id){
     if(reportsCache[id]) return reportsCache[id];
@@ -1366,6 +1389,9 @@
   // cartel de "no hay nada" aparecería durante el arranque, cuando todavía
   // no se sabe si hay reportes o no.
   let reportsLoadedOnce = false;
+  // El último sondeo no llegó (excepción de red o respuesta no-2xx). Es lo
+  // que permite distinguir "no hay retenes" de "no pude preguntar".
+  let lastFetchFailed = false;
   const emptyStateEl = document.getElementById('empty-state');
 
   // El cartel de "no hay reportes" se muestra UNA sola vez por sesión y se
@@ -1376,6 +1402,10 @@
   // otra zona vacía, para no perseguir al usuario.
   let emptyStateShown = false;
   let emptyStateTimer = null;
+  // Aviso de "no pude conectarme": se muestra una vez por RACHA de fallos y se
+  // re-arma solo cuando un sondeo vuelve a responder. Sin eso, una red
+  // intermitente lo repetiría cada 8 s.
+  let errorStateShown = false;
 
   function hideEmptyState(){
     clearTimeout(emptyStateTimer);
@@ -1384,17 +1414,41 @@
   }
   emptyStateEl.addEventListener('click', hideEmptyState);
 
+  // Misma píldora, mismo tamaño y mismo auto-ocultado a los 7 s para los dos
+  // estados. Que la de error NO sea una tarjeta grande y central es a
+  // propósito: esa forma ya se probó y molestó, ver CLAUDE.md.
+  function mostrarPildora(texto){
+    const card = emptyStateEl.querySelector('.empty-card');
+    if(card) card.textContent = texto;
+    emptyStateEl.hidden = false;
+    clearTimeout(emptyStateTimer);
+    emptyStateTimer = setTimeout(hideEmptyState, 7000);
+  }
+
   function maybeShowEmptyState(n){
     if(n > 0){ hideEmptyState(); return; }
-    if(!reportsLoadedOnce || emptyStateShown) return;
-    // No mostrarlo debajo de una hoja abierta (bienvenida, flujo de
+    // No mostrar nada debajo de una hoja abierta (bienvenida, flujo de
     // reporte): quedaría tapado por el scrim y se auto-ocultaría sin que
     // nadie lo llegue a leer. Se reintenta en el próximo sondeo de 8s.
     const ov = document.getElementById('flow-overlay');
     if(ov && !ov.hidden) return;
+
+    // "No hay retenes" y "el servidor no responde" se veían EXACTAMENTE
+    // igual: un mapa vacío. Es la ambigüedad más cara del día 1, porque el
+    // mapa vacío es el estado normal al lanzar y no había forma de saber si
+    // la app andaba. Solo se avisa si además no hay nada dibujado: con
+    // marcadores en pantalla, un sondeo fallido no molesta a nadie.
+    if(lastFetchFailed){
+      if(errorStateShown) return;
+      errorStateShown = true;
+      mostrarPildora('⚠️ Sin conexión con el servidor');
+      return;
+    }
+    errorStateShown = false;
+
+    if(!reportsLoadedOnce || emptyStateShown) return;
     emptyStateShown = true;
-    emptyStateEl.hidden = false;
-    emptyStateTimer = setTimeout(hideEmptyState, 7000);
+    mostrarPildora('🛣️ Todo tranquilo por aquí');
   }
 
   function updateCount(){
@@ -1555,6 +1609,49 @@
   setInterval(refreshReports, 8000);
   window.addEventListener('online', flushPendingQueue);
 
+  // ---- Compartir ----
+  // LA URL SE ARMA SIEMPRE DESDE LA RAÍZ, NO DESDE location.pathname, y no es
+  // un detalle cosmético: el preview dinámico de WhatsApp lo genera el Worker
+  // de Cloudflare (_worker.js), pero el Worker SOLO corre en `/`. La ruta
+  // `/amet-radar.html` la sirve el asset router sin invocarlo nunca — el mismo
+  // mecanismo del bug del 307 documentado en CLAUDE.md.
+  //
+  // Con location.pathname, quien tiene la PWA instalada (start_url es
+  // "./amet-radar.html") compartía siempre la URL que NO genera preview: la
+  // tarjeta linda le fallaba justo a los usuarios más comprometidos, que son
+  // los que más comparten. Verificado contra producción con un User-Agent de
+  // WhatsApp y una sonda real.
+  //
+  // Se prefirió esto antes que `run_worker_first` en wrangler.jsonc porque no
+  // toca la configuración de despliegue (que en este proyecto ya mordió una
+  // vez) y no convierte cada apertura de la PWA en una invocación del Worker.
+  // En local sigue andando: server.js ya resuelve `/` -> amet-radar.html.
+  function urlBase(){ return `${location.origin}/`; }
+
+  // Un solo camino para compartir, con los mismos dos respaldos que ya tenía
+  // el botón de la ficha: hoja nativa -> portapapeles -> el enlace en un toast.
+  function compartir(text, url){
+    if(navigator.share){
+      navigator.share({ title: 'AMET Radar', text, url }).catch(() => {});
+    } else if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(
+        () => showToast('Enlace copiado al portapapeles'),
+        () => showToast(url)
+      );
+    } else {
+      showToast(url);
+    }
+  }
+
+  // Compartir LA APP, no un reporte. Hasta v16.4 solo se podía compartir un
+  // reporte puntual desde su ficha, o sea que el día del lanzamiento —sin
+  // ningún reporte todavía— la app era literalmente incompartible, el único
+  // día en que compartirla es todo.
+  function compartirApp(){
+    compartir('Mira dónde hay retenes de tránsito en La Vega, en tiempo real 👮', urlBase());
+  }
+  document.getElementById('share-app-btn').addEventListener('click', compartirApp);
+
   // ---- Deep link: abrir un reporte compartido ----
   // openReportById es la parte reutilizable (centrar mapa + abrir popup);
   // la usan tanto el link compartido como el click en una notificación
@@ -1566,7 +1663,11 @@
     let r = reportsCache[id];
     if(!r){
       r = await fetchReportById(id);
-      if(!r) return;
+      // Antes esto era un `return` mudo: quien tocaba un link de WhatsApp de
+      // un reporte ya vencido caía en un mapa cualquiera sin ninguna
+      // explicación, y eso se lee como "la app está rota" — justo en el
+      // vector por el que llega la gente nueva.
+      if(!r){ showToast('Ese reporte ya no está activo.'); return; }
       reportsCache[id] = r;
     }
     // OJO: map.setView es de Leaflet y NO existe en MapLibre — tenerlo acá
@@ -1708,6 +1809,47 @@
     });
   }
 
+  // OFRECER LOS AVISOS UNA VEZ, DESPUÉS DEL PRIMER REPORTE PUBLICADO.
+  //
+  // El push es el único mecanismo de retención del proyecto y hasta v16.4 era
+  // 100% por descubrimiento: la campana es un ícono sin etiqueta, la
+  // bienvenida no los mencionaba y publicar tampoco los ofrecía. O sea que el
+  // motivo para volver a abrir la app existía pero nadie lo encontraba.
+  //
+  // Por qué acá y no al abrir: CLAUDE.md registra "onboarding discreto, sin
+  // banner/modal al abrir la app la primera vez", y se respeta. Quien acaba de
+  // publicar un reporte ya entendió para qué sirve todo esto — es el momento
+  // de mayor intención y el opuesto de pedir el permiso a ciegas.
+  //
+  // Y NO dispara Notification.requestPermission() por su cuenta: eso solo pasa
+  // si la persona toca "Avisarme". Un permiso rechazado por reflejo no se
+  // puede volver a pedir desde la app, así que la pregunta blanda va primero.
+  const PUSH_ASKED_KEY = 'amet_push_asked_v1';
+  function maybeOfferPush(){
+    if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+    if(pushToggleBtn.dataset.state === 'active') return;
+    if(Notification.permission !== 'default') return; // ya decidió, en un sentido o en otro
+    try{
+      if(localStorage.getItem(PUSH_ASKED_KEY)) return;
+      localStorage.setItem(PUSH_ASKED_KEY, '1');
+    }catch(e){ return; }
+    const ov = document.getElementById('flow-overlay');
+    if(ov && !ov.hidden) return; // no encimarle una hoja a otra
+    renderSheet(`
+      <h2>¿Te avisamos?</h2>
+      <p class="sub">Gracias por reportar. Podemos avisarte cuando alguien reporte un retén cerca de ti, aunque tengas la app cerrada.</p>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="push-later">Ahora no</button>
+        <button class="btn btn-primary" id="push-yes">Avisarme</button>
+      </div>
+    `);
+    document.getElementById('push-later').addEventListener('click', closeOverlay);
+    document.getElementById('push-yes').addEventListener('click', () => {
+      closeOverlay();
+      subscribeToPush();
+    });
+  }
+
   async function initPushUI(){
     if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
     pushToggleBtn.hidden = false;
@@ -1791,13 +1933,33 @@
     if(action === 'confirm' || action === 'deny'){
       const voted = getVoted();
       if(voted.has(id)){ showToast('Ya votaste en este reporte'); return; }
-      voted.add(id); saveVoted(voted); saveVoteDir(id, action);
+      if(votando.has(id)) return; // doble toque mientras la llamada está en vuelo
+      votando.add(id);
+      // Se deshabilitan los dos botones apenas se toca: es lo que le dice al
+      // usuario que su toque entró, sin tener que mentirle sobre el resultado
+      // antes de saberlo.
+      detailPanel.querySelectorAll('.vote-btn').forEach(b => { b.disabled = true; });
 
       // El retiro comunitario lo decide el servidor (vote_report mira
       // deny_threshold de app_config y borra la fila): el cliente ya no
       // puede borrar reportes ajenos, así que solo obedece la respuesta.
       const out = await voteReport(id, action);
-      if(out && out.removed){
+      votando.delete(id);
+
+      // EL VOTO YA NO SE DA POR BUENO ANTES DE TIEMPO. Hasta v16.4 se guardaba
+      // en localStorage ANTES de llamar al servidor, y como voteReport se traga
+      // la excepción y devuelve null, un voto que nunca llegó terminaba igual
+      // en "Gracias por confirmar" — con los botones deshabilitados para
+      // siempre en ese dispositivo. O sea: se perdía el voto Y se perdía la
+      // posibilidad de reintentarlo, sin que nadie se enterara.
+      if(!out){
+        refreshDetail(id); // re-dibuja desde getVoted(): vuelve a habilitarlos
+        showToast('No se pudo registrar tu voto. Intenta de nuevo.', true);
+        return;
+      }
+      voted.add(id); saveVoted(voted); saveVoteDir(id, action);
+
+      if(out.removed){
         removeMarker(id);
         closeDetail();
         updateCount();
@@ -1809,19 +1971,9 @@
     }
 
     if(action === 'share'){
-      const url = `${location.origin}${location.pathname}?r=${encodeURIComponent(id)}`;
       const cat = CATEGORIES[r.category] || CATEGORIES.reten_fijo;
-      const text = `${cat.emoji} ${cat.label} reportado en AMET Radar`;
-      if(navigator.share){
-        navigator.share({ title: 'AMET Radar', text, url }).catch(() => {});
-      } else if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(url).then(
-          () => showToast('Enlace copiado al portapapeles'),
-          () => showToast(url)
-        );
-      } else {
-        showToast(url);
-      }
+      compartir(`${cat.emoji} ${cat.label} reportado en AMET Radar`,
+                `${urlBase()}?r=${encodeURIComponent(id)}`);
     }
 
     if(action === 'delete'){
@@ -1863,6 +2015,14 @@
   // fix nuevo de watchPosition hace panTo (no setView, para no resetear el
   // zoom) y se autodesactiva si el usuario arrastra el mapa a mano.
   let following = false;
+  // userMoved: el usuario ya arrastró el mapa a mano. Existe porque desde
+  // v17.0 el mapa se ve antes de que conteste el GPS, así que el recentrado
+  // del primer fix puede llegar cuando la persona ya está mirando otra cosa.
+  let userMoved = false;
+  // Techo para soltar el loader cuando el estilo del mapa nunca carga (CDN o
+  // tiles bloqueados): 'load' no dispara y sin esto la pantalla queda opaca
+  // para siempre. 3,5 s es más de lo que tarda un arranque normal.
+  const LOADER_MAX_MS = 3500;
 
   function createMeMarker(latlng){
     const el = document.createElement('div');
@@ -1875,6 +2035,18 @@
   }
 
   function hideLoader(){ mapLoader.hidden = true; }
+
+  // EL ARRANQUE NO DEPENDE DEL GPS. Hasta v16.4 hideLoader() se llamaba solo
+  // desde los caminos de geolocalización, así que con un GPS frío el usuario
+  // miraba hasta 20 segundos (el timeout de watchPosition) una pantalla opaca
+  // — con el mapa ya dibujado detrás, invisible. Es la primera pérdida del
+  // embudo y no tenía ninguna razón de ser.
+  map.on('load', hideLoader);
+  // El tope NO es paranoia: 'load' no dispara si el estilo falla (OpenFreeMap
+  // caído o bloqueado). Sin esto cambiaríamos "20 s de pantalla opaca" por
+  // "pantalla opaca para siempre".
+  setTimeout(hideLoader, LOADER_MAX_MS);
+
   function tryOpenHashOnce(){
     if(hashHandled) return;
     hashHandled = true;
@@ -1898,7 +2070,14 @@
           meMarker.setLngLat([latlng[1], latlng[0]]);
         }
         if(firstFix){
-          map.jumpTo({ center: [latlng[1], latlng[0]], zoom: zoomFromLeaflet(15) });
+          // Con el loader ya fuera del camino (ver map.on('load') arriba), el
+          // mapa está a la vista desde el primer segundo. Recentrar a ciegas
+          // cuando por fin llega el GPS le haría saltar el mapa bajo el dedo
+          // a quien ya empezó a mirar otra zona: si paneó, se respeta. El
+          // botón de ubicación sigue estando para volver a un toque.
+          if(!userMoved){
+            map.jumpTo({ center: [latlng[1], latlng[0]], zoom: zoomFromLeaflet(15) });
+          }
           firstFix = false;
           hideLoader();
           tryOpenHashOnce();
@@ -1964,6 +2143,9 @@
   // Arrastrar el mapa a mano desactiva el seguimiento — panTo/setView
   // programáticos no disparan dragstart, así que esto no se autocancela.
   map.on('dragstart', () => {
+    // Marca que el usuario tomó el control del mapa. Lo lee el primer fix del
+    // GPS para no recentrar encima de lo que la persona está mirando.
+    userMoved = true;
     if(following){
       following = false;
       locateBtn.removeAttribute('data-state');
@@ -2128,17 +2310,34 @@
 
   // ---- Reporte rápido: sin foto, ubicación aproximada a partir del GPS ----
   function startQuickReport(){
+    pendingCategory = CATEGORIA_UNICA;
+    // SIN GPS YA NO ES UN CALLEJÓN SIN SALIDA. Hasta v16.4 esto mostraba un
+    // toast y volvía: con el permiso de ubicación denegado, el botón principal
+    // de la app no funcionaba NUNCA MÁS — no degradado, inutilizable. Ahora
+    // cae al pin arrastrable, que ya existía completo y probado pero solo se
+    // alcanzaba desde FLUJO_CON_FOTO (o sea, código muerto en producción).
+    //
+    // Esto NO le agrega un toque al camino normal: con GPS se publica igual
+    // que siempre, de un toque. La rama nueva solo corre cuando hoy el costo
+    // de reportar es infinito, así que pasa de "imposible" a "dos toques".
+    // Es el mismo patrón que ya usa el flujo con foto para este caso.
     if(!lastKnownLatLng){
-      showToast('Buscando tu ubicación… intenta de nuevo en unos segundos.', true);
-      closeOverlay();
+      startManualPick(publicarPunteado);
       return;
     }
     pendingLocation = jitterLocation(lastKnownLatLng[0], lastKnownLatLng[1], 0, 30);
-    pendingCategory = CATEGORIA_UNICA;
     publishQuickReport();
   }
 
-  async function publishQuickReport(){
+  // Un punto puesto a mano es una afirmación deliberada, no una lectura del
+  // GPS jitterada: se publica como pin exacto (approx:false), igual que ya
+  // hace el flujo con foto cuando no hay GPS, y no como círculo de zona.
+  function publicarPunteado(){
+    pendingCategory = CATEGORIA_UNICA;
+    publishQuickReport({ approx: false });
+  }
+
+  async function publishQuickReport(opts){
     renderSheet(`
       <h2>Publicando…</h2>
       <div class="row-center"><div class="radar-sweep small"></div><span style="font-size:13px;color:var(--muted)">Enviando reporte rápido…</span></div>
@@ -2148,7 +2347,7 @@
       lat: pendingLocation.lat, lng: pendingLocation.lng,
       photo: null, note: '', ts: Date.now(),
       category: pendingCategory || 'reten_fijo',
-      confirms: 0, denies: 0, approx: true
+      confirms: 0, denies: 0, approx: !opts || opts.approx !== false
     };
     await stampOwnership(id, record);
     try{
@@ -2199,7 +2398,11 @@
 
   const PICK_ZOOM = 18;
 
-  function startManualPick(){
+  // alConfirmar: qué hacer con el punto elegido. Por defecto sigue siendo la
+  // hoja de categoría (el flujo con foto), pero el reporte rápido sin GPS le
+  // pasa publicarPunteado para publicar directo — con una sola categoría
+  // reportable, preguntarla sería elegir entre una opción.
+  function startManualPick(alConfirmar){
     // Arranca donde está el usuario (o en el centro del mapa si todavía no
     // hay GPS), no en un punto vacío: casi siempre el retén está cerca.
     // Si ya hay un punto elegido (el del GPS, o uno ajustado antes), el pin
@@ -2258,7 +2461,12 @@
       manualPickHandler = null;
       removePickMarker();
       overlay.style.pointerEvents = '';
-      askForCategory();
+      // La clase 'picking' se saca ACÁ y no solo en askForCategory: mientras
+      // vivía allá, cualquier camino que confirmara el pin sin pasar por la
+      // hoja de categoría dejaba el overlay sin scrim ni desenfoque, así que
+      // "Publicando…" se dibujaba flotando sobre el mapa a la vista.
+      overlay.classList.remove('picking');
+      (alConfirmar || askForCategory)();
     });
   }
 
@@ -2284,7 +2492,10 @@
     // desde acá se abre el pin arrastrable. Al confirmarlo se vuelve a esta
     // misma hoja. Va solo en el flujo detallado: el rápido usa zona
     // aproximada a propósito (ver "Reporte rápido"), ahí no aplica.
-    document.getElementById('adjust-loc').addEventListener('click', startManualPick);
+    // Envuelto en una flecha a propósito: pasarlo pelado le entregaría el
+    // MouseEvent como `alConfirmar` y al confirmar el pin intentaría llamar
+    // a un evento como si fuera una función.
+    document.getElementById('adjust-loc').addEventListener('click', () => startManualPick());
     overlay.querySelectorAll('.cat-option').forEach(btn => {
       btn.addEventListener('click', () => {
         pendingCategory = btn.dataset.cat;
@@ -2423,7 +2634,11 @@
       `<button type="button" class="toast-btn" data-toast="undo">Deshacer</button>`;
     document.getElementById('app').appendChild(t);
     const quitar = () => t.remove();
-    const timer = setTimeout(quitar, UNDO_MS);
+    // Se espera a que venza la ventana de Deshacer antes de ofrecer los
+    // avisos: preguntar mientras todavía se puede deshacer taparía el botón
+    // que sirve para arrepentirse, y encima le preguntaría a alguien que
+    // quizá está por cancelar lo que acaba de publicar.
+    const timer = setTimeout(() => { quitar(); maybeOfferPush(); }, UNDO_MS);
     t.querySelector('[data-toast="foto"]').addEventListener('click', () => {
       clearTimeout(timer);
       quitar();
@@ -2524,11 +2739,6 @@
     let seen = false;
     try{ seen = !!localStorage.getItem(ONBOARDED_KEY); }catch(e){}
     if(seen) return;
-    // Si viene de un link compartido (?r=), ese reporte es el contexto y no
-    // hay que taparlo con la bienvenida.
-    const deepLink = new URLSearchParams(location.search).get('r')
-      || (location.hash.match(/r=([^&]+)/) || [])[1];
-    if(deepLink) return;
     try{ localStorage.setItem(ONBOARDED_KEY, '1'); }catch(e){}
     renderSheet(`
       <h2>Bienvenido a AMET Radar</h2>
@@ -2537,14 +2747,49 @@
         <li><b>👀 Mira el mapa</b> — cada punto es un reporte activo de otra persona.</li>
         <li><b>📣 Reporta</b> — si ves un retén, toca "Reportar ubicación" y se publica al instante. Un solo toque.</li>
         <li><b>👍 Confirma</b> — toca un reporte para decir si sigue ahí o si ya no está.</li>
+        <li><b>🔔 Activa los avisos</b> — con la campana de arriba te avisamos si hay un retén cerca, aunque tengas la app cerrada.</li>
       </ul>
-      <div class="btn-row">
+      <div class="btn-row" style="margin-bottom:10px;">
         <button class="btn btn-primary" id="welcome-ok" style="width:100%;">Entendido</button>
       </div>
+      <button class="mini-btn primary" style="width:100%;" id="welcome-share">Compartir con mis contactos</button>
     `);
     document.getElementById('welcome-ok').addEventListener('click', closeOverlay);
+    // La app se hace conocida por boca a boca; este es el único momento
+    // garantizado de atención que tiene, y sin reportes en el mapa el botón
+    // de compartir de la ficha no existe todavía.
+    document.getElementById('welcome-share').addEventListener('click', () => {
+      closeOverlay();
+      compartirApp();
+    });
   }
-  maybeShowWelcome();
+  // Quien llega por un link compartido (?r=) TAMBIÉN tiene que ver la
+  // bienvenida: es el vector por el que entra la gente nueva y hasta v16.4 era
+  // el único que se quedaba sin ninguna explicación de qué es la app. Lo que
+  // sigue valiendo —y por eso no alcanza con borrar el `return`— es no tapar
+  // el reporte compartido, que es su contexto. Así que se difiere hasta que
+  // cierre esa ficha, en vez de saltearse.
+  //
+  // El camino normal (sin ?r=) sigue siendo síncrono y en el mismo lugar de
+  // antes, a propósito: la bienvenida tiene que abrirse ANTES de que el
+  // primer sondeo intente mostrar la píldora de "Todo tranquilo", si no la
+  // píldora se muestra, renderSheet la tapa, y ya no vuelve a aparecer.
+  function programarBienvenida(){
+    const deepLink = new URLSearchParams(location.search).get('r')
+      || (location.hash.match(/r=([^&]+)/) || [])[1];
+    if(!deepLink){ maybeShowWelcome(); return; }
+    reportsReady.then(() => setTimeout(() => {
+      // La ficha puede no haberse abierto nunca (reporte ya vencido): ahí no
+      // hay nada que esperar y la bienvenida va igual.
+      if(detailEl.hidden){ maybeShowWelcome(); return; }
+      detailEl.addEventListener('click', function alCerrar(e){
+        if(!e.target.closest('.detail-backdrop, .detail-close')) return;
+        detailEl.removeEventListener('click', alCerrar);
+        setTimeout(maybeShowWelcome, 350);
+      });
+    }, 600));
+  }
+  programarBienvenida();
 
   // ---- PWA: service worker (requiere servir por http/https, no file://) ----
   if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
