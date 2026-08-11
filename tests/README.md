@@ -55,7 +55,7 @@ código, revisá si el método está acá.
 | `check-publicar.js` | Publicación completa con foto + deep link `?r=` |
 | `check-maplibre.js` | Migración a MapLibre: estilo, zoom, límites de RD, pines, círculo aproximado, seguimiento |
 | `check-gps.js` | Atajo por GPS y comportamiento sin GPS |
-| `check-pin.js` | Pin arrastrable para elegir el lugar |
+| `check-pin.js` | Pin **fijo al centro** para elegir el lugar (v17.3: se mueve el mapa, no el pin): que no intercepte toques, que el punto salga de `map.getCenter()` y que se limpie al confirmar y al cancelar |
 | `check-cerrar.js` | Tocar fuera cierra las hojas (y las que están procesando, no) |
 | `check-voto.js` | Estado visible del voto y colores de categoría |
 | `check-vacio.js` | Píldora "Todo tranquilo por aquí": tamaño y que no tape nada |

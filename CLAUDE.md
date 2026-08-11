@@ -1195,6 +1195,68 @@ token** (`delete_own_report`), o sea que el "Deshacer" no se rompió.
 hay dato); y el comportamiento en producción bajo el cliente nuevo, porque
 las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
 
+## Marcar en otro punto, con el pin fijo al centro (v17.3)
+
+Pedido del usuario. Hasta v17.2 el pin manual **solo aparecía cuando NO había
+GPS** (esa fue la rama nueva de v17.0), así que con la ubicación andando no
+existía ninguna forma de avisar de un retén que no fuera donde uno está
+parado. Y ese es medio caso real: te lo cuentan por teléfono, o lo pasaste
+hace diez cuadras y recién ahora podés sacar el teléfono.
+
+### La entrada es un botón aparte, no una pregunta
+
+`#pick-btn`, redondo, al lado del de centrar. **No** se agregó una pantalla
+"¿aquí o en el mapa?" al tocar Reportar: esa pantalla intermedia se sacó en
+v13.0 justamente porque le suma un toque a **todos** los reportes, incluidos
+los que se hacen manejando. Así el camino rápido no cambia en nada y el otro
+queda a la vista.
+
+- La etiqueta del botón principal pasó de "Reportar ubicación" a **"Reportar
+  aquí"**: con tres controles en la fila la anterior se partía en dos líneas
+  hasta en 390 px (medido, no a ojo), y además "aquí" ahora *significa* algo,
+  porque existe un camino que no es aquí. Lleva `white-space:nowrap` para que
+  no vuelva a pasar. Verificado que entra en una línea a 320 px.
+- El botón respeta el anti-spam local (`canReport()`) antes de abrir nada: no
+  tiene sentido hacer elegir un punto para después rechazarlo.
+
+### El pin ya no se arrastra: se queda fijo y se mueve el mapa
+
+Reemplaza al pin arrastrable de v10.9. Aquel ya había resuelto el problema de
+"acertá de un toque" (el dedo tapa justo lo que querés marcar), pero
+arrastrando el dedo **sigue** estando sobre el pin al soltar. Con el pin
+clavado al centro el dedo nunca toca el punto, y no hay nada que descubrir:
+se mueve el mapa y se mira el objetivo todo el tiempo. Es el patrón de
+Uber/Google Maps.
+
+- **El pin NO es un marcador de MapLibre**: es un elemento fijo de la pantalla
+  sin coordenadas propias. El punto sale de `map.getCenter()` al confirmar.
+  Eso vale porque `#map` ocupa la pantalla entera, así que el centro del
+  contenedor es el centro del viewport — **si algún día el mapa deja de ser
+  pantalla completa, hay que recalcular esto**.
+- `pointer-events:none` en el pin no es cosmético: si interceptara toques
+  bloquearía justo el gesto de arrastrar el mapa, que es la única forma de
+  mover el punto. Está cubierto por una prueba.
+- La punta cae en el centro exacto (`translate(-50%,-100%)`), y hay una prueba
+  que lo **mide** contra el centro del viewport: es lo que garantiza que se
+  publique lo que se ve.
+- Mientras el mapa se mueve el pin se levanta y la sombra se achica
+  (`.moviendo`, enganchado a `movestart`/`moveend`): es la señal de que lo que
+  se mueve es el mapa y no el pin.
+- Desaparecieron `pickMarker` y `manualPickHandler` (el "tocar el mapa mueve
+  el pin"), que ya no tienen sentido.
+
+**El pin queda en el centro geométrico de la pantalla, no en el de la parte
+visible** (la hoja inferior tapa el tramo de abajo). Es a propósito: correr el
+pin hacia arriba obligaría a compensar el centro del mapa a mano, y una
+diferencia entre lo que se ve y lo que se publica es exactamente el tipo de
+bug que no se nota hasta que alguien reporta un retén en la cuadra
+equivocada.
+
+**Las tres suites que tocaban el pin se actualizaron** (`check-pin`,
+`check-gps`, `check-arranque`): ya no miran `window.__markers` sino el centro
+del mapa y el DOM. La cobertura nueva del botón se verificó en rojo quitando
+el botón y descentrando el pin.
+
 ## Los emojis pasaron a ser íconos (v17.2)
 
 Generaliza a toda la interfaz el argumento que en v15.1 ya había sacado el

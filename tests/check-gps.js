@@ -84,7 +84,7 @@ const sacarFoto = async (page) => {
   check('con GPS, tras la foto va directo a la categoría (no pide marcar)',
         /Qué estás reportando/i.test(conGps), conGps);
   check('no se dibujó ningún pin de marcar',
-        (await page.$$eval('.pick-marker', e => e.length)) === 0);
+        (await page.$$eval('.pick-fijo', e => e.length)) === 0);
   check('la hoja ofrece "Ajustar ubicación"', !!(await page.$('#adjust-loc')));
   await page.screenshot({ path: DIR + '/gps-1-categoria.png' });
 
@@ -93,16 +93,19 @@ const sacarFoto = async (page) => {
   await page.waitForTimeout(400);
   const enMarcar = await textoYa(page, '.sheet h2', '(sin hoja)');
   check('"Ajustar ubicación" abre el paso de marcar', /marca el lugar/i.test(enMarcar), enMarcar);
+  // Desde v17.3 el pin va fijo al centro: el punto elegido es el centro del
+  // mapa, y "arrancar en el GPS" quiere decir que el mapa se centró ahí.
   const pos = await page.evaluate(() => {
-    const m = (window.__markers||[]).find(x => x._el && x._el.classList.contains('pick-marker'));
-    return m ? m._lngLat : null;
+    if(!document.querySelector('.pick-fijo')) return null;
+    const c = window.__map.getCenter();
+    return { lat: c.lat, lng: c.lng };
   });
-  check('el pin arranca en el punto del GPS, no en otro lado',
+  check('el mapa arranca en el punto del GPS, no en otro lado',
         !!pos && Math.abs(pos.lat - 19.2214) < 0.01 && Math.abs(pos.lng + 70.5295) < 0.01,
         JSON.stringify(pos));
 
-  // mover el pin y confirmar -> vuelve a categoría con el punto corregido
-  await page.evaluate(() => window.__map.fire('click', { lngLat: { lat: 19.2400, lng: -70.5500 } }));
+  // mover el mapa y confirmar -> vuelve a categoría con el punto corregido
+  await page.evaluate(() => window.__map.jumpTo({ center: [-70.5500, 19.2400] }));
   await page.waitForTimeout(200);
   await page.click('#pick-confirm');
   await page.waitForTimeout(400);
@@ -134,7 +137,7 @@ const sacarFoto = async (page) => {
   const sinGps = await textoYa(page, '.sheet h2', '(sin hoja)');
   check('sin GPS, tras la foto sí pide marcar el lugar', /marca el lugar/i.test(sinGps), sinGps);
   check('sin GPS se dibuja el pin para marcar',
-        (await page.$$eval('.pick-marker', e => e.length)) === 1);
+        (await page.$$eval('.pick-fijo', e => e.length)) === 1);
   check('sin errores de JS (sin GPS)', errores.length === 0, JSON.stringify(errores));
   await page.screenshot({ path: DIR + '/gps-2-sin-gps.png' });
   await ctx.close();
