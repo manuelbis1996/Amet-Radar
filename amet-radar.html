@@ -162,19 +162,37 @@
   #locate-btn[data-state="active"]{ color:var(--brand); }
   #push-toggle-btn[hidden]{ display:none; }
 
-  /* ---- Pin arrastrable para elegir el lugar del reporte ---- */
-  /* OJO: MapLibre posiciona el marcador escribiendo `transform` en ESTE
-     elemento, así que acá no se puede animar transform ni ponerle uno —
-     se pelearía con el posicionamiento y el pin quedaría en el lugar
-     equivocado. Por eso la animación de entrada va en el hijo. */
-  .pick-marker{
-    color:var(--brand); cursor:grab; touch-action:none;
-    filter: drop-shadow(0 5px 8px rgba(0,0,0,.4));
+  /* ---- Pin FIJO para elegir el lugar del reporte ---- */
+  /* No es un marcador de MapLibre: está clavado al centro de la pantalla y lo
+     que se mueve es el mapa por debajo (patrón Uber/Google Maps). Por eso
+     `pointer-events:none` — si interceptara toques, bloquearía justo el gesto
+     de arrastrar el mapa, que es la única forma de mover el punto.
+     La punta del pin cae EXACTAMENTE en el centro (translate -50%,-100%), que
+     es lo que devuelve map.getCenter() al confirmar. */
+  .pick-fijo{
+    position:absolute; left:50%; top:50%;
+    pointer-events:none; z-index:420;
   }
-  .pick-marker:active{ cursor:grabbing; }
-  .pick-inner{ animation: pick-drop .3s cubic-bezier(.2,.9,.3,1.2) both; }
-  .pick-marker svg{ width:34px; height:47px; display:block; }
-  @keyframes pick-drop{ from{ opacity:0; transform:translateY(-14px); } to{ opacity:1; transform:none; } }
+  .pick-fijo .pick-inner{
+    position:absolute; left:0; top:0;
+    transform:translate(-50%,-100%);
+    color:var(--brand);
+    filter: drop-shadow(0 5px 8px rgba(0,0,0,.4));
+    animation: pick-drop .3s cubic-bezier(.2,.9,.3,1.2) both;
+    transition: translate .18s ease;
+  }
+  .pick-fijo svg{ width:34px; height:47px; display:block; }
+  /* Mientras el mapa se mueve, el pin se levanta y la sombra se achica: es la
+     señal de que lo que se está moviendo es el mapa, no el pin. */
+  .pick-fijo.moviendo .pick-inner{ translate:0 -7px; }
+  .pick-sombra{
+    position:absolute; left:0; top:0;
+    width:12px; height:5px; margin:-2px 0 0 -6px;
+    border-radius:50%; background:rgba(0,0,0,.34);
+    transition: width .18s ease, opacity .18s ease;
+  }
+  .pick-fijo.moviendo .pick-sombra{ width:8px; margin-left:-4px; opacity:.5; }
+  @keyframes pick-drop{ from{ opacity:0; transform:translate(-50%,-100%) translateY(-14px); } to{ opacity:1; } }
 
   /* ---- Marcadores ---- */
   .amet-pin{
@@ -270,16 +288,23 @@
     bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
     display:flex; align-items:center; justify-content:center; gap:12px; padding:0 16px;
   }
-  #locate-btn{
+  /* Los dos botones redondos del mapa comparten forma: centrar en mi
+     ubicación y elegir un punto a mano. */
+  #locate-btn, #pick-btn{
     width:52px; height:52px; border-radius:50%; flex-shrink:0; border:none;
     background:var(--surface); color:var(--text); box-shadow:var(--shadow-1);
     display:flex; align-items:center; justify-content:center;
     cursor:pointer; transition:transform .14s ease;
   }
-  #locate-btn svg{ width:21px; height:21px; }
-  #locate-btn:active{ transform:scale(.92); }
+  #locate-btn svg, #pick-btn svg{ width:21px; height:21px; }
+  #locate-btn:active, #pick-btn:active{ transform:scale(.92); }
+  /* La etiqueta pasó de "Reportar ubicación" a "Reportar aquí" al sumarse el
+     botón de marcar en el mapa: con tres controles en la fila, la anterior se
+     partía en dos líneas hasta en 390px. Y "aquí" ahora dice algo, porque hay
+     un camino que NO es aquí. `nowrap` para que no vuelva a pasar. */
   #report-btn{
-    min-height:56px; padding:0 26px; border:none; border-radius:999px;
+    min-height:56px; padding:0 22px; border:none; border-radius:999px;
+    white-space:nowrap;
     background:var(--brand); color:var(--on-brand);
     font-size:15.5px; font-weight:700; letter-spacing:-.1px;
     display:flex; align-items:center; gap:9px;
@@ -562,9 +587,12 @@
     <button id="locate-btn" aria-label="Centrar mapa en mi ubicación" title="Centrar en mi ubicación">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
     </button>
+    <button id="pick-btn" aria-label="Reportar en otro punto del mapa" title="Reportar en otro punto del mapa">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21.2s7-6.3 7-11.2a7 7 0 1 0-14 0c0 4.9 7 11.2 7 11.2z"/><circle cx="12" cy="10" r="2.6"/></svg>
+    </button>
     <button id="report-btn" aria-label="Reportar ubicación de un retén">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>
-      <span>Reportar ubicación</span>
+      <span>Reportar aquí</span>
     </button>
   </div>
 
@@ -588,7 +616,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v17.2';
+  const APP_VERSION = 'v17.3';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1711,6 +1739,27 @@
   }
   document.getElementById('share-app-btn').addEventListener('click', compartirApp);
 
+  // REPORTAR EN OTRO PUNTO, con o sin GPS. Hasta v17.2 el pin manual solo
+  // aparecía cuando NO había GPS, así que con la ubicación andando no había
+  // ninguna forma de avisar de un retén que no fuera donde uno está parado —
+  // y eso es la mitad de los casos reales: te lo cuentan, o lo pasaste hace
+  // diez cuadras y recién ahora podés sacar el teléfono.
+  //
+  // Va como botón APARTE y no como una pregunta dentro de "Reportar": esa
+  // pantalla intermedia se sacó en v13.0 justamente porque le agregaba un
+  // toque a TODOS los reportes, incluidos los que se hacen manejando. Así el
+  // camino rápido no cambia en nada y este queda a la vista para quien lo
+  // necesite.
+  document.getElementById('pick-btn').addEventListener('click', () => {
+    if(reportBtn.disabled) return;
+    if(!canReport()){
+      showToast('Límite de reportes por hora alcanzado. Intenta más tarde.', true);
+      return;
+    }
+    pendingLocation = null; // que el mapa arranque donde el usuario está mirando
+    startManualPick(publicarPunteado);
+  });
+
   // ---- Deep link: abrir un reporte compartido ----
   // openReportById es la parte reutilizable (centrar mapa + abrir popup);
   // la usan tanto el link compartido como el click en una notificación
@@ -2306,11 +2355,6 @@
     pendingPhoto = null;
     pendingCategory = null;
     reportBtn.disabled = false;
-    if(manualPickHandler){
-      map.off('click', manualPickHandler);
-      map.getContainer().style.cursor = '';
-      manualPickHandler = null;
-    }
     removePickMarker();
     // Reevaluar el estado vacío ahora que no hay una hoja tapando: mientras
     // el overlay está abierto se difiere (ver maybeShowEmptyState), y sin
@@ -2318,10 +2362,15 @@
     updateCount();
   }
 
-  let manualPickHandler = null;
-  let pickMarker = null;
+  // Estado del pin fijo del modo "marca el lugar". Ya no hay ningún marcador
+  // de MapLibre acá: el pin es un elemento de la pantalla y el punto sale de
+  // map.getCenter() (ver startManualPick).
+  let pickEl = null;
+  let pickMoveOn = null, pickMoveOff = null;
   function removePickMarker(){
-    if(pickMarker){ pickMarker.remove(); pickMarker = null; }
+    if(pickMoveOn){ map.off('movestart', pickMoveOn); pickMoveOn = null; }
+    if(pickMoveOff){ map.off('moveend', pickMoveOff); pickMoveOff = null; }
+    if(pickEl){ pickEl.remove(); pickEl = null; }
   }
 
   // Escape cierra lo que un toque afuera también cerraría: primero el
@@ -2461,12 +2510,25 @@
   // hoja de categoría (el flujo con foto), pero el reporte rápido sin GPS le
   // pasa publicarPunteado para publicar directo — con una sola categoría
   // reportable, preguntarla sería elegir entre una opción.
+  // EL PIN NO SE ARRASTRA: SE QUEDA FIJO EN EL CENTRO Y SE MUEVE EL MAPA.
+  //
+  // Es el patrón de Uber/Google Maps y reemplaza al pin arrastrable de v10.9.
+  // Aquel ya había resuelto el problema de "acertá de un toque" (el dedo tapa
+  // justo el lugar que querés marcar), pero arrastrando el dedo sigue estando
+  // sobre el pin en el momento de soltar. Con el pin clavado al centro el
+  // dedo nunca toca el punto: se mueve el mapa por debajo y se mira el
+  // objetivo todo el tiempo. Además no hay nada que "agarrar", que es lo que
+  // había que descubrir en el modelo anterior.
+  //
+  // El pin es un elemento fijo de la pantalla, NO un marcador de MapLibre: no
+  // tiene coordenadas propias. El punto elegido se lee de map.getCenter() al
+  // confirmar. Eso funciona porque #map ocupa la pantalla entera, así que el
+  // centro del contenedor del mapa es el centro del viewport — si algún día
+  // el mapa deja de ser pantalla completa, hay que recalcular esto.
   function startManualPick(alConfirmar){
-    // Arranca donde está el usuario (o en el centro del mapa si todavía no
-    // hay GPS), no en un punto vacío: casi siempre el retén está cerca.
-    // Si ya hay un punto elegido (el del GPS, o uno ajustado antes), el pin
-    // arranca ahí: al venir de "Ajustar ubicación" sería raro que volviera
-    // al GPS y perdiera la corrección.
+    // Dónde arranca el MAPA (ya no "dónde arranca el pin"): en el punto ya
+    // elegido si lo hay, si no en la ubicación del usuario, si no donde esté.
+    // Casi siempre el retén está cerca, así que se ahorra el paneo inicial.
     const inicio = pendingLocation
       ? { lng: pendingLocation.lng, lat: pendingLocation.lat }
       : (lastKnownLatLng
@@ -2474,8 +2536,8 @@
           : map.getCenter());
 
     renderSheet(`
-      <h2>Ahora marca el lugar</h2>
-      <p class="sub">Arrastra el pin al punto exacto, o toca el mapa para moverlo ahí.</p>
+      <h2>Marca el lugar</h2>
+      <p class="sub">Mueve el mapa hasta que el pin quede sobre el punto exacto.</p>
       <div class="btn-row">
         <button class="btn btn-ghost" id="cancel-btn">Cancelar</button>
         <button class="btn btn-primary" id="pick-confirm">Confirmar lugar</button>
@@ -2485,39 +2547,34 @@
     overlay.style.pointerEvents = 'none';
     overlay.classList.add('picking');
     overlay.querySelector('.sheet').style.pointerEvents = 'auto';
-    if(map.getZoom() < zoomFromLeaflet(PICK_ZOOM)){
-      // Ojo: la duración de flyTo en MapLibre va en milisegundos, en
-      // Leaflet iba en segundos.
-      map.flyTo({
-        center: [inicio.lng, inicio.lat],
-        zoom: zoomFromLeaflet(PICK_ZOOM),
-        duration: 500
-      });
-    }
+    // Ojo: la duración de flyTo en MapLibre va en milisegundos, en Leaflet
+    // iba en segundos.
+    map.flyTo({
+      center: [inicio.lng, inicio.lat],
+      zoom: Math.max(map.getZoom(), zoomFromLeaflet(PICK_ZOOM)),
+      duration: 500
+    });
 
-    // Pin arrastrable en vez de "acertá de un toque": antes había que
-    // clavar el punto exacto con el dedo tapando justo el lugar que se
-    // quería marcar, y no se podía corregir. `anchor:'bottom'` hace que la
-    // punta del pin sea el punto real, así el dedo nunca lo tapa.
     removePickMarker();
-    const el = document.createElement('div');
-    el.className = 'pick-marker';
-    el.innerHTML = `<div class="pick-inner"><svg viewBox="0 0 24 34" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 22 12 22s12-13 12-22c0-6.63-5.37-12-12-12z" fill="currentColor"/><circle cx="12" cy="12" r="4.6" fill="#fff"/></svg></div>`;
-    pickMarker = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
-      .setLngLat([inicio.lng, inicio.lat])
-      .addTo(map);
-
-    // Tocar el mapa también mueve el pin: para saltos grandes es más rápido
-    // que arrastrarlo.
-    manualPickHandler = (e) => { if(pickMarker) pickMarker.setLngLat(e.lngLat); };
-    map.on('click', manualPickHandler);
+    pickEl = document.createElement('div');
+    pickEl.className = 'pick-fijo';
+    pickEl.setAttribute('aria-hidden', 'true');
+    pickEl.innerHTML =
+      `<div class="pick-inner"><svg viewBox="0 0 24 34"><path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 22 12 22s12-13 12-22c0-6.63-5.37-12-12-12z" fill="currentColor"/><circle cx="12" cy="12" r="4.6" fill="#fff"/></svg></div>` +
+      `<div class="pick-sombra"></div>`;
+    document.getElementById('app').appendChild(pickEl);
+    // Mientras se arrastra se levanta un poco, como si el pin flotara: es la
+    // señal de que el mapa se está moviendo debajo y no el pin.
+    pickMoveOn = () => pickEl && pickEl.classList.add('moviendo');
+    pickMoveOff = () => pickEl && pickEl.classList.remove('moviendo');
+    map.on('movestart', pickMoveOn);
+    map.on('moveend', pickMoveOff);
 
     document.getElementById('pick-confirm').addEventListener('click', () => {
-      if(!pickMarker) return;
-      const ll = pickMarker.getLngLat();
-      pendingLocation = { lat: ll.lat, lng: ll.lng };
-      map.off('click', manualPickHandler);
-      manualPickHandler = null;
+      // El punto es el centro del mapa, que es exactamente donde está la
+      // punta del pin.
+      const c = map.getCenter();
+      pendingLocation = { lat: c.lat, lng: c.lng };
       removePickMarker();
       overlay.style.pointerEvents = '';
       // La clase 'picking' se saca ACÁ y no solo en askForCategory: mientras
@@ -2804,7 +2861,7 @@
       <p class="sub">Reportes de retenes de tránsito en La Vega, hechos por la comunidad.</p>
       <ul class="welcome-list">
         <li><b>${ico('ojo')} Mira el mapa</b> — cada punto es un reporte activo de otra persona.</li>
-        <li><b>${ico('megafono')} Reporta</b> — si ves un retén, toca "Reportar ubicación" y se publica al instante. Un solo toque.</li>
+        <li><b>${ico('megafono')} Reporta</b> — si ves un retén, toca "Reportar aquí" y se publica al instante. Un solo toque. Con el pin de al lado podés marcar otro punto del mapa.</li>
         <li><b>${ico('pulgarArriba')} Confirma</b> — toca un reporte para decir si sigue ahí o si ya no está.</li>
         <li><b>${ico('campana')} Activa los avisos</b> — con la campana de arriba te avisamos si hay un retén cerca, aunque tengas la app cerrada.</li>
       </ul>

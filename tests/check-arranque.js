@@ -160,10 +160,10 @@ async function nuevaPagina(browser, geo, extra){
     const titulo = await textoYa(page, '.sheet h2');
     check('EL BUG: sin GPS, reportar abre el pin en vez de morir en un toast',
           /marca el lugar/i.test(titulo), titulo);
-    check('hay un pin arrastrable en el mapa', (await page.$$('.pick-marker')).length === 1);
+    check('hay un pin fijo en el centro para marcar', (await page.$$('.pick-fijo')).length === 1);
 
-    // El usuario elige un punto tocando el mapa y confirma.
-    await page.evaluate(() => window.__map.fire('click', { lngLat: { lng: -70.5100, lat: 19.2400 } }));
+    // El usuario mueve el mapa hasta poner el lugar bajo el pin, y confirma.
+    await page.evaluate(() => window.__map.jumpTo({ center: [-70.5100, 19.2400] }));
     await page.waitForTimeout(120);
     await page.click('#pick-confirm');
     await page.waitForTimeout(900);
@@ -263,6 +263,93 @@ async function nuevaPagina(browser, geo, extra){
           /r1/.test(await page.evaluate(() => { try{ return localStorage.getItem('amet_voted_v1') || ''; }catch(e){ return ''; } })));
     check('y se agradece', /gracias/i.test(await textoYa(page, '.toast', '')),
           await textoYa(page, '.toast', ''));
+    await ctx.close();
+  }
+
+  // =====================================================================
+  // 7. CON GPS también se puede marcar en otro punto
+  //
+  // Hasta v17.2 el pin manual solo aparecía sin GPS, así que con la ubicación
+  // andando no había forma de avisar de un retén que no fuera donde uno está
+  // parado — y ese es medio caso real: te lo cuentan, o lo pasaste hace diez
+  // cuadras. Lo que NO puede pasar es que esto le agregue un toque al camino
+  // rápido, que es el que se usa manejando.
+  // =====================================================================
+  {
+    const GEO_OK = `
+      window.__bounds = { n: 19.30, s: 19.14, e: -70.45, w: -70.62 };
+      Object.defineProperty(navigator,'geolocation',{value:{
+        watchPosition:(s)=>{setTimeout(()=>s({coords:{latitude:19.2214,longitude:-70.5295}}),40);return 1;},
+        clearWatch:()=>{}},configurable:true});`;
+    const { ctx, page } = await nuevaPagina(browser, GEO_OK);
+    page.on('pageerror', e => errores.push(String(e)));
+    await page.route('**/rest/v1/reports*', r => r.fulfill({ contentType:'application/json', body:'[]' }));
+    const rpcs = [];
+    await page.route('**/rest/v1/rpc/**', r => {
+      const fn = new URL(r.request().url()).pathname.split('/').pop();
+      let args = {}; try{ args = JSON.parse(r.request().postData() || '{}'); }catch(e){}
+      rpcs.push({ fn, args });
+      const body = fn === 'create_report' ? JSON.stringify({ ok:true, reason:null }) : 'null';
+      return r.fulfill({ status:200, contentType:'application/json', body });
+    });
+    await page.goto(BASE + '/amet-radar.html', { waitUntil:'domcontentloaded' });
+    await page.waitForTimeout(800);
+    const w = await page.$('#welcome-ok'); if(w){ await w.click(); await page.waitForTimeout(250); }
+
+    check('con GPS hay un botón para marcar en otro punto', !!(await page.$('#pick-btn')));
+
+    // El camino rápido no cambia: sigue publicando de un toque, sin preguntar.
+    await page.click('#report-btn');
+    await page.waitForTimeout(1000);
+    const rapidos = rpcs.filter(r => r.fn === 'create_report');
+    check('«Reportar» sigue siendo UN toque, sin pantallas nuevas',
+          rapidos.length === 1 && (await page.$eval('#flow-overlay', el => el.hidden)) === true,
+          'publicados=' + rapidos.length);
+    const aRapido = (rapidos[0] || {}).args || {};
+    check('y ese sigue usando el GPS, como zona aproximada',
+          Math.abs(aRapido.p_lat - 19.2214) < 0.01 && aRapido.p_approx === true,
+          JSON.stringify({ lat:aRapido.p_lat, approx:aRapido.p_approx }));
+
+    // Ahora el camino nuevo: marcar lejos de donde estoy.
+    await page.evaluate(() => { try{ localStorage.removeItem('amet_report_times_v1'); }catch(e){} });
+    await page.waitForTimeout(6300); // que venza el toast de Deshacer
+    const of = await page.$('#push-later'); if(of){ await of.click(); await page.waitForTimeout(300); }
+
+    await page.click('#pick-btn');
+    await page.waitForTimeout(500);
+    check('EL PEDIDO: con GPS igual se abre «Marca el lugar»',
+          /marca el lugar/i.test(await textoYa(page, '.sheet h2')), await textoYa(page, '.sheet h2'));
+    check('el pin queda fijo en el centro de la pantalla', (await page.$$('.pick-fijo')).length === 1);
+    const centrado = await page.evaluate(() => {
+      const el = document.querySelector('.pick-fijo');
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left), cx: Math.round(window.innerWidth / 2),
+               y: Math.round(r.top), cy: Math.round(window.innerHeight / 2),
+               toques: getComputedStyle(el).pointerEvents };
+    });
+    check('está en el centro exacto, que es lo que se va a publicar',
+          Math.abs(centrado.x - centrado.cx) <= 1 && Math.abs(centrado.y - centrado.cy) <= 1,
+          JSON.stringify(centrado));
+    check('y no intercepta los toques (si no, no se podría arrastrar el mapa)',
+          centrado.toques === 'none', centrado.toques);
+
+    // Se mueve el mapa, no el pin.
+    await page.evaluate(() => window.__map.jumpTo({ center: [-70.4900, 19.2650] }));
+    await page.waitForTimeout(150);
+    await page.click('#pick-confirm');
+    await page.waitForTimeout(900);
+
+    const marcados = rpcs.filter(r => r.fn === 'create_report');
+    check('se publicó el segundo reporte', marcados.length === 2, 'n=' + marcados.length);
+    const a = (marcados[1] || {}).args || {};
+    check('EL PEDIDO: publica donde quedó el pin, NO donde está el dispositivo',
+          Math.abs(a.p_lat - 19.2650) < 1e-6 && Math.abs(a.p_lng - (-70.4900)) < 1e-6,
+          JSON.stringify({ lat:a.p_lat, lng:a.p_lng }));
+    check('un punto elegido a mano va como pin exacto, no como zona',
+          a.p_approx === false, 'approx=' + a.p_approx);
+    check('lleva owner_hash, así que se puede borrar',
+          /^[0-9a-f]{64}$/.test(a.p_owner_hash || ''));
+    check('el pin se limpia al terminar', (await page.$$('.pick-fijo')).length === 0);
     await ctx.close();
   }
 

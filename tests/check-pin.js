@@ -22,11 +22,20 @@ const check = (n, c, extra='') => {
   if(!c) fails.push(n);
 };
 
+// Desde v17.3 el pin NO es un marcador de MapLibre: está clavado al centro de
+// la pantalla y lo que se mueve es el mapa por debajo. Así que "dónde apunta"
+// ya no se lee del marcador sino del centro del mapa, y "está puesto" se mira
+// en el DOM.
 const pinInfo = (page) => page.evaluate(() => {
-  const m = (window.__markers || []).find(x => x._el && x._el.classList.contains('pick-marker'));
-  if(!m) return null;
-  return { draggable: m._draggable, anchor: m._anchor, pos: m._lngLat, quitado: m._removed };
+  const el = document.querySelector('.pick-fijo');
+  if(!el) return null;
+  const c = window.__map.getCenter();
+  return { pos: { lat: c.lat, lng: c.lng },
+           sinToques: getComputedStyle(el).pointerEvents === 'none' };
 });
+// Mover el mapa es lo que mueve el punto elegido.
+const moverMapa = (page, lat, lng) =>
+  page.evaluate(([la, ln]) => window.__map.jumpTo({ center: [ln, la] }), [lat, lng]);
 
 (async () => {
   const browser = await lanzar();
@@ -60,10 +69,11 @@ const pinInfo = (page) => page.evaluate(() => {
 
   const p0 = await pinInfo(page);
   check('aparece un pin al entrar en "Marca el lugar"', !!p0, JSON.stringify(p0));
-  check('el pin es arrastrable', !!p0 && p0.draggable === true, 'draggable=' + (p0 && p0.draggable));
-  check('el pin ancla por la punta (el dedo no tapa el punto)',
-        !!p0 && p0.anchor === 'bottom', 'anchor=' + (p0 && p0.anchor));
-  check('el pin arranca en la ubicación del usuario (~19.2214, -70.5295)',
+  // El pin no puede recibir toques: si los interceptara bloquearía justo el
+  // gesto de arrastrar el mapa, que es la ÚNICA forma de mover el punto.
+  check('el pin no intercepta los toques del mapa',
+        !!p0 && p0.sinToques === true, JSON.stringify(p0));
+  check('el mapa arranca en la ubicación del usuario (~19.2214, -70.5295)',
         !!p0 && Math.abs(p0.pos.lat - 19.2214) < 0.01 && Math.abs(p0.pos.lng + 70.5295) < 0.01,
         JSON.stringify(p0 && p0.pos));
   check('hay botón para confirmar el lugar', !!(await page.$('#pick-confirm')));
@@ -73,22 +83,18 @@ const pinInfo = (page) => page.evaluate(() => {
         await page.$eval('#empty-state', el => el.hidden));
   await page.screenshot({ path: DIR + '/pin-1-marcar.png' });
 
-  // tocar el mapa ahora MUEVE el pin, ya no salta de paso
-  await page.evaluate(() => window.__map.fire('click', { lngLat: { lat: 19.2300, lng: -70.5400 } }));
+  // Mover el mapa mueve el punto elegido, porque el pin está fijo al centro.
+  await moverMapa(page, 19.2300, -70.5400);
   await page.waitForTimeout(200);
   const p1 = await pinInfo(page);
-  check('tocar el mapa mueve el pin',
+  check('mover el mapa mueve el punto elegido',
         !!p1 && Math.abs(p1.pos.lat - 19.2300) < 0.0001 && Math.abs(p1.pos.lng + 70.5400) < 0.0001,
         JSON.stringify(p1 && p1.pos));
   const sigueEnMarcar = await page.textContent('.sheet h2');
-  check('tocar el mapa NO avanza de paso solo', /Marca el lugar/i.test(sigueEnMarcar), sigueEnMarcar);
+  check('mover el mapa NO avanza de paso solo', /Marca el lugar/i.test(sigueEnMarcar), sigueEnMarcar);
 
-  // simular un arrastre del pin (el stub no implementa el drag real de
-  // MapLibre, así que se mueve por API como haría el drag)
-  await page.evaluate(() => {
-    const m = window.__markers.find(x => x._el && x._el.classList.contains('pick-marker'));
-    m.setLngLat({ lng: -70.5350, lat: 19.2280 });
-  });
+  // y el punto final es el último centro, no el primero
+  await moverMapa(page, 19.2280, -70.5350);
   await page.waitForTimeout(120);
 
   // confirmar usa la posición final del pin
@@ -96,8 +102,7 @@ const pinInfo = (page) => page.evaluate(() => {
   await page.waitForTimeout(400);
   const titulo = await page.textContent('.sheet h2');
   check('"Confirmar lugar" avanza a elegir categoría', /Qué estás reportando/i.test(titulo), titulo);
-  const p2 = await pinInfo(page);
-  check('el pin se quita del mapa al confirmar', p2 === null || p2.quitado === true, JSON.stringify(p2));
+  check('el pin se quita de la pantalla al confirmar', (await pinInfo(page)) === null);
   const guardado = await page.evaluate(() => window.__pend || null);
   await page.screenshot({ path: DIR + '/pin-2-confirmado.png' });
 
@@ -106,9 +111,8 @@ const pinInfo = (page) => page.evaluate(() => {
   await entrarAMarcar();
   check('vuelve a aparecer el pin en un intento nuevo', !!(await pinInfo(page)));
   await page.click('#cancel-btn'); await page.waitForTimeout(300);
-  const p3 = await pinInfo(page);
-  check('cancelar quita el pin del mapa', p3 === null || p3.quitado === true, JSON.stringify(p3));
-  const quedan = await page.$$eval('.pick-marker', e => e.length);
+  check('cancelar quita el pin de la pantalla', (await pinInfo(page)) === null);
+  const quedan = await page.$$eval('.pick-fijo', e => e.length);
   check('no queda ningún pin huérfano en el DOM', quedan === 0, 'pins=' + quedan);
 
   console.log(fails.length ? `\n>>> ${fails.length} FALLO(S): ${fails.join(' | ')}` : '\n>>> TODOS LOS CHEQUEOS PASARON');
