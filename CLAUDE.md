@@ -1195,6 +1195,59 @@ token** (`delete_own_report`), o sea que el "Deshacer" no se rompió.
 hay dato); y el comportamiento en producción bajo el cliente nuevo, porque
 las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
 
+## El panel se alinea con la app (v17.4)
+
+Dos cambios, los dos "que el panel y la app dejen de ser dos productos".
+
+### El acento pasó de ámbar a violeta
+
+El panel usaba `--amber: #ffb020`, que es **exactamente** el `hex` de la
+categoría `reten_fijo` en `CATEGORIES`. O sea que el acento de la interfaz
+—títulos, botón de guardar, barras del gráfico— era del mismo color que el
+dato más común del mapa: la misma colisión que v16.0 arregló en la app y por
+la misma razón.
+
+**Son DOS tonos y no es decoración**, porque este panel es oscuro:
+- `--brand` (`#7c3aed`) va como **fondo**, con texto blanco encima. Ojo:
+  `.btn-primary` tenía texto oscuro sobre ámbar; sobre violeta eso daría
+  3.3:1, así que pasó a blanco.
+- `--brand-soft` (`#a78bfa`) es el que va en **texto y trazos** sobre el fondo
+  oscuro. El violeta pleno como texto sobre `--panel` da 3.1:1, por debajo de
+  lo legible; el suave da 6.4:1.
+
+Las categorías **no se tocaron**: siguen con sus cuatro colores, que son dato
+y no decoración.
+
+### El pin también va fijo al centro
+
+Mismo patrón que la app en v17.3, con una diferencia que importa: en la app
+`#map` ocupa la pantalla entera, así que el centro del viewport es el centro
+del mapa; **acá el mapa es una caja**, y el pin se centra sobre `.map-wrap`.
+Hoy `.map-bar` va absoluta y no ocupa alto, así que `.map-wrap` y
+`#admin-map` miden lo mismo — se verificó midiendo, y hay una prueba
+(`check-admin-publicar`) que compara la punta del pin contra el centro de
+`#admin-map`, no del contenedor. Si alguien pone la barra en el flujo, esa
+prueba se pone en rojo en vez de que el panel publique un punto distinto del
+que se ve.
+
+**Se mantiene la regla de v14.4**: el pin NO aparece al abrir el panel. Hay
+que entrar con «Elegir en el mapa». Si estuviera siempre en el centro,
+"publicar" quedaría permanentemente armado apuntando a un lugar que nadie
+eligió — exactamente el accidente que v14.4 cerró.
+
+- Tocar el mapa ya no clava el punto; el click queda solo para cerrar la ficha
+  de un reporte.
+- Escribir las coordenadas a mano **sigue siendo una vía de primera clase**
+  (es la que anda por teclado y la que salva si el mapa no carga): centra el
+  mapa ahí, y como el pin vive en el centro, queda encima.
+- `reflejarEstadoPunto()` se llama ahora también al final de `initAdminMap()`.
+  Sin eso el botón «Elegir en el mapa» quedaba oculto para siempre: la primera
+  llamada ocurre con `adminMap` todavía en `null`, y ahí se esconde a
+  propósito porque sin mapa no lleva a ningún lado.
+
+**Esto no toca `amet-radar.html` ni `sw.js`**, así que no sube
+`APP_VERSION`/`CACHE_NAME` — `admin.html` no está en el app shell.
+
 ## Marcar en otro punto, con el pin fijo al centro (v17.3)
 
 Pedido del usuario. Hasta v17.2 el pin manual **solo aparecía cuando NO había
