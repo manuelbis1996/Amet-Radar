@@ -141,6 +141,11 @@
   td.note{ color:var(--muted); max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   td.num{ font-family:var(--font-mono); color:var(--muted); white-space:nowrap; }
   .thumb{ width:44px; height:33px; object-fit:cover; border-radius:5px; display:block; }
+  /* Contenedor de los íconos que reemplazaron a los emojis: se alinea con el
+     texto y hereda su color, que es lo que un emoji no hace. Igual que en
+     amet-radar.html. */
+  .ico{ display:inline-flex; align-items:center; justify-content:center; vertical-align:-.2em; }
+  .ico svg{ width:1.1em; height:1.1em; display:block; }
   .cat-tag{
     font-size:10px; padding:3px 9px; border-radius:20px; color:#12141a;
     white-space:nowrap; font-family:var(--font-mono); font-weight:600;
@@ -501,11 +506,28 @@
     'Content-Type': 'application/json'
   };
 
+  // Mismo set de íconos que amet-radar.html. Los dos archivos son autónomos a
+  // propósito (no hay build step ni módulos compartidos), así que esto está
+  // duplicado; si se toca uno, tocar el otro.
+  const TRAZO = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  const ICO = {
+    reten_fijo:  '<path d="M12 2.6l7.4 2.7v5.5c0 4.6-3.1 8-7.4 10.2-4.3-2.2-7.4-5.6-7.4-10.2V5.3z"/>',
+    reten_movil: '<path d="M3.5 16.5v-2.2l1.6-4A2 2 0 0 1 7 9h10a2 2 0 0 1 1.9 1.3l1.6 4v2.2z"/><path d="M6.5 9.2l.9-2.3A2 2 0 0 1 9.3 5.6h5.4a2 2 0 0 1 1.9 1.3l.9 2.3"/><circle cx="7.3" cy="18.4" r="1.5"/><circle cx="16.7" cy="18.4" r="1.5"/>',
+    accidente:   '<path d="M12 3.4l9 15.6H3z"/><path d="M12 9.6v3.9"/><path d="M12 16.8h.01"/>',
+    control:     '<path d="M4 7h2M4 12h2M18 7h2M18 12h2"/><rect x="7.5" y="2.6" width="9" height="18.8" rx="4"/><circle cx="12" cy="7.2" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="16.8" r="1.5"/>',
+    pulgarArriba:'<path d="M7 21V10l4.5-8A2.5 2.5 0 0 1 14 4.6L13 9h5.6a2 2 0 0 1 2 2.5l-1.8 7A2 2 0 0 1 16.8 20H7z"/><path d="M7 10H3v11h4z"/>',
+    pulgarAbajo: '<path d="M17 3v11l-4.5 8A2.5 2.5 0 0 1 10 19.4L11 15H5.4a2 2 0 0 1-2-2.5l1.8-7A2 2 0 0 1 7.2 4H17z"/><path d="M17 14h4V3h-4z"/>',
+    bandera:     '<path d="M5 21V4.5"/><path d="M5 5.2h11.5l-1.9 3.6 1.9 3.6H5z"/>',
+    desconocido: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.8-.9 1.4v.4"/><path d="M12 17h.01"/>'
+  };
+  const ico = (nombre) =>
+    `<i class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" ${TRAZO}>${ICO[nombre] || ICO.desconocido}</svg></i>`;
+
   const CATEGORIES = {
-    reten_fijo:  { label:'Retén fijo',      emoji:'👮', hex:'#ffb020' },
-    reten_movil: { label:'Retén móvil',     emoji:'🚓', hex:'#34c9a8' },
-    accidente:   { label:'Accidente',       emoji:'⚠️', hex:'#ff5d3a' },
-    control:     { label:'Control tránsito',emoji:'🚦', hex:'#4f9bf0' }
+    reten_fijo:  { label:'Retén fijo',      icon:'reten_fijo',  hex:'#ffb020' },
+    reten_movil: { label:'Retén móvil',     icon:'reten_movil', hex:'#34c9a8' },
+    accidente:   { label:'Accidente',       icon:'accidente',   hex:'#ff5d3a' },
+    control:     { label:'Control tránsito',icon:'control',     hex:'#4f9bf0' }
   };
 
   // El password se guarda en sessionStorage y se reenvía en cada borrado:
@@ -635,8 +657,8 @@
     `;
     const breakdown = document.getElementById('cat-breakdown');
     breakdown.innerHTML = Object.entries(byCategory).map(([key, count]) => {
-      const cat = CATEGORIES[key] || { emoji:'❔', label:key };
-      return `<span class="cat-pill">${cat.emoji} ${cat.label}: ${count}</span>`;
+      const cat = CATEGORIES[key] || { icon:'desconocido', label:key };
+      return `<span class="cat-pill">${ico(cat.icon)} ${cat.label}: ${count}</span>`;
     }).join('') || '<span class="cat-pill">Sin reportes</span>';
   }
 
@@ -672,16 +694,16 @@
       return;
     }
     tbody.innerHTML = rows.map(r => {
-      const cat = CATEGORIES[r.category] || { emoji:'❔', label:r.category, hex:'#8a92a1' };
+      const cat = CATEGORIES[r.category] || { icon:'desconocido', label:r.category, hex:'#8a92a1' };
       const denuncias = r.photo ? (r.photo_flags || 0) : 0;
       return `
         <tr data-id="${r.id}"${denuncias ? ' class="denunciada"' : ''}>
-          <td>${r.photo ? `<a class="thumb-link" href="${r.photo}" target="_blank" rel="noopener" title="Abrir foto completa"><img class="thumb" src="${r.photo}" alt="Foto del reporte"></a>${denuncias ? `<span class="flag-tag" title="Denuncias de esta foto">⚑ ${denuncias}</span>` : ''}` : ''}</td>
-          <td><span class="cat-tag" style="background:${cat.hex}">${cat.emoji} ${cat.label}</span></td>
+          <td>${r.photo ? `<a class="thumb-link" href="${r.photo}" target="_blank" rel="noopener" title="Abrir foto completa"><img class="thumb" src="${r.photo}" alt="Foto del reporte"></a>${denuncias ? `<span class="flag-tag" title="Denuncias de esta foto">${ico('bandera')} ${denuncias}</span>` : ''}` : ''}</td>
+          <td><span class="cat-tag" style="background:${cat.hex}">${ico(cat.icon)} ${cat.label}</span></td>
           <td class="note">${r.note ? escapeHtml(r.note) : '—'}</td>
           <td>${timeAgo(r.ts)}${esVencido(r) ? '<span class="exp-tag" title="Los usuarios ya no lo ven">vencido</span>' : ''}</td>
           <td class="num">${Number(r.lat).toFixed(5)}, ${Number(r.lng).toFixed(5)}</td>
-          <td>👍 ${r.confirms||0} · 👎 ${r.denies||0}</td>
+          <td>${ico('pulgarArriba')} ${r.confirms||0} · ${ico('pulgarAbajo')} ${r.denies||0}</td>
           <td><div class="row-actions">
             <button class="ghost-btn row-ver" data-id="${r.id}" aria-label="Ver en el mapa el reporte de ${cat.label}">Ver</button>
             <button class="ghost-btn row-link" data-id="${r.id}" aria-label="Copiar enlace del reporte de ${cat.label}">Link</button>
@@ -956,7 +978,7 @@
       <button type="button" class="cat-choice" data-cat="${key}"
               aria-pressed="${key === categoriaElegida}"
               style="--cat:${cat.hex};--cat-tint:${hexTint(cat.hex, 0.14)}">
-        <span>${cat.emoji}</span><span>${cat.label}</span>
+        <span>${ico(cat.icon)}</span><span>${cat.label}</span>
       </button>`).join('');
     cont.querySelectorAll('.cat-choice').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1092,13 +1114,13 @@
     repSeleccionado = r.id;
     document.querySelectorAll('.rep-dot.sel').forEach(e => e.classList.remove('sel'));
     el.classList.add('sel');
-    const cat = CATEGORIES[r.category] || { emoji:'❔', label:r.category, hex:'#8a92a1' };
+    const cat = CATEGORIES[r.category] || { icon:'desconocido', label:r.category, hex:'#8a92a1' };
     const tag = document.getElementById('rp-cat');
-    tag.textContent = `${cat.emoji} ${cat.label}`;
+    tag.innerHTML = `${ico(cat.icon)} ${cat.label}`;
     tag.style.background = cat.hex;
     const vencido = esVencido(r);
     document.getElementById('rp-meta').innerHTML =
-      `${timeAgo(r.ts)} · 👍 ${r.confirms||0} · 👎 ${r.denies||0}` +
+      `${timeAgo(r.ts)} · ${ico('pulgarArriba')} ${r.confirms||0} · ${ico('pulgarAbajo')} ${r.denies||0}` +
       (r.approx ? ' · zona aproximada' : '') +
       (vencido ? ' · <b>vencido, los usuarios ya no lo ven</b>' : '') +
       (r.photo ? ' · con foto' : '');
@@ -1115,7 +1137,7 @@
     cerrarPopover();
     for(const r of reportsCache){
       if(typeof r.lat !== 'number' || typeof r.lng !== 'number') continue;
-      const cat = CATEGORIES[r.category] || { emoji:'❔', label:r.category, hex:'#8a92a1' };
+      const cat = CATEGORIES[r.category] || { icon:'desconocido', label:r.category, hex:'#8a92a1' };
       const vencido = esVencido(r);
       const el = document.createElement('div');
       el.className = 'rep-dot' + (r.approx ? ' approx' : '') + (vencido ? ' vencido' : '');

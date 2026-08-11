@@ -135,11 +135,17 @@ const REPORTS = [
   // de la constante de diseño, que puede moverse.
   check('alejando el mapa el marcador no se hace invisible ni intocable',
     alejado >= 44, alejado + 'px a zoom 9');
-  const core = await page.$$eval('.approx-core', els => els.map(e => ({
-    txt: e.textContent.trim(), w: getComputedStyle(e).width
-  })));
-  check('la zona lleva un núcleo con el emoji de la categoría',
-    core.length === 1 && core[0].txt.length > 0, JSON.stringify(core));
+  // Desde v17.2 el núcleo lleva un SVG y no el emoji de la categoría, así que
+  // ya no alcanza con mirar textContent (daría '' y el chequeo pasaría a ser
+  // un rojo falso... o peor, si se afloja, un verde vacío). Se comprueba que
+  // haya un ícono dibujado de verdad y con tamaño.
+  const core = await page.$$eval('.approx-core', els => els.map(e => {
+    const svg = e.querySelector('.ico-marcador svg');
+    const b = svg ? svg.getBoundingClientRect() : null;
+    return { icono: !!svg, iw: b ? Math.round(b.width) : 0, w: getComputedStyle(e).width };
+  }));
+  check('la zona lleva un núcleo con el ícono de la categoría',
+    core.length === 1 && core[0].icono && core[0].iw >= 12, JSON.stringify(core));
   check('y ese núcleo es de tamaño fijo, no depende del zoom',
     core[0] && core[0].w === '34px', core[0] && core[0].w);
 

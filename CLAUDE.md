@@ -1195,6 +1195,45 @@ token** (`delete_own_report`), o sea que el "Deshacer" no se rompió.
 hay dato); y el comportamiento en producción bajo el cliente nuevo, porque
 las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
 
+## Los emojis pasaron a ser íconos (v17.2)
+
+Generaliza a toda la interfaz el argumento que en v15.1 ya había sacado el
+emoji 📷 del marcador: un emoji **se dibuja distinto en cada sistema
+operativo** (y en algunos Android viejos directamente no aparece), **no hereda
+el color** del contexto, y a tamaño chico queda como una mancha. Un trazo
+escala nítido, toma el color que le toque y hace que la app se lea como una
+sola cosa en vez de un collage.
+
+- **`ICO` + `ico(nombre)`** en `amet-radar.html`, con el mismo estilo de trazo
+  que ya tenía `CAM_SVG` (que sigue existiendo aparte: va colgado del marcador
+  con su propio contenedor y tamaño). `CATEGORIES` ganó `icon`.
+- **`CATEGORIES.emoji` NO se borró, y no es un olvido.** Quedan tres lugares
+  donde el medio es **texto plano** y un SVG es imposible: el título de las
+  notificaciones push (`notify-nearby`), el texto que se manda al compartir por
+  WhatsApp, y las meta tags del preview (`_worker.js`). Ahí el emoji es
+  justamente lo que hace que el mensaje se vea vivo. Si algún día se toca
+  `CATEGORIES`, hay que mantener los dos campos.
+- **`admin.html` tiene el set duplicado** a propósito: los dos archivos son
+  autónomos (no hay build step ni módulos compartidos). Si se toca uno, tocar
+  el otro.
+
+**Dos cosas que mordieron al hacerlo, las dos por lo mismo**: había código que
+inyectaba el contenido con `textContent`, y con un SVG adentro eso **muestra el
+marcado como texto literal**. En la píldora de estado la hizo pasar de una
+línea a **183 px de alto** — lo agarró `check-vacio.js`, que mide cuánto ocupa.
+El mismo patrón estaba en `admin.html` (`tag.textContent`). Los dos pasaron a
+`innerHTML`; las cadenas son constantes de la app, no entra nada del usuario.
+
+**El chequeo del núcleo del círculo hubo que reescribirlo**: `check-maplibre.js`
+miraba `textContent` para confirmar que el marcador de zona tiene la insignia
+de su categoría, y con un SVG eso da `''`. Ahora busca el `<svg>` y **mide que
+tenga tamaño** — si se hubiera aflojado a "no importa el texto", el chequeo
+habría quedado pasando por vacío.
+
+**Se miraron en captura, no solo en asertos.** La primera versión del auto
+patrulla tenía la barra de luces flotando y el semáforo se confundía con un
+control remoto; se rehicieron los dos y se volvió a capturar.
+
 ## El arranque en frío (v17.0) — leer antes de tocar el loader, el voto o compartir
 
 Todo este bloque sale de una pregunta distinta a las anteriores: no "¿qué le
