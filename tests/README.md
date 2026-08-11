@@ -94,6 +94,16 @@ tendría cualquiera que lea el código fuente de la página — que es exactamen
 el atacante contra el que se cerró todo. Si algún día pide credenciales, algo
 se desvió.
 
+**Desde v17.1 también comprueba que el push siga vivo** — era el punto ciego
+más grande del proyecto. Antes publicaba la sonda, que dispara la notificación
+de verdad, pero **no miraba nunca el resultado**: un `notify-nearby` muerto
+pasaba en verde, y ningún otro lugar lo habría denunciado (el trigger de
+`pg_net` descarta la respuesta y el panel muestra uso, no salud). Ahora llama a
+la función por el mismo camino y con la misma key que usa el trigger, así que
+en un solo chequeo cubre que la key sirva, que las VAPID estén configuradas,
+que la `service_role` pueda leer `push_subscriptions` y que el radio salga de
+`app_config`.
+
 Corre solo, semanalmente y a pedido, por `.github/workflows/base-real.yml`.
 **Queda fuera de `run.js` a propósito**: la convención es que
 `check-*-real.js` no entra en esa corrida, porque el CI manda el dominio de
@@ -162,6 +172,13 @@ estructuralmente no puede ver:
 - el **tope por IP** de `create_report` (haría falta emitir 31 reportes).
 - cualquier cosa que dependa de la `service_role` key o de mirar el plan de
   una consulta.
+- que la notificación **llegue a un teléfono de verdad**. La sonda comprueba
+  que `notify-nearby` responde bien, no que el push aterrice: eso solo se ve a
+  mano, en un dispositivo real.
+- **Y ojo con el workflow**: GitHub apaga los workflows programados a los 60
+  días sin actividad en el repo. Un proyecto estable —que es el objetivo— deja
+  de commitear y el chequeo semanal se desactiva solo. Tampoco avisa a nadie
+  cuando falla.
 
 Para eso, y para cualquier cambio que toque RLS, funciones de la base,
 triggers, grants o Edge Functions:

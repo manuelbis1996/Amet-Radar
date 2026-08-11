@@ -241,15 +241,23 @@ pantalla de inicio"). Además **no se puede probar con el mock**: el evento no
 dispara en Chromium headless.
 - Esfuerzo: medio. Es lo siguiente si v17.0 mueve la aguja.
 
-**🟡 No hay forma de enterarse de que algo se rompió**
-Si `notify-nearby` dejara de mandar notificaciones, nadie se entera: los
-triggers de `pg_net` descartan la respuesta, el panel no muestra salud (solo
-uso) y `check-base-real.js` publica la sonda pero **no verifica que el push
-salga**. El disparador más probable es deshabilitar las *legacy JWT keys* en
-Supabase: los tres triggers se autentican con la anon key vieja en formato JWT
-mientras la app usa la publishable nueva, así que ese switch **mata push y
-limpieza de fotos en silencio** sin tocar una línea de código.
-- Esfuerzo: bajo para lo que rinde. Mirar antes de sumar usuarios.
+**✅ El push podía morir en silencio — cerrado** (v17.1)
+Dos cosas, y las dos eran fallos invisibles. (1) Los tres triggers de `pg_net`
+se autenticaban con la anon key **legacy en formato JWT**: el día que alguien
+deshabilitara las legacy keys desde el dashboard de Supabase —cosa que la
+propia interfaz ofrece— push y limpieza de fotos morían sin que la app, el
+panel ni las suites se enteraran. Ahora usan la publishable nueva
+(`20260810060000_triggers_publishable_key.sql`). (2) `check-base-real.js`
+publicaba la sonda, que dispara el push de verdad, pero **no miraba el
+resultado**; ahora llama a `notify-nearby` por el mismo camino y con la misma
+key que el trigger. Detalle en `CLAUDE.md`, "La key legacy de los triggers".
+
+**🟢 Salud del push en el panel**
+Lo que queda de ese frente: el panel muestra uso, no salud. Un indicador de
+"último push enviado / cuántos fallaron" necesitaría que algo lo registre, o
+sea una tabla más. Con la sonda semanal comprobando la función, esto pasó de
+necesario a cómodo.
+- Esfuerzo: medio.
 
 **🟢 Sin backups, y `daily_stats` no se regenera**
 El plan Free no incluye backups ni PITR. `reports` se autoexpira igual y

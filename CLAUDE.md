@@ -1790,6 +1790,51 @@ viejo.
   compartido con el esquema anterior), pero todo lo que genera la app
   (botón compartir, `notificationclick` del service worker) ya usa `?r=`.
 
+## La key legacy de los triggers (v17.1) — un fallo silencioso que se cerró
+
+**Qué pasaba.** Los tres triggers de `pg_net` —`notify_nearby_reports`,
+`delete_report_photo` y `clear_report_photo`— se autenticaban con la anon key
+**vieja, en formato JWT** (`eyJhbGciOi...`), embebida dentro de tres
+migraciones, mientras que la app, el panel y `_worker.js` usan
+`sb_publishable_...`. Supabase ofrece deshabilitar las *legacy JWT keys* desde
+el dashboard, y el día que alguien acepte esa oferta:
+
+- las notificaciones push dejan de salir,
+- las fotos dejan de borrarse de Storage al borrarse su reporte,
+- y **nada lo denuncia**: la app, el panel y las 18 suites siguen en verde,
+  porque ninguno de los tres usa esa key.
+
+Es el peor tipo de fallo del sistema: silencioso, y disparado por una acción de
+mantenimiento que parece inofensiva. Por eso se eliminó la dependencia en vez
+de dejar anotado "no toques ese botón".
+
+**Lo contraintuitivo, y por eso hay que verificarlo antes de repetirlo**:
+`notify-nearby` y `delete-photo` tienen **`verify_jwt: true`**, así que lo
+esperable era que una key que no es un JWT fuera rechazada. No lo es — el
+gateway de Supabase acepta el formato nuevo igual. Se comprobó con `curl`
+contra las dos funciones **antes** de aplicar la migración, y después de
+aplicarla se publicó una sonda real y se leyó `net._http_response`: el trigger
+llegó con **200** y `{"notified":0,"expired":0,"radius":1000}`.
+
+**Los triggers no se recrean**, solo las funciones (`create or replace`).
+Tocarlos arriesgaría perder el `WHEN` de `reports_delete_photo`, que es lo que
+evita llamar a `delete-photo` por reportes que nunca tuvieron foto.
+
+### Y ahora la sonda semanal comprueba que el push sigue vivo
+
+Era el punto ciego más grande: `check-base-real.js` publicaba la sonda —que
+dispara el push de verdad— **sin mirar nunca el resultado**, así que un
+`notify-nearby` muerto pasaba en verde. Ahora la llama por el mismo camino y
+con la misma key que usa el trigger, lo que cubre de una sola vez que la key
+sirva, que las VAPID estén configuradas (si faltan, corta con 500 antes de
+nada), que la `service_role` pueda leer `push_subscriptions` y que el radio
+salga de `app_config`. Verificado en rojo apuntándolo a una función inexistente.
+
+**Lo que sigue sin cubrirse**: que el push llegue a un teléfono de verdad. Eso
+solo se prueba a mano. Y que **GitHub apaga los workflows programados a los 60
+días sin actividad en el repo** — un proyecto estable deja de commitear y el
+chequeo semanal se desactiva solo, sin avisar.
+
 ## Reconstruir la base de datos desde cero (si hay que migrar de cuenta/proyecto)
 Todo el esquema de Supabase está versionado en `supabase/migrations/*.sql`
 y alcanza, en orden, para recrear la base entera en un proyecto nuevo —
@@ -1857,6 +1902,10 @@ ordena alfabéticamente bien):
 19. `20260809210000_daily_stats.sql` — tabla `daily_stats` y el trigger
     `reports_bump_stats` (ver "Estado del proyecto"). Aditiva y sin políticas:
     solo la lee `admin-metrics` con la service_role key.
+20. `20260810060000_triggers_publishable_key.sql` — los tres triggers de
+    `pg_net` pasan de la anon key **legacy (JWT)** a la publishable nueva (ver
+    "La key legacy de los triggers" abajo). En un proyecto nuevo hay que
+    reemplazar esa key por la del proyecto, igual que en `amet-radar.html`.
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
