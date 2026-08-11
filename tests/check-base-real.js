@@ -315,6 +315,40 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
   }
 
   // =========================================================================
+  // 4.bis. Que las notificaciones push SIGAN SALIENDO.
+  //
+  // Este era el punto ciego más grande del proyecto: si `notify-nearby`
+  // muriera, NADIE se enteraría. El trigger de pg_net descarta la respuesta,
+  // el panel muestra uso pero no salud, y esta misma suite publicaba la sonda
+  // —que dispara el push de verdad— sin mirar nunca el resultado. O sea que un
+  // push roto pasaba en verde.
+  //
+  // Se llama a la función por el MISMO camino y con la MISMA key que usa el
+  // trigger, así que esto cubre de una sola vez: que la key sirva (las
+  // funciones tienen verify_jwt activo), que las VAPID estén configuradas —si
+  // faltan, la función corta con 500 antes que nada—, que la service_role
+  // pueda leer `push_subscriptions`, y que el radio se lea de `app_config`.
+  //
+  // Las coordenadas son las de la sonda (Lago Enriquillo): no hay suscriptores
+  // ahí, así que `notified` da 0 y no le suena el teléfono a nadie real.
+  // =========================================================================
+  console.log('-- El push sigue vivo --');
+  {
+    const r = await pedir('POST', '/functions/v1/notify-nearby', {
+      record: { id: 'sonda_salud', lat: SONDA_LAT, lng: SONDA_LNG, category: 'reten_fijo' }
+    });
+    check('notify-nearby responde (si no, el push está muerto y nadie se entera)',
+      r.status === 200, 'status=' + r.status + ' ' + String(r.texto).slice(0, 120));
+    // `radius` viaja en la respuesta justamente para poder comprobar esto
+    // desde afuera: es la prueba de que leyó app_config y no cayó al default.
+    check('leyó el radio de app_config en vivo',
+      !!r.json && typeof r.json.radius === 'number' && r.json.radius > 0,
+      'radius=' + (r.json && r.json.radius));
+    check('no le mandó una notificación a nadie real (la sonda está deshabitada)',
+      !!r.json && r.json.notified === 0, 'notified=' + (r.json && r.json.notified));
+  }
+
+  // =========================================================================
   // 5. Ciclo de la sonda. Es la única parte que escribe, y la única que puede
   //    comprobar de forma CONCLUYENTE que un DELETE/PATCH directo no toca una
   //    fila que existe de verdad.

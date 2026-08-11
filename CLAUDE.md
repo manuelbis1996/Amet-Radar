@@ -1195,6 +1195,60 @@ token** (`delete_own_report`), o sea que el "Deshacer" no se rompió.
 hay dato); y el comportamiento en producción bajo el cliente nuevo, porque
 las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
 
+## Los emojis pasaron a ser íconos (v17.2)
+
+Generaliza a toda la interfaz el argumento que en v15.1 ya había sacado el
+emoji 📷 del marcador: un emoji **se dibuja distinto en cada sistema
+operativo** (y en algunos Android viejos directamente no aparece), **no hereda
+el color** del contexto, y a tamaño chico queda como una mancha. Un trazo
+escala nítido, toma el color que le toque y hace que la app se lea como una
+sola cosa en vez de un collage.
+
+- **`ICO` + `ico(nombre)`** en `amet-radar.html`, con el mismo estilo de trazo
+  que ya tenía `CAM_SVG` (que sigue existiendo aparte: va colgado del marcador
+  con su propio contenedor y tamaño). `CATEGORIES` ganó `icon`.
+- **`CATEGORIES.emoji` NO se borró, y no es un olvido.** Quedan tres lugares
+  donde el medio es **texto plano** y un SVG es imposible: el título de las
+  notificaciones push (`notify-nearby`), el texto que se manda al compartir por
+  WhatsApp, y las meta tags del preview (`_worker.js`). Ahí el emoji es
+  justamente lo que hace que el mensaje se vea vivo. Si algún día se toca
+  `CATEGORIES`, hay que mantener los dos campos.
+- **`admin.html` tiene el set duplicado** a propósito: los dos archivos son
+  autónomos (no hay build step ni módulos compartidos). Si se toca uno, tocar
+  el otro.
+
+**Dos cosas que mordieron al hacerlo, las dos por lo mismo**: había código que
+inyectaba el contenido con `textContent`, y con un SVG adentro eso **muestra el
+marcado como texto literal**. En la píldora de estado la hizo pasar de una
+línea a **183 px de alto** — lo agarró `check-vacio.js`, que mide cuánto ocupa.
+El mismo patrón estaba en `admin.html` (`tag.textContent`). Los dos pasaron a
+`innerHTML`; las cadenas son constantes de la app, no entra nada del usuario.
+
+**El chequeo del núcleo del círculo hubo que reescribirlo**: `check-maplibre.js`
+miraba `textContent` para confirmar que el marcador de zona tiene la insignia
+de su categoría, y con un SVG eso da `''`. Ahora busca el `<svg>` y **mide que
+tenga tamaño** — si se hubiera aflojado a "no importa el texto", el chequeo
+habría quedado pasando por vacío.
+
+**Se miraron en captura, no solo en asertos.** La primera versión del auto
+patrulla tenía la barra de luces flotando y el semáforo se confundía con un
+control remoto; se rehicieron los dos y se volvió a capturar.
+
+### Y de paso apareció que el gráfico del panel no dibujaba nada
+
+Verificando el panel con los íconos nuevos: las 14 barras de "Estado del
+proyecto" salían **todas de 3 px** (el `min-height`) sin importar el valor.
+Una barra con `height:X%` necesita que su padre tenga **altura definida**, y
+`.chart` usaba `align-items:flex-end`, así que cada columna medía lo que su
+contenido y el porcentaje no resolvía contra nada. El gráfico existía desde
+v16.4 y no informaba nada.
+
+Arreglado con `align-items:stretch` y una `.chart-track` (`flex:1`) de la que
+cuelga la barra. **La suite pasaba en verde con el gráfico roto** porque miraba
+`style.height` —el valor declarado— y no el renderizado; ahora mide con
+`getBoundingClientRect()` y comprueba que las alturas sean distintas entre sí.
+Verificada revirtiendo el arreglo: detecta las 14 barras de 3 px.
+
 ## El arranque en frío (v17.0) — leer antes de tocar el loader, el voto o compartir
 
 Todo este bloque sale de una pregunta distinta a las anteriores: no "¿qué le
@@ -1790,6 +1844,51 @@ viejo.
   compartido con el esquema anterior), pero todo lo que genera la app
   (botón compartir, `notificationclick` del service worker) ya usa `?r=`.
 
+## La key legacy de los triggers (v17.1) — un fallo silencioso que se cerró
+
+**Qué pasaba.** Los tres triggers de `pg_net` —`notify_nearby_reports`,
+`delete_report_photo` y `clear_report_photo`— se autenticaban con la anon key
+**vieja, en formato JWT** (`eyJhbGciOi...`), embebida dentro de tres
+migraciones, mientras que la app, el panel y `_worker.js` usan
+`sb_publishable_...`. Supabase ofrece deshabilitar las *legacy JWT keys* desde
+el dashboard, y el día que alguien acepte esa oferta:
+
+- las notificaciones push dejan de salir,
+- las fotos dejan de borrarse de Storage al borrarse su reporte,
+- y **nada lo denuncia**: la app, el panel y las 18 suites siguen en verde,
+  porque ninguno de los tres usa esa key.
+
+Es el peor tipo de fallo del sistema: silencioso, y disparado por una acción de
+mantenimiento que parece inofensiva. Por eso se eliminó la dependencia en vez
+de dejar anotado "no toques ese botón".
+
+**Lo contraintuitivo, y por eso hay que verificarlo antes de repetirlo**:
+`notify-nearby` y `delete-photo` tienen **`verify_jwt: true`**, así que lo
+esperable era que una key que no es un JWT fuera rechazada. No lo es — el
+gateway de Supabase acepta el formato nuevo igual. Se comprobó con `curl`
+contra las dos funciones **antes** de aplicar la migración, y después de
+aplicarla se publicó una sonda real y se leyó `net._http_response`: el trigger
+llegó con **200** y `{"notified":0,"expired":0,"radius":1000}`.
+
+**Los triggers no se recrean**, solo las funciones (`create or replace`).
+Tocarlos arriesgaría perder el `WHEN` de `reports_delete_photo`, que es lo que
+evita llamar a `delete-photo` por reportes que nunca tuvieron foto.
+
+### Y ahora la sonda semanal comprueba que el push sigue vivo
+
+Era el punto ciego más grande: `check-base-real.js` publicaba la sonda —que
+dispara el push de verdad— **sin mirar nunca el resultado**, así que un
+`notify-nearby` muerto pasaba en verde. Ahora la llama por el mismo camino y
+con la misma key que usa el trigger, lo que cubre de una sola vez que la key
+sirva, que las VAPID estén configuradas (si faltan, corta con 500 antes de
+nada), que la `service_role` pueda leer `push_subscriptions` y que el radio
+salga de `app_config`. Verificado en rojo apuntándolo a una función inexistente.
+
+**Lo que sigue sin cubrirse**: que el push llegue a un teléfono de verdad. Eso
+solo se prueba a mano. Y que **GitHub apaga los workflows programados a los 60
+días sin actividad en el repo** — un proyecto estable deja de commitear y el
+chequeo semanal se desactiva solo, sin avisar.
+
 ## Reconstruir la base de datos desde cero (si hay que migrar de cuenta/proyecto)
 Todo el esquema de Supabase está versionado en `supabase/migrations/*.sql`
 y alcanza, en orden, para recrear la base entera en un proyecto nuevo —
@@ -1857,6 +1956,10 @@ ordena alfabéticamente bien):
 19. `20260809210000_daily_stats.sql` — tabla `daily_stats` y el trigger
     `reports_bump_stats` (ver "Estado del proyecto"). Aditiva y sin políticas:
     solo la lee `admin-metrics` con la service_role key.
+20. `20260810060000_triggers_publishable_key.sql` — los tres triggers de
+    `pg_net` pasan de la anon key **legacy (JWT)** a la publishable nueva (ver
+    "La key legacy de los triggers" abajo). En un proyecto nuevo hay que
+    reemplazar esa key por la del proyecto, igual que en `amet-radar.html`.
 
 Aplicar cada uno con `apply_migration` (MCP) o pegándolos en el SQL
 Editor del proyecto nuevo, en ese orden.
