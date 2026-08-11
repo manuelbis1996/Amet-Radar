@@ -202,9 +202,18 @@
      dependencias. Los días sin actividad llegan con 0 desde el endpoint, así
      que la barra existe igual (con altura mínima) y el eje no miente. */
   #metrics-chart{ margin-top:18px; }
-  .chart{ display:flex; align-items:flex-end; gap:5px; height:96px; }
+  /* OJO con las alturas en %: una barra con height:X% necesita que su PADRE
+     tenga altura definida. La primera versión tenía .chart con align-items:
+     flex-end, así que cada columna medía lo que su contenido y el porcentaje
+     no resolvía contra nada — las 14 barras salían todas de 3px (el
+     min-height) sin importar el valor. El gráfico existía pero no informaba.
+     Por eso ahora las columnas se estiran y la barra cuelga de .chart-track,
+     que es el que tiene altura definida (flex:1 dentro de una columna con
+     alto fijo). */
+  .chart{ display:flex; align-items:stretch; gap:5px; height:96px; }
   .chart-col{ flex:1; display:flex; flex-direction:column; justify-content:flex-end;
               align-items:center; gap:5px; min-width:0; }
+  .chart-track{ flex:1; width:100%; display:flex; align-items:flex-end; }
   .chart-bar{
     width:100%; border-radius:4px 4px 0 0; background:var(--amber);
     min-height:3px; transition:height .25s;
@@ -1303,7 +1312,7 @@
         const alto = Math.round((d.reportes / max) * 100);
         return `<div class="chart-col${d.reportes ? '' : ' cero'}" title="${d.dia}: ${d.reportes}">
                   <b>${d.reportes || ''}</b>
-                  <div class="chart-bar" style="height:${alto}%"></div>
+                  <div class="chart-track"><div class="chart-bar" style="height:${alto}%"></div></div>
                 </div>`;
       }).join('') +
       `</div><div class="chart-eje">` +

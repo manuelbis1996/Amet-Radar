@@ -280,6 +280,18 @@ async function abrirPanel(browser) {
     JSON.stringify(barras.map(b => b.cero ? 0 : 1)));
   check('la barra más alta llega al 100%',
     barras.some(b => b.alto === '100%'), JSON.stringify(barras.map(b => b.alto)));
+  // Y que ese 100% se DIBUJE. Los chequeos de arriba miran style.height, o sea
+  // el valor declarado, y con eso el gráfico pasaba en verde estando roto: las
+  // barras colgaban de un padre sin altura definida, así que el porcentaje no
+  // resolvía y las 14 salían de 3px (el min-height) sin importar el valor.
+  // Existía el gráfico, pero no informaba nada. Por eso acá se mide de verdad.
+  const altosReales = await page.$$eval('#metrics-chart .chart-bar',
+    els => els.map(e => Math.round(e.getBoundingClientRect().height)));
+  const masAlta = Math.max(...altosReales);
+  check('las barras se dibujan con altura real, no aplastadas',
+    masAlta >= 40, 'la más alta mide ' + masAlta + 'px');
+  check('y son proporcionales entre sí (no todas iguales)',
+    new Set(altosReales).size >= 10, JSON.stringify(altosReales));
 
   // ---- 11. Moderar la foto sin borrar el aviso ----
   // Antes la única opción era borrar el reporte entero, y eso mezcla dos

@@ -1234,6 +1234,21 @@ habría quedado pasando por vacío.
 patrulla tenía la barra de luces flotando y el semáforo se confundía con un
 control remoto; se rehicieron los dos y se volvió a capturar.
 
+### Y de paso apareció que el gráfico del panel no dibujaba nada
+
+Verificando el panel con los íconos nuevos: las 14 barras de "Estado del
+proyecto" salían **todas de 3 px** (el `min-height`) sin importar el valor.
+Una barra con `height:X%` necesita que su padre tenga **altura definida**, y
+`.chart` usaba `align-items:flex-end`, así que cada columna medía lo que su
+contenido y el porcentaje no resolvía contra nada. El gráfico existía desde
+v16.4 y no informaba nada.
+
+Arreglado con `align-items:stretch` y una `.chart-track` (`flex:1`) de la que
+cuelga la barra. **La suite pasaba en verde con el gráfico roto** porque miraba
+`style.height` —el valor declarado— y no el renderizado; ahora mide con
+`getBoundingClientRect()` y comprueba que las alturas sean distintas entre sí.
+Verificada revirtiendo el arreglo: detecta las 14 barras de 3 px.
+
 ## El arranque en frío (v17.0) — leer antes de tocar el loader, el voto o compartir
 
 Todo este bloque sale de una pregunta distinta a las anteriores: no "¿qué le
