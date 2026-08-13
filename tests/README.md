@@ -28,7 +28,14 @@ que la app usa (`Map`, `Marker`, `getBounds`, `easeTo`, `jumpTo`, `panTo`,
 eventos) y expone `window.__map` para poder auditar las llamadas.
 
 **Consecuencia importante**: estos tests verifican el *comportamiento* de la
-app, no cómo se ve el mapa. El render visual hay que mirarlo en un teléfono.
+app, no cómo se ve el mapa. El render visual **ya no hay que mirarlo solo en
+un teléfono**: desde v17.5 se puede capturar la app real sobre tiles reales
+desde acá — Chromium con `--use-angle=swiftshader`, la librería servida desde
+el disco (el navegador no alcanza unpkg) y los tiles interceptados con
+`page.route` y cumplidos con el `fetch` de node, que sí sale. Ver "El mapa de
+fondo pasó a positron" en `CLAUDE.md`. Las suites siguen con el stub a
+propósito: son rápidas y deterministas; aquello es para decidir cuestiones
+visuales, no para probar lógica.
 
 **El stub solo tiene lo que alguien usó alguna vez.** Es un doble parcial, no
 una implementación: si tocás código que llama a un método de MapLibre que
