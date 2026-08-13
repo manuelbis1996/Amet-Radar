@@ -32,8 +32,8 @@ app, no cómo se ve el mapa. El render visual **ya no hay que mirarlo solo en
 un teléfono**: desde v17.5 se puede capturar la app real sobre tiles reales
 desde acá — Chromium con `--use-angle=swiftshader`, la librería servida desde
 el disco (el navegador no alcanza unpkg) y los tiles interceptados con
-`page.route` y cumplidos con el `fetch` de node, que sí sale. Ver "El mapa de
-fondo pasó a positron" en `CLAUDE.md`. Las suites siguen con el stub a
+`page.route` y cumplidos con el `fetch` de node, que sí sale. Ver "Se pueden renderizar mapas
+REALES desde el sandbox" en `CLAUDE.md`. Las suites siguen con el stub a
 propósito: son rápidas y deterministas; aquello es para decidir cuestiones
 visuales, no para probar lógica.
 

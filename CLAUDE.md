@@ -1195,60 +1195,44 @@ token** (`delete_own_report`), o sea que el "Deshacer" no se rompió.
 hay dato); y el comportamiento en producción bajo el cliente nuevo, porque
 las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
 
-## El mapa de fondo pasó a `positron` (v17.5)
+## Se pueden renderizar mapas REALES desde el sandbox (v17.5)
 
-**El problema no era que el mapa fuera feo: competía con los datos.** El estilo
-`bright` de OpenFreeMap pinta **todas las calles de amarillo-ámbar**, y el
-marcador de `reten_fijo` —el más común de la app, con diferencia— también es
-ámbar. O sea que el pin que la gente viene a buscar se camuflaba con el mapa
-de fondo. Es la misma colisión que v16.0 arregló entre el acento y la
-categoría, y que v17.4 arregló en el panel, pero esta vez contra el basemap.
-
-Con `positron` el fondo se vuelve gris neutro y los cuatro colores de
-categoría saltan solos. El principio es el de siempre en un mapa con datos
-encima: **el mapa es contexto, los marcadores son el dato**.
-
-Es un cambio de **una línea por archivo** (`amet-radar.html` y `admin.html`,
-los dos para que el panel y la app no queden con mapas distintos) y se
-revierte igual de fácil.
-
-**El costo, asumido:** `positron` pierde la jerarquía de calles. En `bright`
-una avenida se distingue de una calle chica por el color; en `positron` son
-todas blancas y solo cambia el grosor. Manejando eso puede costar más. Si
-molesta, el siguiente paso NO es volver a `bright` —volvería la colisión—
-sino recuperar la jerarquía tocando las capas del estilo. Se intentó una
-versión rápida por nombre de capa (`motorway`, `trunk`, `primary`) y **no
-alcanzó**: los ids de `positron` no matchean así, y el resultado quedó
-idéntico. Hay que mirar las 119 capas del estilo.
-
-**Se descartaron**: `liberty` (casi idéntico a `bright`, misma colisión) y
-`dark` (v16.0 sacó el tema oscuro a pedido, y quedó anotado que si vuelve
-tiene que volver junto con una interfaz oscura, no solo el mapa).
-
-### Y ahora SÍ se pueden ver los mapas desde el sandbox
-
-Esto vale más que el cambio de estilo. Hasta acá `CLAUDE.md` y
-`tests/README.md` decían que el render del mapa **no se podía verificar** —
-que el CDN y los tiles estaban bloqueados y que eso había que mirarlo en el
-teléfono. Ya no es del todo cierto, y por eso todo lo visual del mapa se venía
-decidiendo a ciegas. Lo que hace falta:
+Hasta acá este archivo y `tests/README.md` decían que el render del mapa **no
+se podía verificar** — que el CDN y los tiles estaban bloqueados y que había
+que mirarlo en un teléfono. Ya no es cierto, y vale anotarlo porque significa
+que **todo lo visual del mapa se venía decidiendo a ciegas**. Hacen falta tres
+cosas, y ninguna es obvia por separado:
 
 1. **WebGL por software**: lanzar Chromium con `--use-gl=angle
-   --use-angle=swiftshader --enable-unsafe-swiftshader`. Sin eso `new
-   maplibregl.Map()` no llega ni a disparar `load`.
+   --use-angle=swiftshader --enable-unsafe-swiftshader`. Sin eso
+   `new maplibregl.Map()` no llega ni a disparar `load`.
 2. **La librería desde el disco**: el navegador no alcanza unpkg
-   (`ERR_CONNECTION_RESET`), pero `curl` sí. Se baja una vez y se sirve local
-   o se cumple con `page.route`.
+   (`ERR_CONNECTION_RESET`) aunque `curl` sí. Se baja una vez y se cumple con
+   `page.route('**/maplibre-gl.js')`.
 3. **Los tiles por node**: el navegador tampoco alcanza
    `tiles.openfreemap.org`, pero el `fetch` de node sí (usa el proxy del
    entorno). Se interceptan con `page.route('**tiles.openfreemap.org/**')` y
    se cumplen con lo que devuelve `fetch`. **Ojo**: si en vez de interceptar
-   se usa un proxy propio, hay que reescribir las URLs de adentro del JSON del
-   estilo (tiles, glyphs, sprite), que apuntan al dominio original.
+   se levanta un proxy propio, hay que reescribir las URLs de adentro del JSON
+   del estilo (tiles, glyphs, sprite), que apuntan al dominio original.
 
-Con eso se captura la app real sobre el mapa real. Las suites **siguen usando
-el stub**: son otra cosa (rápidas, deterministas, sin red). Esto es para
-decidir cuestiones visuales, que es justo lo que no se podía hacer.
+Con eso se captura la app real sobre el mapa real de La Vega. Las suites
+**siguen usando el stub** a propósito: son rápidas, deterministas y sin red.
+Esto es para decidir cuestiones visuales, que es justo lo que no se podía.
+
+### Se evaluó cambiar el basemap y se descartó
+
+Se probó `positron` (gris neutro) contra el `bright` actual, capturando la app
+real con los dos. El argumento a favor era que `bright` pinta **todas las
+calles de amarillo-ámbar** y el marcador de `reten_fijo` —el más común— es
+ámbar, así que se camufla con el fondo. Con `positron` los marcadores saltan.
+
+**El dueño lo miró y prefirió `bright`**, así que se quedó `bright`. Si en
+algún momento la camuflada del marcador molesta, las salidas por orden de
+menos a más invasivo son: cambiar el color de la categoría `reten_fijo` (ojo
+que viaja también a las notificaciones push y al preview de WhatsApp),
+oscurecer el borde del marcador, o afinar las capas de calles de `bright`. Lo
+que **no** conviene es `liberty`: es casi idéntico a `bright`, misma colisión.
 
 ## El panel se alinea con la app (v17.4)
 

@@ -1145,7 +1145,7 @@
       if(typeof maplibregl === 'undefined') throw new Error('maplibre no cargó');
       adminMap = new maplibregl.Map({
         container: 'admin-map',
-        style: 'https://tiles.openfreemap.org/styles/positron',
+        style: 'https://tiles.openfreemap.org/styles/bright',
         center: [DEFAULT_CENTER[1], DEFAULT_CENTER[0]],  // MapLibre usa [lng, lat]
         zoom: 12,
         maxBounds: RD_BOUNDS,

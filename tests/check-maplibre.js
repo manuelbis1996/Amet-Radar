@@ -91,12 +91,7 @@ const REPORTS = [
         JSON.stringify(init.maxBounds));
   check('minZoom >= 8 (si no, al alejar el mapa se clava en el centro del país)',
         init.minZoom >= 8, 'minZoom=' + init.minZoom);
-  // Positron y NO bright desde v17.5: bright pinta las calles del mismo ámbar
-  // que la categoría reten_fijo, así que el marcador más común de la app se
-  // camuflaba con el mapa de fondo. Si alguien vuelve a un estilo cálido, que
-  // sea leyendo ese comentario y no sin querer.
-  check('estilo Positron de OpenFreeMap (neutro, para que los marcadores resalten)',
-        /openfreemap\.org\/styles\/positron$/.test(init.style), init.style);
+  check('estilo Bright de OpenFreeMap', /openfreemap\.org\/styles\/bright$/.test(init.style), init.style);
   check('zoom inicial convertido de Leaflet 13 -> MapLibre 12', init.zoom === 12, 'zoom=' + init.zoom);
   check('centro en [lng, lat] (no [lat, lng])', init.center[0] < -60 && init.center[1] > 0 && init.center[1] < 30, JSON.stringify(init.center));
   check('rotación deshabilitada', init.rotDisabled === true);
