@@ -144,7 +144,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 18 suites de Playwright, versionadas en el repo. **Leer
+- `tests/` — las 19 suites, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -154,7 +154,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   el doble de MapLibre que comparten todas (el sandbox bloquea el CDN y los
   tiles). **`tests` está en `.assetsignore`**: sin eso, con
   `assets.directory: "./"`, estos archivos se publicarían como servibles.
-- `tests/check-base-real.js` — el complemento de las 18: pega contra la base
+- `tests/check-base-real.js` — el complemento de las 19: pega contra la base
   **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
   mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
   entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
@@ -359,6 +359,66 @@ respondió `radius: 2000` y después `radius: 3500` sin redesplegar nada — o s
 que lo lee en vivo. Para eso el campo `radius` va en la respuesta: es la única
 forma de distinguir "tomó el valor nuevo" de "cayó al de por defecto". El
 `check` de la columna se comprobó rechazando un `update` a 10 (`23514`).
+
+## La tarjeta de WhatsApp dice dónde (v17.6)
+
+Pedido del usuario: que al compartir un reporte se vea **la dirección** y una
+**imagen de fondo**, en vez de la tarjeta chiquita con el logo.
+
+### La dirección sale de Nominatim, en el Worker
+
+`_worker.js` ya consultaba el reporte para armar el preview; ahora pide también
+`lat/lng/photo` y hace una geocodificación inversa. La tarjeta pasó de decir
+solo la categoría a decir **en qué calle**:
+
+```
+👮 Retén fijo en Calle María Trinidad Sánchez
+Reportado hace 5 min · Santo Domingo Savio, La Vega
+```
+
+Es lo que hace útil compartir el link: sin la calle, quien lo recibe no sabe
+si le queda de camino.
+
+- **Nominatim es gratis y sin key**, pero su política pide un `User-Agent`
+  identificable y castiga el abuso. Por eso se llama **solo en el camino de
+  bots** (poco frecuente, y WhatsApp cachea la tarjeta) y la respuesta se
+  cachea 24 h en el borde con `cf: { cacheTtl }`. Hay una prueba de que a un
+  usuario real no se le gasta una llamada.
+- **Si falla, se cae al texto de antes.** Nunca rompe el preview: es un
+  adorno, no un requisito.
+
+### La imagen: la foto real si la hay, y si no una tarjeta por categoría
+
+`og:image` apuntaba a `icon-512.png`, que es cuadrado y chico — por eso
+WhatsApp dibujaba la tarjeta angosta con el logo al costado. Ahora:
+
+1. **Si el reporte tiene foto**, va la foto. Es lo que mejor comunica y es
+   gratis: ya está pública en Storage.
+2. **Si no**, una de las cuatro `og-<categoria>.png` (1200×630), generadas
+   desde HTML con Playwright para que usen los mismos íconos y colores que la
+   app. El script está en el historial de la sesión, no en el repo: se
+   regeneran a mano si cambia el diseño.
+
+Y `twitter:card` pasó a `summary_large_image`. **Ojo con las medidas**:
+`og:image:width/height` se declaran **solo** para las tarjetas generadas. Con
+la foto de un reporte serían mentira —`compressImage` la deja en 480 px de
+ancho— y hay scrapers que descartan la imagen cuando no coincide.
+
+**Las filas viejas guardaban la foto como `data:` URL embebida** y eso no sirve
+como `og:image`, así que se exige explícitamente que empiece con `http`. Es el
+mismo cuidado que ya tienen el trigger de limpieza y el cliente.
+
+### Cobertura
+
+`tests/check-preview.js`, la **primera** que tiene el Worker — hasta acá se
+verificaba a mano con `curl` contra producción. No usa Playwright: importa
+`_worker.js` y le mockea el `fetch` y el binding `ASSETS`. Cubre los dos
+caminos de imagen, la caída de Nominatim, la categoría desconocida, y que el
+usuario real siga pasando de largo.
+
+**Lo que la suite NO puede ver**: cómo se ve la tarjeta de verdad en WhatsApp.
+Eso se prueba mandándose el link a uno mismo. Y ojo que **WhatsApp cachea el
+preview por URL**, así que para volver a probar hace falta un reporte nuevo.
 
 ## Preview dinámico por reporte (Cloudflare Worker)
 Cuando se comparte el link de un reporte puntual (`?r=<id>`) por WhatsApp,
@@ -1194,6 +1254,98 @@ token** (`delete_own_report`), o sea que el "Deshacer" no se rompió.
 **Lo que NO se verificó**: cuánta gente real comparte IP por CGNAT en RD (no
 hay dato); y el comportamiento en producción bajo el cliente nuevo, porque
 las migraciones 2 y 3 del orden de arriba todavía no se hicieron.
+
+## Se pueden renderizar mapas REALES desde el sandbox (v17.5)
+
+Hasta acá este archivo y `tests/README.md` decían que el render del mapa **no
+se podía verificar** — que el CDN y los tiles estaban bloqueados y que había
+que mirarlo en un teléfono. Ya no es cierto, y vale anotarlo porque significa
+que **todo lo visual del mapa se venía decidiendo a ciegas**. Hacen falta tres
+cosas, y ninguna es obvia por separado:
+
+1. **WebGL por software**: lanzar Chromium con `--use-gl=angle
+   --use-angle=swiftshader --enable-unsafe-swiftshader`. Sin eso
+   `new maplibregl.Map()` no llega ni a disparar `load`.
+2. **La librería desde el disco**: el navegador no alcanza unpkg
+   (`ERR_CONNECTION_RESET`) aunque `curl` sí. Se baja una vez y se cumple con
+   `page.route('**/maplibre-gl.js')`.
+3. **Los tiles por node**: el navegador tampoco alcanza
+   `tiles.openfreemap.org`, pero el `fetch` de node sí (usa el proxy del
+   entorno). Se interceptan con `page.route('**tiles.openfreemap.org/**')` y
+   se cumplen con lo que devuelve `fetch`. **Ojo**: si en vez de interceptar
+   se levanta un proxy propio, hay que reescribir las URLs de adentro del JSON
+   del estilo (tiles, glyphs, sprite), que apuntan al dominio original.
+
+Con eso se captura la app real sobre el mapa real de La Vega. Las suites
+**siguen usando el stub** a propósito: son rápidas, deterministas y sin red.
+Esto es para decidir cuestiones visuales, que es justo lo que no se podía.
+
+### Se evaluó cambiar el basemap y se descartó
+
+Se probó `positron` (gris neutro) contra el `bright` actual, capturando la app
+real con los dos. El argumento a favor era que `bright` pinta **todas las
+calles de amarillo-ámbar** y el marcador de `reten_fijo` —el más común— es
+ámbar, así que se camufla con el fondo. Con `positron` los marcadores saltan.
+
+**El dueño lo miró y prefirió `bright`**, así que se quedó `bright`. Si en
+algún momento la camuflada del marcador molesta, las salidas por orden de
+menos a más invasivo son: cambiar el color de la categoría `reten_fijo` (ojo
+que viaja también a las notificaciones push y al preview de WhatsApp),
+oscurecer el borde del marcador, o afinar las capas de calles de `bright`. Lo
+que **no** conviene es `liberty`: es casi idéntico a `bright`, misma colisión.
+
+## El panel se alinea con la app (v17.4)
+
+Dos cambios, los dos "que el panel y la app dejen de ser dos productos".
+
+### El acento pasó de ámbar a violeta
+
+El panel usaba `--amber: #ffb020`, que es **exactamente** el `hex` de la
+categoría `reten_fijo` en `CATEGORIES`. O sea que el acento de la interfaz
+—títulos, botón de guardar, barras del gráfico— era del mismo color que el
+dato más común del mapa: la misma colisión que v16.0 arregló en la app y por
+la misma razón.
+
+**Son DOS tonos y no es decoración**, porque este panel es oscuro:
+- `--brand` (`#7c3aed`) va como **fondo**, con texto blanco encima. Ojo:
+  `.btn-primary` tenía texto oscuro sobre ámbar; sobre violeta eso daría
+  3.3:1, así que pasó a blanco.
+- `--brand-soft` (`#a78bfa`) es el que va en **texto y trazos** sobre el fondo
+  oscuro. El violeta pleno como texto sobre `--panel` da 3.1:1, por debajo de
+  lo legible; el suave da 6.4:1.
+
+Las categorías **no se tocaron**: siguen con sus cuatro colores, que son dato
+y no decoración.
+
+### El pin también va fijo al centro
+
+Mismo patrón que la app en v17.3, con una diferencia que importa: en la app
+`#map` ocupa la pantalla entera, así que el centro del viewport es el centro
+del mapa; **acá el mapa es una caja**, y el pin se centra sobre `.map-wrap`.
+Hoy `.map-bar` va absoluta y no ocupa alto, así que `.map-wrap` y
+`#admin-map` miden lo mismo — se verificó midiendo, y hay una prueba
+(`check-admin-publicar`) que compara la punta del pin contra el centro de
+`#admin-map`, no del contenedor. Si alguien pone la barra en el flujo, esa
+prueba se pone en rojo en vez de que el panel publique un punto distinto del
+que se ve.
+
+**Se mantiene la regla de v14.4**: el pin NO aparece al abrir el panel. Hay
+que entrar con «Elegir en el mapa». Si estuviera siempre en el centro,
+"publicar" quedaría permanentemente armado apuntando a un lugar que nadie
+eligió — exactamente el accidente que v14.4 cerró.
+
+- Tocar el mapa ya no clava el punto; el click queda solo para cerrar la ficha
+  de un reporte.
+- Escribir las coordenadas a mano **sigue siendo una vía de primera clase**
+  (es la que anda por teclado y la que salva si el mapa no carga): centra el
+  mapa ahí, y como el pin vive en el centro, queda encima.
+- `reflejarEstadoPunto()` se llama ahora también al final de `initAdminMap()`.
+  Sin eso el botón «Elegir en el mapa» quedaba oculto para siempre: la primera
+  llamada ocurre con `adminMap` todavía en `null`, y ahí se esconde a
+  propósito porque sin mapa no lleva a ningún lado.
+
+**Esto no toca `amet-radar.html` ni `sw.js`**, así que no sube
+`APP_VERSION`/`CACHE_NAME` — `admin.html` no está en el app shell.
 
 ## Marcar en otro punto, con el pin fijo al centro (v17.3)
 
@@ -2164,9 +2316,10 @@ protección ya resuelve sin piezas nuevas.
   comparando la lista de "Ignoring asset" contra el árbol real del repo;
   la primera versión del archivo (con `.git/`) NO excluía nada y hubiera
   publicado el repo entero. Verificado que el resultado final sube
-  exactamente 7 archivos: `amet-radar.html`, `admin.html`,
+  exactamente 11 archivos: `amet-radar.html`, `admin.html`,
   `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`,
-  `icon-badge.png`. **`**/.wrangler` está en la lista**: el propio
+  `icon-badge.png` y las cuatro `og-<categoria>.png` (las tarjetas del
+  preview, ver "La tarjeta de WhatsApp dice dónde"). **`**/.wrangler` está en la lista**: el propio
   `wrangler deploy --dry-run` crea ese directorio al bundlear y deja ahí
   el `_worker.js` con su **sourcemap** — wrangler ignora el `.js` solo,
   no el `.map`, así que sin esa línea un despliegue hecho a mano desde

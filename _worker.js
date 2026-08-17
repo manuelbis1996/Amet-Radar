@@ -16,6 +16,15 @@
 const SUPABASE_URL = "https://nikexwjxxcxzhsuypsjn.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_p8U6gvvBwPVHdfmspjyCXA_g6clP58v";
 
+// Geocodificación inversa para poner LA DIRECCIÓN en la tarjeta compartida.
+// Nominatim es gratis y sin key, pero su política de uso pide un User-Agent
+// identificable y castiga el abuso. Por eso: solo se llama en el camino de
+// BOTS (que ya es poco frecuente — un puñado de veces por link compartido) y
+// la respuesta se cachea 24 h en el borde. Si falla o bloquea, se devuelve
+// null y la tarjeta queda como estaba: NUNCA rompe el preview.
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
+const NOMINATIM_UA = "AMET-Radar/1.0 (+https://amet-radar.lavega.workers.dev)";
+
 const CATEGORY_LABELS = {
   reten_fijo: "👮 Retén fijo",
   reten_movil: "🚓 Retén móvil",
@@ -46,15 +55,46 @@ function timeAgo(ts) {
   return `hace ${Math.floor(h / 24)} d`;
 }
 
+async function direccionDe(lat, lng) {
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+  try {
+    const u = `${NOMINATIM_URL}?format=jsonv2&zoom=17&accept-language=es` +
+      `&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`;
+    const res = await fetch(u, {
+      headers: { "User-Agent": NOMINATIM_UA, Accept: "application/json" },
+      // Opción propia de Cloudflare: cachea la subpetición en el borde. Fuera
+      // de Workers se ignora sin romper nada.
+      cf: { cacheTtl: 86400, cacheEverything: true },
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const a = d.address || {};
+    const via = a.road || a.pedestrian || a.footway || null;
+    const zona = a.suburb || a.neighbourhood || a.quarter || null;
+    const ciudad = a.city || a.town || a.village || a.municipality || null;
+    if (!via && !zona && !ciudad) return null;
+    return { via, zona: zona && zona !== via ? zona : null, ciudad };
+  } catch (err) {
+    return null;
+  }
+}
+
 function escapeHtml(s) {
   const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   return s.replace(/[&<>"']/g, (c) => map[c]);
 }
 
-function renderPreviewHtml(title, description, pageUrl, siteUrl) {
+function renderPreviewHtml(title, description, pageUrl, imagen, grande) {
   const t = escapeHtml(title);
   const d = escapeHtml(description);
   const u = escapeHtml(pageUrl);
+  const img = escapeHtml(imagen);
+  // Las medidas solo se declaran para las tarjetas generadas, que sabemos que
+  // son 1200x630. Con la foto de un reporte serían mentira (compressImage la
+  // deja en 480px de ancho) y algunos scrapers la descartarían por eso.
+  const medidas = grande
+    ? '<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">\n'
+    : "";
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -64,11 +104,12 @@ function renderPreviewHtml(title, description, pageUrl, siteUrl) {
 <meta property="og:title" content="${t}">
 <meta property="og:description" content="${d}">
 <meta property="og:url" content="${u}">
-<meta property="og:image" content="${siteUrl}/icon-512.png">
-<meta name="twitter:card" content="summary">
+<meta property="og:site_name" content="AMET Radar">
+<meta property="og:image" content="${img}">
+${medidas}<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${t}">
 <meta name="twitter:description" content="${d}">
-<meta name="twitter:image" content="${siteUrl}/icon-512.png">
+<meta name="twitter:image" content="${img}">
 <meta http-equiv="refresh" content="0; url=${u}">
 </head>
 <body></body>
@@ -82,7 +123,7 @@ async function maybeReportPreview(request, url) {
 
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/reports?id=eq.${encodeURIComponent(reportId)}&select=category,note,ts`,
+      `${SUPABASE_URL}/rest/v1/reports?id=eq.${encodeURIComponent(reportId)}&select=category,note,ts,lat,lng,photo`,
       { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } },
     );
     if (!res.ok) return null;
@@ -93,12 +134,32 @@ async function maybeReportPreview(request, url) {
     if (!report) return null;
 
     const label = CATEGORY_LABELS[report.category] ?? "Reporte";
-    const title = `${label} — AMET Radar`;
-    const description = report.note
-      ? `Reportado ${timeAgo(report.ts)}. "${report.note}"`
-      : `Reportado ${timeAgo(report.ts)} en La Vega.`;
 
-    return new Response(renderPreviewHtml(title, description, request.url, url.origin), {
+    // DÓNDE fue marcado, que es lo que hace útil compartir el link: sin esto
+    // la tarjeta decía solo la categoría y quien la recibe no sabe si le
+    // queda de camino. Si la geocodificación falla se cae al texto de antes.
+    const dir = await direccionDe(report.lat, report.lng);
+    const lugar = dir && [dir.zona, dir.ciudad].filter(Boolean).join(", ");
+    const title = dir && dir.via ? `${label} en ${dir.via}` : `${label} — AMET Radar`;
+
+    const cuando = `Reportado ${timeAgo(report.ts)}`;
+    const description = report.note
+      ? `${cuando}. "${report.note}"`
+      : lugar
+        ? `${cuando} · ${lugar}`
+        : `${cuando} en La Vega.`;
+
+    // LA IMAGEN DE FONDO. Prioridad: la foto real del reporte si la tiene
+    // (es lo que mejor comunica), y si no una tarjeta 1200x630 por categoría.
+    // Ojo con las filas viejas: antes de la migración a Storage la foto se
+    // guardaba como data: URL embebida, y eso no sirve como og:image.
+    const tieneFoto = typeof report.photo === "string" &&
+      report.photo.startsWith("http");
+    const imagen = tieneFoto
+      ? report.photo
+      : `${url.origin}/og-${CATEGORY_LABELS[report.category] ? report.category : "reten_fijo"}.png`;
+
+    return new Response(renderPreviewHtml(title, description, request.url, imagen, !tieneFoto), {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   } catch (err) {

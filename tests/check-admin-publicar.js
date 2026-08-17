@@ -87,6 +87,18 @@ async function abrirPanel(browser, opciones = {}) {
   return { ctx, page, rpcs, errores, borrados, configs };
 }
 
+// Desde v17.4 el pin del panel va FIJO AL CENTRO igual que en la app: tocar
+// el mapa ya no clava el punto, se mueve el mapa por debajo. Y sigue habiendo
+// que entrar al modo con «Elegir en el mapa» — el pin no aparece solo, para
+// no dejar "publicar" armado apuntando a un lugar que nadie eligió (v14.4).
+async function elegirPunto(page, lat, lng){
+  const btn = await page.$('#pin-elegir');
+  if(btn && !(await btn.isHidden())) await btn.click();
+  await page.evaluate(([la, ln]) => window.__map.jumpTo({ center:[ln, la] }), [lat, lng]);
+  await page.evaluate(() => window.__map.fire('moveend'));
+  await page.waitForTimeout(150);
+}
+
 (async () => {
   const browser = await lanzar();
 
@@ -103,11 +115,28 @@ async function abrirPanel(browser, opciones = {}) {
     // Tocar el mapa elige el punto: escribe las coordenadas y recién ahí
     // aparece el pin (antes estaba siempre puesto en el centro).
     check('no hay pin antes de elegir un punto',
-      (await page.$$eval('.pick-pin', e => e.length)) === 0);
-    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.4800, lat:19.2900 } }));
+      (await page.$$eval('.pick-fijo', e => e.length)) === 0);
+    await elegirPunto(page, 19.2900, -70.4800);
     await page.waitForTimeout(200);
-    check('tocar el mapa pone el pin y llena las coordenadas',
-      (await page.$$eval('.pick-pin', e => e.length)) === 1 &&
+    // LA PUNTA DEL PIN TIENE QUE CAER EN EL CENTRO DEL MAPA, no del contenedor.
+    // Se publica map.getCenter(), así que si el pin dibujado y ese centro se
+    // separan se publica un punto distinto del que se ve — y no se nota. Hoy
+    // coinciden porque .map-bar va absoluta y no ocupa alto; el día que alguien
+    // la ponga en el flujo, esto se pone en rojo en vez de mentir.
+    {
+      const m = await page.evaluate(() => {
+        const mapa = document.getElementById('admin-map').getBoundingClientRect();
+        const inner = document.querySelector('.pick-fijo .pick-inner');
+        if(!inner) return null;
+        const p = inner.getBoundingClientRect();
+        return { dx: Math.abs((p.left + p.width/2) - (mapa.left + mapa.width/2)),
+                 dy: Math.abs(p.bottom - (mapa.top + mapa.height/2)) };
+      });
+      check('la punta del pin cae en el centro EXACTO del mapa',
+        !!m && m.dx <= 1 && m.dy <= 1, JSON.stringify(m));
+    }
+    check('mover el mapa bajo el pin llena las coordenadas',
+      (await page.$$eval('.pick-fijo', e => e.length)) === 1 &&
       (await page.inputValue('#pub-lat')) === '19.29000',
       await page.inputValue('#pub-lat'));
     await page.click('.cat-choice[data-cat="accidente"]');
@@ -155,7 +184,7 @@ async function abrirPanel(browser, opciones = {}) {
       r.fulfill({ contentType:'application/json',
         body: JSON.stringify(REPORTES.concat([{ id:'r-nuevo', lat:19.2600, lng:-70.5000,
           photo:null, note:'', ts: Date.now(), category:'control', confirms:0, denies:0, approx:false }])) }));
-    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.50, lat:19.26 } }));
+    await elegirPunto(page, 19.26, -70.50);
     await page.waitForTimeout(150);
     await page.click('#publish-btn');
     await page.waitForTimeout(700);
@@ -188,14 +217,14 @@ async function abrirPanel(browser, opciones = {}) {
       borrados.length === 1 && borrados[0].id === 'r-uno', JSON.stringify(borrados));
 
     // Quitar el punto elegido
-    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.50, lat:19.25 } }));
+    await elegirPunto(page, 19.25, -70.50);
     await page.waitForTimeout(200);
     check('el botón de quitar punto aparece al elegir uno',
       !(await page.$eval('#pin-clear', el => el.hidden)));
     await page.click('#pin-clear');
     await page.waitForTimeout(200);
     check('quitar el punto borra el pin y vacía las coordenadas',
-      (await page.$$eval('.pick-pin', e => e.length)) === 0 &&
+      (await page.$$eval('.pick-fijo', e => e.length)) === 0 &&
       (await page.inputValue('#pub-lat')) === '');
     await ctx.close();
   }
@@ -206,7 +235,7 @@ async function abrirPanel(browser, opciones = {}) {
       respuesta: { ok:false, reason:'duplicate', id:null }
     });
     // Hay que elegir un punto antes: el formulario ya no arranca con uno.
-    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.53, lat:19.22 } }));
+    await elegirPunto(page, 19.22, -70.53);
     await page.waitForTimeout(150);
     await page.click('#publish-btn');
     await page.waitForTimeout(600);
@@ -224,7 +253,7 @@ async function abrirPanel(browser, opciones = {}) {
     const { ctx, page } = await abrirPanel(browser, {
       respuesta: { ok:false, reason:'rate_limit', id:null }
     });
-    await page.evaluate(() => window.__map.fire('click', { lngLat:{ lng:-70.53, lat:19.22 } }));
+    await elegirPunto(page, 19.22, -70.53);
     await page.waitForTimeout(150);
     await page.click('#publish-btn');
     await page.waitForTimeout(600);
