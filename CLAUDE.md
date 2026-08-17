@@ -144,7 +144,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 18 suites de Playwright, versionadas en el repo. **Leer
+- `tests/` — las 19 suites, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -154,7 +154,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   el doble de MapLibre que comparten todas (el sandbox bloquea el CDN y los
   tiles). **`tests` está en `.assetsignore`**: sin eso, con
   `assets.directory: "./"`, estos archivos se publicarían como servibles.
-- `tests/check-base-real.js` — el complemento de las 18: pega contra la base
+- `tests/check-base-real.js` — el complemento de las 19: pega contra la base
   **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
   mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
   entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
@@ -359,6 +359,66 @@ respondió `radius: 2000` y después `radius: 3500` sin redesplegar nada — o s
 que lo lee en vivo. Para eso el campo `radius` va en la respuesta: es la única
 forma de distinguir "tomó el valor nuevo" de "cayó al de por defecto". El
 `check` de la columna se comprobó rechazando un `update` a 10 (`23514`).
+
+## La tarjeta de WhatsApp dice dónde (v17.6)
+
+Pedido del usuario: que al compartir un reporte se vea **la dirección** y una
+**imagen de fondo**, en vez de la tarjeta chiquita con el logo.
+
+### La dirección sale de Nominatim, en el Worker
+
+`_worker.js` ya consultaba el reporte para armar el preview; ahora pide también
+`lat/lng/photo` y hace una geocodificación inversa. La tarjeta pasó de decir
+solo la categoría a decir **en qué calle**:
+
+```
+👮 Retén fijo en Calle María Trinidad Sánchez
+Reportado hace 5 min · Santo Domingo Savio, La Vega
+```
+
+Es lo que hace útil compartir el link: sin la calle, quien lo recibe no sabe
+si le queda de camino.
+
+- **Nominatim es gratis y sin key**, pero su política pide un `User-Agent`
+  identificable y castiga el abuso. Por eso se llama **solo en el camino de
+  bots** (poco frecuente, y WhatsApp cachea la tarjeta) y la respuesta se
+  cachea 24 h en el borde con `cf: { cacheTtl }`. Hay una prueba de que a un
+  usuario real no se le gasta una llamada.
+- **Si falla, se cae al texto de antes.** Nunca rompe el preview: es un
+  adorno, no un requisito.
+
+### La imagen: la foto real si la hay, y si no una tarjeta por categoría
+
+`og:image` apuntaba a `icon-512.png`, que es cuadrado y chico — por eso
+WhatsApp dibujaba la tarjeta angosta con el logo al costado. Ahora:
+
+1. **Si el reporte tiene foto**, va la foto. Es lo que mejor comunica y es
+   gratis: ya está pública en Storage.
+2. **Si no**, una de las cuatro `og-<categoria>.png` (1200×630), generadas
+   desde HTML con Playwright para que usen los mismos íconos y colores que la
+   app. El script está en el historial de la sesión, no en el repo: se
+   regeneran a mano si cambia el diseño.
+
+Y `twitter:card` pasó a `summary_large_image`. **Ojo con las medidas**:
+`og:image:width/height` se declaran **solo** para las tarjetas generadas. Con
+la foto de un reporte serían mentira —`compressImage` la deja en 480 px de
+ancho— y hay scrapers que descartan la imagen cuando no coincide.
+
+**Las filas viejas guardaban la foto como `data:` URL embebida** y eso no sirve
+como `og:image`, así que se exige explícitamente que empiece con `http`. Es el
+mismo cuidado que ya tienen el trigger de limpieza y el cliente.
+
+### Cobertura
+
+`tests/check-preview.js`, la **primera** que tiene el Worker — hasta acá se
+verificaba a mano con `curl` contra producción. No usa Playwright: importa
+`_worker.js` y le mockea el `fetch` y el binding `ASSETS`. Cubre los dos
+caminos de imagen, la caída de Nominatim, la categoría desconocida, y que el
+usuario real siga pasando de largo.
+
+**Lo que la suite NO puede ver**: cómo se ve la tarjeta de verdad en WhatsApp.
+Eso se prueba mandándose el link a uno mismo. Y ojo que **WhatsApp cachea el
+preview por URL**, así que para volver a probar hace falta un reporte nuevo.
 
 ## Preview dinámico por reporte (Cloudflare Worker)
 Cuando se comparte el link de un reporte puntual (`?r=<id>`) por WhatsApp,
@@ -2256,9 +2316,10 @@ protección ya resuelve sin piezas nuevas.
   comparando la lista de "Ignoring asset" contra el árbol real del repo;
   la primera versión del archivo (con `.git/`) NO excluía nada y hubiera
   publicado el repo entero. Verificado que el resultado final sube
-  exactamente 7 archivos: `amet-radar.html`, `admin.html`,
+  exactamente 11 archivos: `amet-radar.html`, `admin.html`,
   `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`,
-  `icon-badge.png`. **`**/.wrangler` está en la lista**: el propio
+  `icon-badge.png` y las cuatro `og-<categoria>.png` (las tarjetas del
+  preview, ver "La tarjeta de WhatsApp dice dónde"). **`**/.wrangler` está en la lista**: el propio
   `wrangler deploy --dry-run` crea ese directorio al bundlear y deja ahí
   el `_worker.js` con su **sourcemap** — wrangler ignora el `.js` solo,
   no el `.map`, así que sin esa línea un despliegue hecho a mano desde
