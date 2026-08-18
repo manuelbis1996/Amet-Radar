@@ -47,7 +47,7 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 - **Panel de administración** (`admin.html`), con el borrado y la edición de
   parámetros detrás de Edge Functions con password.
 - **PWA instalable**; mapa limitado a República Dominicana.
-- **18 suites de Playwright** versionadas en `tests/`, más
+- **20 suites de Playwright** versionadas en `tests/`, más
   `check-base-real.js` contra la base real, con su workflow semanal.
 
 ---
@@ -232,14 +232,17 @@ llegara; y **el preview de WhatsApp roto justo para quien instala la PWA**
 y poder compartir la app sin tener ningún reporte. Detalle en `CLAUDE.md`,
 "El arranque en frío (v17.0)".
 
-**🟡 Prompt de instalación (`beforeinstallprompt`)**
-La app es instalable pero nunca lo sugiere, y una PWA instalada es lo que hace
-que el push sirva de verdad. Quedó afuera de v17.0 a propósito: no es una
-línea sino una superficie (heurísticas de engagement en Chrome, persistir el
-descarte, y en iOS no existe el evento — hay que explicar "Compartir → Añadir a
-pantalla de inicio"). Además **no se puede probar con el mock**: el evento no
-dispara en Chromium headless.
-- Esfuerzo: medio. Es lo siguiente si v17.0 mueve la aguja.
+**✅ Prompt de instalación — hecho** (v17.7)
+La app era instalable pero nunca lo sugería, y una PWA instalada es lo que hace
+que el push sirva de verdad. Se ofrece en la **segunda apertura** (la primera
+no, para no romper "onboarding discreto" ni encimarse con la bienvenida), una
+sola vez: "Ahora no", "Instalar" y cerrar tocando afuera cuentan igual. En
+iPhone no existe el evento, así que se explica el camino a mano en vez de
+mostrar un botón que no haría nada. Lo que se anticipó acá se confirmó: **el
+evento no dispara en Chromium headless**, así que `check-instalar.js` despacha
+uno sintético y prueba nuestra lógica, no la del navegador — que la
+instalación ocurra de verdad solo se ve en un teléfono. Detalle en `CLAUDE.md`,
+"Ofrecer instalar la app (v17.7)".
 
 **✅ El push podía morir en silencio — cerrado** (v17.1)
 Dos cosas, y las dos eran fallos invisibles. (1) Los tres triggers de `pg_net`
@@ -280,8 +283,8 @@ recuperan solos — y `daily_stats` es el único histórico que tiene el proyect
    prioridad que queda**, y es condicional: no hay nada que hacer hasta que el
    egreso moleste.
 7. ~~**El embudo del día 1**~~ ✅ hecho (v17.0)
-8. **Prompt de instalación** y **saber que el push sigue vivo** — los dos que
-   dejó abiertos v17.0, en ese orden.
+8. ~~**Prompt de instalación**~~ ✅ hecho (v17.7). Queda **saber que el push
+   sigue vivo** desde el panel, el otro que dejó abierto v17.0.
 9. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
    editar reporte propio).
 

@@ -144,7 +144,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 19 suites, versionadas en el repo. **Leer
+- `tests/` — las 20 suites, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -154,7 +154,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   el doble de MapLibre que comparten todas (el sandbox bloquea el CDN y los
   tiles). **`tests` está en `.assetsignore`**: sin eso, con
   `assets.directory: "./"`, estos archivos se publicarían como servibles.
-- `tests/check-base-real.js` — el complemento de las 19: pega contra la base
+- `tests/check-base-real.js` — el complemento de las 20: pega contra la base
   **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
   mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
   entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
@@ -359,6 +359,63 @@ respondió `radius: 2000` y después `radius: 3500` sin redesplegar nada — o s
 que lo lee en vivo. Para eso el campo `radius` va en la respuesta: es la única
 forma de distinguir "tomó el valor nuevo" de "cayó al de por defecto". El
 `check` de la columna se comprobó rechazando un `update` a 10 (`23514`).
+
+## Ofrecer instalar la app (v17.7)
+
+La app era instalable **desde siempre** (manifest + service worker) y nunca lo
+sugería, así que se quedaba en pestaña del navegador. Instalada cambian dos
+cosas concretas: queda un ícono en la pantalla de inicio —deja de depender de
+que se acuerden de la URL o encuentren el link viejo de WhatsApp— y las
+notificaciones push funcionan de verdad, que es **el único mecanismo de
+retención del proyecto**. Es la pieza que el plan de v17.0 dejó explícitamente
+afuera ("es un cuarto frente; entra en el próximo incremento si este
+funciona").
+
+### Se ofrece en la SEGUNDA apertura, no en la primera
+
+Es la decisión central y roza una regla ya escrita: *"onboarding discreto, sin
+banner/modal al abrir la app la primera vez"*. Se respeta el espíritu — la
+primera vez no aparece nada — y quien vuelve ya mostró interés. De paso no se
+encima con las otras dos cosas que hoy pueden salir: la bienvenida (primera
+apertura) y la oferta de avisos (después del primer reporte).
+
+- El contador vive en `localStorage` (`amet_aperturas_v1`) y se incrementa una
+  vez por carga; la respuesta se recuerda en `amet_install_asked_v1`.
+- **Se marca como preguntado ANTES de mostrar la hoja**, no en los botones.
+  Así "Ahora no", "Instalar" y cerrar tocando afuera cuentan los tres igual:
+  se ofrece **una vez y nunca más**. Insistir es justo lo que hace que la
+  gente aprenda a descartar sin leer.
+- No se ofrece si ya está instalada (`display-mode: standalone` o
+  `navigator.standalone`), ni si hay una hoja abierta, ni con la ficha de un
+  reporte a la vista — quien llega por un link compartido viene a ver ese
+  reporte.
+
+### `beforeinstallprompt` se frena, y el evento se usa UNA vez
+
+`e.preventDefault()` no es opcional: sin eso Chrome muestra su propia barra
+cuando quiere y perdemos el control de cuándo se pregunta. El evento guardado
+sirve **una sola vez**, así que se pone en `null` antes de llamar a `prompt()`
+— reusarlo tira. `appinstalled` también marca la clave, para que un usuario
+que instale por el menú del navegador no reciba la oferta después.
+
+### En iPhone no hay API: se explica el camino
+
+Safari no emite `beforeinstallprompt` ni deja disparar la instalación desde la
+página. La única salida honesta es señalar dónde está la opción (Compartir →
+Añadir a pantalla de inicio). **No se muestra un botón "Instalar"** que no
+haría nada. Como no hay evento al que engancharse, en iOS se intenta por
+tiempo (2,5 s, después de la bienvenida y del primer sondeo). El chequeo de
+iOS excluye Chrome y Firefox de iPhone (`crios`/`fxios`), donde el camino es
+distinto.
+
+### Lo que la suite NO puede ver
+
+`beforeinstallprompt` **no dispara en Chromium headless**: solo lo emite Chrome
+real tras sus heurísticas de engagement. `tests/check-instalar.js` despacha un
+evento sintético con la misma forma, así que prueba **nuestra** lógica (cuándo
+se ofrece, cuántas veces, qué pasa al aceptar), no que el navegador lo emita ni
+que la instalación ocurra. Eso solo se ve en un teléfono. Las seis guardas se
+verificaron en rojo revirtiendo cada una por separado.
 
 ## La tarjeta de WhatsApp dice dónde (v17.6)
 

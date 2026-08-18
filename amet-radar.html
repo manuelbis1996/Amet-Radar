@@ -616,7 +616,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v17.3';
+  const APP_VERSION = 'v17.7';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -2906,6 +2906,102 @@
     }, 600));
   }
   programarBienvenida();
+
+  // ---- Instalar la app en la pantalla de inicio ----
+  //
+  // POR QUÉ IMPORTA. La app es instalable desde siempre (manifest + service
+  // worker) pero nunca lo sugería, así que se quedaba en pestaña del
+  // navegador. Instalada cambia dos cosas concretas: queda un ícono en la
+  // pantalla de inicio (deja de depender de que se acuerden de la URL) y las
+  // notificaciones push funcionan de verdad — que es el único mecanismo de
+  // retención que tiene el proyecto.
+  //
+  // CUÁNDO SE OFRECE. En la SEGUNDA apertura, no en la primera. Quien vuelve
+  // ya mostró interés, y así no se encima con la bienvenida ni con la oferta
+  // de avisos (que llega después del primer reporte). Sigue respetando
+  // "onboarding discreto, sin banner/modal al abrir": no hay nada al abrir la
+  // primera vez, y esto se muestra UNA sola vez y se puede ignorar.
+  const INSTALL_KEY = 'amet_install_asked_v1';
+  const APERTURAS_KEY = 'amet_aperturas_v1';
+  let promptInstalar = null;
+
+  function yaInstalada(){
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+      || window.navigator.standalone === true;
+  }
+  // iOS no tiene beforeinstallprompt NI forma de disparar la instalación desde
+  // la página: la única vía es explicarle al usuario dónde está la opción.
+  function esIOS(){
+    return /iphone|ipad|ipod/i.test(navigator.userAgent)
+      && !/crios|fxios/i.test(navigator.userAgent);
+  }
+  function aperturas(){
+    try{
+      const n = (parseInt(localStorage.getItem(APERTURAS_KEY), 10) || 0) + 1;
+      localStorage.setItem(APERTURAS_KEY, String(n));
+      return n;
+    }catch(e){ return 1; }
+  }
+  const APERTURAS = aperturas();
+
+  function marcarInstalarPreguntado(){
+    try{ localStorage.setItem(INSTALL_KEY, '1'); }catch(e){}
+  }
+
+  function quizasOfrecerInstalar(){
+    if(yaInstalada()) return;
+    if(APERTURAS < 2) return;              // recién en la segunda vuelta
+    if(!promptInstalar && !esIOS()) return; // el navegador no la puede instalar
+    try{ if(localStorage.getItem(INSTALL_KEY)) return; }catch(e){ return; }
+    const ov = document.getElementById('flow-overlay');
+    if(ov && !ov.hidden) return;            // no encimarle una hoja a otra
+    if(!detailEl.hidden) return;            // ni tapar un reporte compartido
+    marcarInstalarPreguntado();
+
+    if(promptInstalar){
+      renderSheet(`
+        <h2>Tenla a mano</h2>
+        <p class="sub">Instálala en tu pantalla de inicio: se abre de un toque, arranca aun sin señal, y los avisos de retenes te llegan con la app cerrada.</p>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="inst-no">Ahora no</button>
+          <button class="btn btn-primary" id="inst-si">Instalar</button>
+        </div>
+      `);
+      document.getElementById('inst-no').addEventListener('click', closeOverlay);
+      document.getElementById('inst-si').addEventListener('click', async () => {
+        closeOverlay();
+        const p = promptInstalar;
+        promptInstalar = null; // el evento se puede usar UNA sola vez
+        try{ await p.prompt(); }catch(e){}
+      });
+      return;
+    }
+
+    // iOS: no hay API, solo se puede señalar dónde está.
+    renderSheet(`
+      <h2>Tenla a mano</h2>
+      <p class="sub">En iPhone se agrega desde el navegador: toca <b>Compartir</b> abajo y después <b>Añadir a pantalla de inicio</b>.</p>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="inst-ok" style="width:100%;">Entendido</button>
+      </div>
+    `);
+    document.getElementById('inst-ok').addEventListener('click', closeOverlay);
+  }
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    // Sin preventDefault, Chrome muestra su propia barra de instalación y
+    // perdemos el control de cuándo se pregunta.
+    e.preventDefault();
+    promptInstalar = e;
+    quizasOfrecerInstalar();
+  });
+  window.addEventListener('appinstalled', () => {
+    promptInstalar = null;
+    marcarInstalarPreguntado();
+  });
+  // En iOS el evento no existe, así que hay que intentarlo por tiempo. Se
+  // espera a que la bienvenida y el primer sondeo hayan pasado.
+  if(esIOS()) setTimeout(quizasOfrecerInstalar, 2500);
 
   // ---- PWA: service worker (requiere servir por http/https, no file://) ----
   if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
