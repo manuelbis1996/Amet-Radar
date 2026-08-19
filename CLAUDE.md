@@ -144,7 +144,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 20 suites, versionadas en el repo. **Leer
+- `tests/` — las 21 suites, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -154,7 +154,12 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   el doble de MapLibre que comparten todas (el sandbox bloquea el CDN y los
   tiles). **`tests` está en `.assetsignore`**: sin eso, con
   `assets.directory: "./"`, estos archivos se publicarían como servibles.
-- `tests/check-base-real.js` — el complemento de las 20: pega contra la base
+- `tests/check-acerca.js` — la hoja "Acerca de" (v17.8). Cubre lo que dice, que
+  las dos entradas la abran, que la topbar de tres botones siga entrando en
+  320 px, que `admin.html` tenga `noindex`, y sobre todo que **el correo no
+  quede escrito entero en el HTML servido** (lee el archivo del repo, no el
+  DOM).
+- `tests/check-base-real.js` — el complemento de las 21: pega contra la base
   **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
   mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
   entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
@@ -359,6 +364,66 @@ respondió `radius: 2000` y después `radius: 3500` sin redesplegar nada — o s
 que lo lee en vivo. Para eso el campo `radius` va en la respuesta: es la única
 forma de distinguir "tomó el valor nuevo" de "cayó al de por defecto". El
 `check` de la columna se comprobó rechazando un `update` a 10 (`23514`).
+
+## Quién hay detrás, y qué datos usa (v17.8)
+
+Hasta acá la app **no tenía ningún canal de contacto**. Alguien que el día 1
+encontrara un error, tuviera una idea o simplemente quisiera saber quién está
+detrás, no tenía a dónde escribir — y en una app que se difunde por WhatsApp
+entre vecinos, "esto quién lo hizo" es una pregunta que se hace mucha gente
+antes de instalar nada.
+
+La hoja `openAboutSheet()` hace **tres trabajos en una sola pantalla**, y ese
+es el punto: cualquiera de los tres por separado no justificaba una pantalla
+nueva, los tres juntos sí.
+
+1. **Contacto y autoría.** Manuelbis, ingeniero en software, con correo y
+   GitHub. Es también la puerta para que la app sirva de carta de
+   presentación.
+2. **Privacidad.** No es relleno legal: la app pide **GPS y notificaciones**, y
+   guarda `lat/lng` en `push_subscriptions`. Pedir esos dos permisos sin decir
+   qué se hace con ellos es justo lo que empuja a rechazarlos. Y acá hay algo
+   real que contar, no una plantilla: no hay cuentas, los reportes se
+   autoexpiran, y **la IP se guarda hasheada y sin vínculo con el reporte**
+   (ver "Anti-spam del lado del servidor"). Todo lo que dice esa sección es
+   verificable contra el esquema; si algún día se agrega una columna que ate
+   una persona a un reporte, **hay que cambiar ese texto en el mismo commit**.
+3. **Encuadre.** Que quede por escrito que los reportes los publica la
+   comunidad, no están verificados, y que no se use el teléfono manejando.
+
+### El correo no está escrito en el fuente, y hay una prueba que lo vigila
+
+`CONTACTO_USUARIO` y `CONTACTO_DOMINIO` son dos constantes separadas y el
+correo se arma en runtime con `String.fromCharCode(64)`. Una página pública e
+indexada se scrapea, y un `mailto:` literal en el HTML servido es spam
+garantizado sobre un correo personal. `check-acerca.js` lee **el archivo del
+repo** y falla si la cadena completa aparece ahí — o sea que la protección no
+depende de que alguien se acuerde: si se "simplifica" a un mailto literal, el
+CI se pone en rojo.
+
+### Dos entradas, y ninguna es un banner
+
+- **Botón ⓘ en la topbar** — la vía permanente. Es el **tercer** botón de esa
+  fila (antes eran dos), así que la suite mide a 320 px que la marca no se
+  solape con los botones ni la barra se salga de pantalla.
+- **Enlace al pie de la bienvenida** — es la única atención garantizada que
+  tiene la app, y quien llega nuevo se entera de que hay alguien detrás sin
+  tener que buscarlo.
+
+Se respeta la regla de siempre: **no hay ningún banner ni modal nuevo al
+abrir**. La hoja solo aparece si la tocan.
+
+### `admin.html` lleva `noindex`, y no un `robots.txt`
+
+El panel se sirve desde el mismo origen público que la app: en cuanto el link
+circule, los buscadores pueden llegar. El password protege las acciones, pero
+no hay razón para que la pantalla de moderación salga en una búsqueda.
+
+**Se hizo con `<meta name="robots" content="noindex, nofollow">` y NO con un
+`robots.txt`** — a propósito: un `Disallow: /admin.html` *publica* la ruta a
+cualquiera que lea el archivo, que es exactamente lo contrario de lo que se
+busca. Es el error clásico. No hay ningún enlace a `admin.html` desde la app,
+así que la meta alcanza.
 
 ## Ofrecer instalar la app (v17.7)
 
