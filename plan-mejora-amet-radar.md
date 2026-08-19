@@ -47,7 +47,7 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 - **Panel de administración** (`admin.html`), con el borrado y la edición de
   parámetros detrás de Edge Functions con password.
 - **PWA instalable**; mapa limitado a República Dominicana.
-- **20 suites de Playwright** versionadas en `tests/`, más
+- **21 suites de Playwright** versionadas en `tests/`, más
   `check-base-real.js` contra la base real, con su workflow semanal.
 
 ---
@@ -255,6 +255,18 @@ publicaba la sonda, que dispara el push de verdad, pero **no miraba el
 resultado**; ahora llama a `notify-nearby` por el mismo camino y con la misma
 key que el trigger. Detalle en `CLAUDE.md`, "La key legacy de los triggers".
 
+**✅ Nadie sabía quién hizo la app ni qué datos usa — hecho** (v17.8)
+La app no tenía **ningún canal de contacto**: quien encontrara un error el día
+1 no tenía a dónde escribir. La hoja "Acerca de" (botón ⓘ en la topbar + enlace
+al pie de la bienvenida) resuelve eso y dos cosas más que hacían falta igual:
+decir **qué se guarda** —la app pide GPS y notificaciones, y no explicarlo es
+lo que empuja a rechazarlos— y dejar por escrito que los reportes son de la
+comunidad, no están verificados, y que no se use el teléfono manejando. El
+correo se arma en runtime y **no aparece escrito en el HTML servido**, con una
+prueba que lo vigila. De paso, `admin.html` lleva `noindex` (y no un
+`robots.txt`, que publicaría la ruta). Detalle en `CLAUDE.md`, "Quién hay
+detrás, y qué datos usa".
+
 **🟢 Salud del push en el panel**
 Lo que queda de ese frente: el panel muestra uso, no salud. Un indicador de
 "último push enviado / cuántos fallaron" necesitaría que algo lo registre, o
@@ -285,8 +297,9 @@ recuperan solos — y `daily_stats` es el único histórico que tiene el proyect
 7. ~~**El embudo del día 1**~~ ✅ hecho (v17.0)
 8. ~~**Prompt de instalación**~~ ✅ hecho (v17.7). Queda **saber que el push
    sigue vivo** desde el panel, el otro que dejó abierto v17.0.
-9. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
-   editar reporte propio).
+9. ~~**Acerca de / contacto / privacidad**~~ ✅ hecho (v17.8)
+10. Resto (imagen OG dinámica, colapsar notificaciones, teclado en el picker,
+    editar reporte propio).
 
 **Condicional, fuera del orden**: si algún día se reactiva `FLUJO_CON_FOTO`
 (la foto **antes** de publicar), hay que revisar la moderación de nuevo — la

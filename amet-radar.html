@@ -439,6 +439,53 @@
   .welcome-list{ list-style:none; margin:0 0 16px; padding:0; display:flex; flex-direction:column; gap:11px; }
   .welcome-list li{ font-size:13.5px; line-height:1.5; color:var(--muted); }
   .welcome-list b{ color:var(--text); font-weight:700; }
+  /* Enlace de texto dentro de una hoja. Va como <button> y no como <a>
+     porque no navega a ningún lado: abre otra hoja. */
+  .sheet-link{
+    display:block; width:100%; margin-top:14px; padding:6px 0;
+    background:none; border:none; cursor:pointer;
+    font:inherit; font-size:12.5px; color:var(--muted); text-decoration:underline;
+    text-underline-offset:3px;
+  }
+
+  /* ---- Hoja "Acerca de" ---- */
+  /* Hace tres trabajos en una sola pantalla: decir quién hizo la app y cómo
+     escribirle, decir qué se guarda (la app pide GPS y notificaciones: no
+     explicarlo es lo que hace que la gente los rechace) y dejar por escrito
+     que los reportes son de la comunidad y no están verificados. */
+  .about-sec{ margin-bottom:16px; }
+  .about-sec:last-of-type{ margin-bottom:0; }
+  .about-h{
+    display:flex; align-items:center; gap:7px; margin:0 0 7px;
+    font-size:12px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;
+    color:var(--text);
+  }
+  .about-h .ico{ width:15px; height:15px; color:var(--brand); flex-shrink:0; }
+  .about-sec p{ margin:0; font-size:13px; line-height:1.55; color:var(--muted); }
+  .about-sec p + p{ margin-top:7px; }
+  .about-sec b{ color:var(--text); font-weight:600; }
+  /* La lista de privacidad: lo que SÍ y lo que NO, que es la parte que
+     construye confianza. El guion va como pseudo-elemento para que copiar el
+     texto no se lo lleve. */
+  .about-list{ list-style:none; margin:7px 0 0; padding:0; display:flex; flex-direction:column; gap:5px; }
+  .about-list li{ position:relative; padding-left:14px; font-size:12.5px; line-height:1.5; color:var(--muted); }
+  .about-list li::before{ content:'·'; position:absolute; left:4px; color:var(--brand); font-weight:700; }
+  /* Aviso: no es un error, así que no va en rojo; es el tono de "leelo una
+     vez". El borde de la izquierda alcanza para separarlo del resto. */
+  .about-nota{
+    border-left:3px solid var(--brand); padding:2px 0 2px 11px;
+  }
+  .about-contacto{
+    display:flex; flex-direction:column; gap:8px; margin-top:10px;
+  }
+  .about-contacto a{
+    display:flex; align-items:center; gap:9px; min-height:var(--tap);
+    padding:0 13px; border-radius:12px;
+    background:var(--surface-2); color:var(--text); text-decoration:none;
+    font-size:13.5px; font-weight:600; word-break:break-all;
+  }
+  .about-contacto a .ico{ width:17px; height:17px; color:var(--brand); flex-shrink:0; }
+  .about-ver{ margin-top:14px; text-align:center; font-size:11.5px; color:var(--muted); }
 
   /* ---- Flujo de publicación ---- */
   .cat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
@@ -576,6 +623,9 @@
         <button id="share-app-btn" class="topbar-btn" aria-label="Compartir AMET Radar" title="Compartir AMET Radar">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51L8.59 10.49"/></svg>
         </button>
+        <button id="about-btn" class="topbar-btn" aria-label="Acerca de AMET Radar" title="Acerca de AMET Radar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11.4v4.8"/><path d="M12 8h.01"/></svg>
+        </button>
         <button id="push-toggle-btn" class="topbar-btn" data-state="inactive" aria-label="Avisarme de retenes cerca" title="Avisarme de retenes cerca" hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         </button>
@@ -616,7 +666,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v17.7';
+  const APP_VERSION = 'v17.8';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -1223,6 +1273,12 @@
     ruta:        '<path d="M8.5 3L5 21"/><path d="M15.5 3L19 21"/><path d="M12 4.5v2.8"/><path d="M12 11v2.8"/><path d="M12 17.5v2.8"/>',
     alerta:      '<circle cx="12" cy="12" r="9"/><path d="M12 7.6v5"/><path d="M12 16.2h.01"/>',
     rayo:        '<path d="M13.5 2.5L4.8 13.6h6L9.9 21.5l9.3-11.9h-6.4z"/>',
+    // Info: es `alerta` dado vuelta (punto arriba, trazo abajo). Conviene que
+    // se distingan, porque los dos son un círculo a primera vista.
+    info:        '<circle cx="12" cy="12" r="9"/><path d="M12 11.4v4.8"/><path d="M12 8h.01"/>',
+    correo:      '<rect x="2.5" y="4.8" width="19" height="14.4" rx="2.4"/><path d="M3.2 6.2l8.8 6.4 8.8-6.4"/>',
+    codigo:      '<path d="M8.6 8.2L4 12l4.6 3.8"/><path d="M15.4 8.2L20 12l-4.6 3.8"/><path d="M13.4 4.6l-2.8 14.8"/>',
+    escudoOk:    '<path d="M12 2.6l7.4 2.7v5.5c0 4.6-3.1 8-7.4 10.2-4.3-2.2-7.4-5.6-7.4-10.2V5.3z"/><path d="M9.2 11.9l1.9 1.9 3.7-3.8"/>',
     // Es el mismo trazo que CAM_SVG, que existe aparte porque va colgado del
     // marcador con su propio contenedor y tamaño.
     camara:      '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>'
@@ -2846,6 +2902,74 @@
     }
   }
 
+  // ---- Hoja "Acerca de" ----
+  // Hasta v17.8 la app no tenía NINGÚN canal de contacto: alguien que
+  // encontrara un problema el día 1 no tenía a dónde escribir. Esta hoja
+  // resuelve eso y dos cosas más que hacían falta igual:
+  //
+  //  1. Privacidad. La app pide GPS y notificaciones, y guarda lat/lng en
+  //     push_subscriptions. Pedir esos dos permisos sin decir qué se hace con
+  //     ellos es justo lo que empuja a rechazarlos. Y acá hay algo real que
+  //     contar: no hay cuentas, los reportes se autoexpiran y la IP se guarda
+  //     hasheada y SIN vínculo con el reporte (ver "Anti-spam del lado del
+  //     servidor" en CLAUDE.md) — o sea que ni con la base entera se puede
+  //     saber quién reportó qué.
+  //  2. Encuadre. Que quede por escrito que los reportes los publica la
+  //     comunidad y no están verificados, y que no se use el teléfono
+  //     manejando. Dos líneas, y es lo honesto.
+  //
+  // El correo NO va escrito entero en ningún lado del archivo: se arma en
+  // tiempo de ejecución desde dos constantes. Una página pública indexada se
+  // scrapea, y un mailto en texto plano en el fuente es spam garantizado.
+  const CONTACTO_USUARIO = 'manuelbis1996';
+  const CONTACTO_DOMINIO = 'gmail.com';
+  const CONTACTO_GITHUB  = 'manuelbis1996';
+  const correoContacto = () => CONTACTO_USUARIO + String.fromCharCode(64) + CONTACTO_DOMINIO;
+
+  function openAboutSheet(){
+    const correo = correoContacto();
+    renderSheet(`
+      <h2>Acerca de AMET Radar</h2>
+      <p class="sub">Reportes de retenes de tránsito en La Vega, hechos por la comunidad.</p>
+
+      <div class="about-sec">
+        <h3 class="about-h">${ico('ojo')} Cómo funciona</h3>
+        <p>Cuando alguien ve un retén lo marca en el mapa, y el resto puede confirmar si sigue ahí o si ya no está. Los reportes <b>se borran solos</b> a las pocas horas, así que lo que ves es lo que está pasando ahora.</p>
+        <div class="about-nota" style="margin-top:10px;">
+          <p><b>Ojo:</b> los reportes los publica la gente, no están verificados y pueden estar equivocados o desactualizados. <b>No uses el teléfono mientras manejas.</b></p>
+        </div>
+      </div>
+
+      <div class="about-sec">
+        <h3 class="about-h">${ico('escudoOk')} Tu privacidad</h3>
+        <p>La app funciona <b>sin cuentas y sin registro</b>: nunca te pedimos tu nombre, tu teléfono ni tu correo.</p>
+        <ul class="about-list">
+          <li>Tu ubicación se usa para mostrarte el mapa y para avisarte si hay un retén cerca. <b>No se guarda tu recorrido.</b></li>
+          <li>Al publicar un reporte se guarda solo el punto, la hora y la categoría. <b>No queda registrado quién lo publicó.</b></li>
+          <li>Para frenar el spam se guarda una huella de tu conexión, <b>cifrada y sin ningún vínculo con tu reporte</b>.</li>
+          <li>Si activas los avisos guardamos la última zona donde estuviste, para saber a quién avisarle. Puedes desactivarlos cuando quieras desde la campana.</li>
+        </ul>
+      </div>
+
+      <div class="about-sec">
+        <h3 class="about-h">${ico('codigo')} Quién la hizo</h3>
+        <p>La hizo <b>Manuelbis</b>, ingeniero en software. Es un proyecto propio, gratis y sin publicidad, hecho para La Vega.</p>
+        <p>¿Encontraste un error, tienes una idea, o quieres que trabajemos juntos en un proyecto? Escríbeme:</p>
+        <div class="about-contacto">
+          <a id="about-mail" href="mailto:${correo}?subject=AMET%20Radar">${ico('correo')}<span>${correo}</span></a>
+          <a href="https://github.com/${CONTACTO_GITHUB}" target="_blank" rel="noopener">${ico('codigo')}<span>github.com/${CONTACTO_GITHUB}</span></a>
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-top:18px;">
+        <button class="btn btn-primary" id="about-ok" style="width:100%;">Cerrar</button>
+      </div>
+      <p class="about-ver">Versión ${APP_VERSION}</p>
+    `);
+    document.getElementById('about-ok').addEventListener('click', closeOverlay);
+  }
+  document.getElementById('about-btn').addEventListener('click', openAboutSheet);
+
   // ---- Bienvenida, una sola vez ----
   // Al abrir la app por primera vez no había nada que explicara para qué
   // sirve: solo un mapa y dos botones. Va acá abajo del todo a propósito,
@@ -2869,8 +2993,13 @@
         <button class="btn btn-primary" id="welcome-ok" style="width:100%;">Entendido</button>
       </div>
       <button class="mini-btn primary" style="width:100%;" id="welcome-share">Compartir con mis contactos</button>
+      <button class="sheet-link" id="welcome-about">Quién hizo esta app y qué datos usa</button>
     `);
     document.getElementById('welcome-ok').addEventListener('click', closeOverlay);
+    // El botón ⓘ de la topbar es la vía permanente, pero acá está la única
+    // atención garantizada que tiene la app: quien llega nuevo se entera de
+    // que hay alguien detrás y de qué se guarda, sin tener que buscarlo.
+    document.getElementById('welcome-about').addEventListener('click', openAboutSheet);
     // La app se hace conocida por boca a boca; este es el único momento
     // garantizado de atención que tiene, y sin reportes en el mapa el botón
     // de compartir de la ficha no existe todavía.

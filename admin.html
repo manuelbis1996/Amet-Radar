@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#12141a">
+<!-- El panel se sirve desde el mismo origen público que la app, así que en
+     cuanto el link circule los buscadores pueden llegar acá. El password
+     protege las acciones (borrar, editar config), pero no hay ninguna razón
+     para que la pantalla de moderación aparezca en una búsqueda. Se hace con
+     esta meta y NO con un robots.txt: un `Disallow: /admin.html` publicaría
+     la ruta a quien lea el archivo, que es lo contrario de lo que se busca. -->
+<meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="icon-192.png">
 <title>AMET Radar — Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
