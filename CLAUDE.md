@@ -365,6 +365,62 @@ que lo lee en vivo. Para eso el campo `radius` va en la respuesta: es la única
 forma de distinguir "tomó el valor nuevo" de "cayó al de por defecto". El
 `check` de la columna se comprobó rechazando un `update` a 10 (`23514`).
 
+## La campana se salía de la pantalla (v17.10)
+
+Reportado por el usuario ("el botón de arriba se está metiendo el de la
+campanita en móvil"). La topbar desbordaba y **la campana —el último botón—
+quedaba literalmente fuera del viewport**: 47 px afuera a 360 px de ancho y
+17 px a 390 px, o sea los dos anchos de teléfono más comunes.
+
+**Por qué apareció recién ahora**: v17.8 sumó el botón ⓘ y la fila pasó de dos
+botones a tres, de 96 px a 148 px. Con la marca completa ya no entraba.
+
+**Por qué nada en la fila cedía**: `.brand-name` y `.brand-count` van con
+`white-space:nowrap` y los botones con `flex-shrink:0`, así que ningún
+elemento podía encogerse. El sobrante se iba para afuera.
+
+### La prueba existía y medía el único ancho donde el bug no aparece
+
+Esto es lo más útil de todo el episodio. `check-acerca.js` ya comprobaba que
+la topbar entrara… **solo a 320 px**. Y hay un `@media (max-width: 359px)` que
+**oculta `.brand-count`**, o sea que a 320 px la marca es 83 px más angosta que
+en cualquier teléfono real. La guarda apuntaba justo al hueco donde el
+problema no puede pasar, y encima medía con el mapa vacío (`0 en vista`),
+cuando el contador se ensancha con los dígitos.
+
+La lección para la próxima medición de layout: **un solo ancho no es una
+prueba de layout**, y menos si es el ancho que activa un `@media` propio.
+Ahora se mide en 320/360/390/412 y con 128 reportes en pantalla.
+
+### El arreglo son DOS capas, y cada una tiene su guarda
+
+1. **Estructural (la que importa)**: `.brand` pasó a `min-width:0` +
+   `overflow:hidden`, y `.brand-name` a `text-overflow:ellipsis`. Así la que
+   cede es la marca —lo único recortable sin perder una función— y **ningún
+   botón puede irse de la pantalla**, pase lo que pase con la fuente del
+   sistema o si algún día se suma un cuarto botón.
+2. **Cosmética**: el contador se oculta hasta 429 px en vez de hasta 359 px.
+   El número sale de medir: con el contador hacen falta ~409 px, así que
+   recién a partir de 430 px (el teléfono más ancho que se usa) sobra lugar.
+
+**Se sacrifica el contador y no otra cosa** porque los tres botones son
+acciones y ninguno puede bajar de 44 px (mínimo táctil), mientras que "cuántos
+hay en vista" ya lo dicen los marcadores del mapa.
+
+A 320 px el nombre entraba por 6 px de diferencia, así que en ese rango se
+aprieta el relleno del pill: la elipsis queda como **último recurso**, no como
+el aspecto normal.
+
+**La capa 1 necesitó una guarda propia a 280 px**, porque en los anchos
+normales la capa 2 la tapa: quitar `min-width:0` no rompía nada visible con el
+contador ya oculto. A 280 px nada alcanza, así que ahí se comprueba lo único
+que importa — que ceda la marca y no se vaya un botón. Verificado en rojo
+revirtiendo cada capa por separado.
+
+**La versión sube el decimal a v17.10 y no a v18.0**: es un arreglo de layout,
+y la regla del proyecto reserva el entero para rediseños o features. El minor
+es un contador, no un decimal — después de `.9` viene `.10`.
+
 ## La campana respondía a veces y mentía siempre (v17.9)
 
 Reportado por el usuario ("los botones de la campanita están mal
