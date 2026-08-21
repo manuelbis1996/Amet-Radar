@@ -47,7 +47,7 @@ Prioridad: 🔴 Alta · 🟡 Media · 🟢 Baja
 - **Panel de administración** (`admin.html`), con el borrado y la edición de
   parámetros detrás de Edge Functions con password.
 - **PWA instalable**; mapa limitado a República Dominicana.
-- **21 suites de Playwright** versionadas en `tests/`, más
+- **22 suites de Playwright** versionadas en `tests/`, más
   `check-base-real.js` contra la base real, con su workflow semanal.
 
 ---
@@ -162,7 +162,7 @@ por teclado: los inputs de coordenadas son la fuente de verdad.)
 ## 5. Calidad y DX
 
 **✅ Cero tests — resuelto**
-14 suites de Playwright versionadas en `tests/`, con `node tests/run.js` —
+22 suites de Playwright versionadas en `tests/`, con `node tests/run.js` —
 incluida `check-admin-publicar.js`, la primera que cubre `admin.html`. Aparte
 va `check-base-real.js`, que sí llega a Postgres.
 

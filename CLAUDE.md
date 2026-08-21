@@ -144,7 +144,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 21 suites, versionadas en el repo. **Leer
+- `tests/` — las 22 suites, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -159,7 +159,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   320 px, que `admin.html` tenga `noindex`, y sobre todo que **el correo no
   quede escrito entero en el HTML servido** (lee el archivo del repo, no el
   DOM).
-- `tests/check-base-real.js` — el complemento de las 21: pega contra la base
+- `tests/check-base-real.js` — el complemento de las 22: pega contra la base
   **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
   mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
   entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
@@ -364,6 +364,76 @@ respondió `radius: 2000` y después `radius: 3500` sin redesplegar nada — o s
 que lo lee en vivo. Para eso el campo `radius` va en la respuesta: es la única
 forma de distinguir "tomó el valor nuevo" de "cayó al de por defecto". El
 `check` de la columna se comprobó rechazando un `update` a 10 (`23514`).
+
+## La campana respondía a veces y mentía siempre (v17.9)
+
+Reportado por el usuario ("los botones de la campanita están mal
+configurados"). Eran **tres** defectos distintos y los tres silenciosos, que es
+lo que los hacía difíciles de ver: ninguno tira un error, ninguno aparece en
+consola, y las 21 suites estaban en verde.
+
+### 1. La campana podía quedar visible pero MUDA
+
+`initPushUI()` la mostraba al instante (`pushToggleBtn.hidden = false`) pero
+enganchaba el listener del click **después** de `await
+navigator.serviceWorker.ready`.
+
+Y ahí está la trampa: **`serviceWorker.ready` no rechaza nunca**. Si el service
+worker no llega a activarse, la promesa queda pendiente para siempre y el
+listener **no se engancha jamás**. La campana se veía igual que siempre, se
+tocaba, y no pasaba absolutamente nada — sin toast, sin hoja, sin error.
+
+Cuándo pasa de verdad, que no es hipotético: la app servida por `http://` desde
+una IP de la red (el `sw.js` solo se registra en `https` o `localhost`, así que
+no hay service worker que se active), o un registro que falla — que además
+falla callado, porque termina en `.catch(() => {})`. Y aun en el camino normal
+hay una ventana al arrancar, mientras el service worker se instala, en la que
+la campana ya se ve y todavía no responde.
+
+**Arreglo, y la regla general que deja**: el listener va **antes de cualquier
+`await`**. Un control que ya está a la vista tiene que responder desde el
+primer toque; si todavía no puede hacer su trabajo, lo dice. No hay estado en
+el que la respuesta correcta sea el silencio.
+
+Además todas las esperas del service worker pasan ahora por
+`esperarServiceWorker()`, que le pone un tope (`PUSH_SW_TIMEOUT_MS`, 8 s). Sin
+eso `subscribeToPush()` tenía el mismo problema por dentro: se quedaba en
+`loading` para siempre.
+
+### 2. Afirmaba "apagada" antes de saberlo
+
+El estado inicial venía del HTML (`data-state="inactive"`), o sea que a alguien
+que **sí** tenía los avisos activos se le mostraba la campana gris hasta que
+`getSubscription()` contestara — y para siempre si `ready` se colgaba. Ahora
+arranca en `checking` y solo afirma cuando sabe.
+
+### 3. La etiqueta no cambiaba nunca, y el encendido era solo color
+
+Con los avisos activos, `aria-label` y `title` seguían diciendo *"Avisarme de
+retenes cerca"* aunque el botón ahí ya no suscribe: abre la hoja de gestión. Un
+lector de pantalla anunciaba la acción equivocada. No había `aria-pressed`, así
+que el estado on/off no se exponía de ninguna forma.
+
+Y visualmente **el ícono es idéntico en los dos estados**: lo único que cambiaba
+era el tinte violeta en algo de 19 px. Se agregó un punto (`::after`), que es
+una diferencia de **forma** — mismo recurso que ya usaba el botón de filtros con
+su punto naranja. Es el detalle que más importa de los tres para el producto: si
+no se puede ver de un vistazo si los avisos están encendidos, el único mecanismo
+de retención del proyecto queda a ciegas.
+
+### Cobertura
+
+`tests/check-campana.js`, con las cuatro guardas **verificadas en rojo**. El
+service worker que nunca se activa se simula con una promesa que no resuelve,
+que es exactamente lo que hace el navegador.
+
+**Trampa al escribir la suite, que dio un rojo falso**: el doble de
+`pushManager` devolvía `getSubscription() → null` incluso después de
+`subscribe()`, así que la baja no encontraba nada que dar de baja y parecía que
+el producto no desuscribía. El doble tiene que **recordar** la suscripción.
+
+**Lo que la suite NO puede ver**: que el push llegue de verdad a un teléfono.
+Eso sigue siendo prueba manual.
 
 ## Quién hay detrás, y qué datos usa (v17.8)
 

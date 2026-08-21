@@ -158,7 +158,17 @@
   .topbar-btn svg{ width:19px; height:19px; }
   .topbar-btn:active{ transform:scale(.9); }
   #push-toggle-btn[data-state="active"]{ color:var(--brand); }
-  #push-toggle-btn[data-state="loading"]{ opacity:.5; cursor:default; }
+  /* El encendido NO puede comunicarse solo por color: el ícono es el mismo en
+     los dos estados, así que la única diferencia era un tinte violeta en algo
+     de 19px. El punto agrega una diferencia de FORMA, que se ve igual sin
+     distinguir bien los colores. Mismo recurso que el botón de filtros. */
+  #push-toggle-btn[data-state="active"]::after{
+    content:''; position:absolute; top:9px; right:9px;
+    width:8px; height:8px; border-radius:50%;
+    background:var(--brand); border:2px solid var(--surface);
+  }
+  #push-toggle-btn[data-state="loading"],
+  #push-toggle-btn[data-state="checking"]{ opacity:.5; cursor:default; }
   #locate-btn[data-state="active"]{ color:var(--brand); }
   #push-toggle-btn[hidden]{ display:none; }
 
@@ -666,7 +676,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v17.8';
+  const APP_VERSION = 'v17.9';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -788,6 +798,13 @@
   const PUSH_ENDPOINT_KEY = 'amet_push_endpoint_v1';
   const PUSH_POS_UPDATE_MIN_METERS = 400;
   const PUSH_POS_UPDATE_MIN_MS = 5 * 60 * 1000;
+  // Tope para esperar a que el service worker se active. NO es una
+  // optimización: `navigator.serviceWorker.ready` no rechaza nunca — si el
+  // service worker no llega a activarse (registro fallido, o la app servida
+  // por http desde una IP de la red, donde ni se registra) la promesa queda
+  // pendiente PARA SIEMPRE. Sin este tope, todo lo que la espere se cuelga en
+  // silencio. Ver `esperarServiceWorker`.
+  const PUSH_SW_TIMEOUT_MS = 8000;
 
   // Columnas explícitas, no `select=*`: esto se pide cada 8 segundos y trae
   // TODOS los reportes en cada sondeo, así que es de lejos lo que más egreso
@@ -1867,7 +1884,39 @@
   }
 
   const pushToggleBtn = document.getElementById('push-toggle-btn');
-  function setPushButtonState(state){ pushToggleBtn.dataset.state = state; }
+
+  // Qué dice la campana en cada estado. Antes el `aria-label` y el `title`
+  // eran fijos ("Avisarme de retenes cerca") y no cambiaban nunca: con los
+  // avisos YA activos el botón anuncia una acción que no hace —ahí abre la
+  // hoja de gestión— así que a un lector de pantalla le mentía. Y el único
+  // indicio de encendido/apagado era el tinte violeta: mismo ícono, mismo
+  // tamaño. Ahora además va un punto (`::after` en el CSS), que es una
+  // diferencia de forma y no de color — mismo patrón que ya usaba el botón
+  // de filtros con su punto naranja.
+  const PUSH_BTN_LABEL = {
+    checking:  'Preparando los avisos de retenes',
+    loading:   'Cambiando los avisos de retenes',
+    inactive:  'Avisarme de retenes cerca',
+    active:    'Avisos de retenes activados. Tocar para gestionarlos'
+  };
+  function setPushButtonState(state){
+    pushToggleBtn.dataset.state = state;
+    const label = PUSH_BTN_LABEL[state] || PUSH_BTN_LABEL.inactive;
+    pushToggleBtn.setAttribute('aria-label', label);
+    pushToggleBtn.setAttribute('title', label);
+    pushToggleBtn.setAttribute('aria-pressed', state === 'active' ? 'true' : 'false');
+  }
+
+  // `navigator.serviceWorker.ready` que no se puede colgar. Todo lo que toca
+  // push pasa por acá: sin el tope, un service worker que nunca se activa
+  // dejaba la campana esperando indefinidamente y sin decir nada.
+  function esperarServiceWorker(){
+    return Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((_, rechazar) => setTimeout(
+        () => rechazar(new Error('service worker no disponible')), PUSH_SW_TIMEOUT_MS))
+    ]);
+  }
 
   async function subscribeToPush(){
     setPushButtonState('loading');
@@ -1878,7 +1927,7 @@
         setPushButtonState('inactive');
         return;
       }
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await esperarServiceWorker();
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
@@ -1921,7 +1970,7 @@
   async function unsubscribeFromPush(){
     setPushButtonState('loading');
     try{
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await esperarServiceWorker();
       const sub = await reg.pushManager.getSubscription();
       if(sub){
         await callRpc('unsubscribe_push', { p_endpoint: sub.endpoint });
@@ -1942,7 +1991,7 @@
       if(elapsed < PUSH_POS_UPDATE_MIN_MS && moved < PUSH_POS_UPDATE_MIN_METERS) return;
     }
     try{
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await esperarServiceWorker();
       const sub = await reg.pushManager.getSubscription();
       if(!sub) return;
       await callRpc('update_push_position', {
@@ -2014,20 +2063,53 @@
     });
   }
 
+  // Si el service worker se activó. `null` mientras no se sabe.
+  let pushDisponible = null;
+
   async function initPushUI(){
     if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
     pushToggleBtn.hidden = false;
-    try{
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      setPushButtonState(sub ? 'active' : 'inactive');
-    }catch(err){ setPushButtonState('inactive'); }
+    // Todavía no se sabe si este dispositivo ya está suscripto, así que no se
+    // afirma "apagada": el estado por defecto del HTML mostraba la campana
+    // gris sobre alguien que SÍ tenía los avisos activos, hasta que
+    // `getSubscription()` contestara.
+    setPushButtonState('checking');
 
-    pushToggleBtn.addEventListener('click', () => {
-      if(pushToggleBtn.dataset.state === 'loading') return;
-      if(pushToggleBtn.dataset.state === 'active') openPushSheet();
-      else subscribeToPush();
-    });
+    // EL LISTENER VA ANTES DE CUALQUIER `await`, Y NO ES UN DETALLE DE ESTILO.
+    // Estaba después de esperar a `serviceWorker.ready`, que no resuelve nunca
+    // si el service worker no se activa: la campana quedaba visible, con
+    // aspecto normal, y al tocarla NO PASABA NADA — sin toast, sin hoja y sin
+    // error en consola. Verificado reproduciéndolo.
+    pushToggleBtn.addEventListener('click', onPushToggleClick);
+
+    try{
+      const reg = await esperarServiceWorker();
+      const sub = await reg.pushManager.getSubscription();
+      pushDisponible = true;
+      setPushButtonState(sub ? 'active' : 'inactive');
+    }catch(err){
+      // Se deja apagada (es lo que corresponde ofrecer), pero se recuerda que
+      // no está disponible para poder explicarlo al tocarla en vez de fallar
+      // en silencio.
+      console.warn('Avisos push no disponibles', err);
+      pushDisponible = false;
+      setPushButtonState('inactive');
+    }
+  }
+
+  function onPushToggleClick(){
+    const estado = pushToggleBtn.dataset.state;
+    if(estado === 'loading') return;              // hay una operación en vuelo
+    if(estado === 'checking'){
+      showToast('Estamos preparando los avisos, probá de nuevo en un momento');
+      return;
+    }
+    if(pushDisponible === false){
+      showToast('Los avisos no están listos todavía. Recargá la app e intentá de nuevo');
+      return;
+    }
+    if(estado === 'active') openPushSheet();
+    else subscribeToPush();
   }
   initPushUI();
 

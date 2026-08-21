@@ -48,7 +48,7 @@ Lo más rápido es un túnel, `npx localtunnel --port 8000`.
 ## Pruebas
 
 ```bash
-node tests/run.js                 # las 21 suites
+node tests/run.js                 # las 22 suites
 node tests/run.js seguridad area  # solo las que coincidan
 ```
 
