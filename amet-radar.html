@@ -127,6 +127,13 @@
     display:flex; align-items:center; gap:9px; min-height:var(--tap);
     background:var(--surface); border-radius:999px; padding:0 15px 0 11px;
     box-shadow:var(--shadow-1);
+    /* `min-width:0` + el recorte de abajo son la RED DE SEGURIDAD, no un
+       detalle: sin esto nada en la fila podía encogerse (todo va con
+       `white-space:nowrap` y los botones con `flex-shrink:0`), así que el
+       contenido desbordaba a la derecha y la campana —el último botón— se
+       iba literalmente fuera de la pantalla. Ahora la que cede es la marca,
+       que es lo que se puede recortar sin perder ninguna función. */
+    min-width:0; overflow:hidden;
   }
   .brand-dot{
     width:9px; height:9px; border-radius:50%; background:var(--brand); flex-shrink:0;
@@ -134,7 +141,10 @@
        (v16.0) y el punto se veía de otro color que su propio halo. */
     box-shadow:0 0 0 4px rgba(124,58,237,.18);
   }
-  .brand-name{ font-size:15px; font-weight:700; letter-spacing:-.2px; white-space:nowrap; }
+  .brand-name{
+    font-size:15px; font-weight:700; letter-spacing:-.2px; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis;
+  }
   .brand-count{
     display:inline-flex; align-items:center; gap:4px; margin-left:2px;
     padding-left:10px; border-left:1px solid var(--line);
@@ -601,6 +611,26 @@
   /* Pantallas muy angostas: que el botón principal no empuje al de ubicación */
   @media (max-width: 359px){
     #report-btn{ padding:0 18px; font-size:14.5px; }
+    /* A 320px el nombre entra por 6px de diferencia. Se le sacan al relleno
+       del pill y a la separación del punto, en vez de dejar que la elipsis
+       lo corte en "AMET Ra…" — el recorte queda como último recurso (una
+       fuente del sistema muy grande), no como el aspecto normal. */
+    .brand{ padding:0 11px 0 9px; gap:7px; }
+  }
+  /* EL CONTADOR SE OCULTA EN TODO EL RANGO DE TELÉFONOS, no solo debajo de
+     360px como antes. Con la topbar de tres botones (44px cada uno + 8 de
+     separación = 148px) más la marca completa, "N en vista" no entra en
+     ningún teléfono real: a 360px se pasaba 47px y a 390px, 17px. El límite
+     sale de medir, no de elegir un número redondo — con el contador hacen
+     falta ~409px de ancho, así que recién a partir de 430px (el teléfono más
+     ancho que se usa) hay lugar de sobra.
+
+     Por qué se sacrifica el contador y no otra cosa: los tres botones son
+     acciones y ninguno puede bajar de 44px (mínimo táctil), mientras que
+     "cuántos hay en vista" ya lo dicen los marcadores del mapa. Ojo con la
+     prueba: el bug vivió porque la única medición era a 320px, justo el
+     ancho donde el contador YA estaba oculto. Se mide en cuatro anchos. */
+  @media (max-width: 429px){
     .brand-count{ display:none; }
   }
 
@@ -676,7 +706,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v17.9';
+  const APP_VERSION = 'v17.10';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).

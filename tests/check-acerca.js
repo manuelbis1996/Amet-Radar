@@ -17,6 +17,11 @@ const DIR = __dirname;
 const STUB = fs.readFileSync(DIR + '/maplibre-stub.js', 'utf8');
 
 const GEO = `
+// Sin esto el stub cae a unos límites por defecto sobre Santo Domingo, los
+// reportes de La Vega quedan fuera del área visible y el contador de la marca
+// se queda en 0 — o sea que el caso de varios dígitos, que es el que ensancha
+// la marca, no se estaría probando.
+window.__bounds = { n: 19.30, s: 19.14, e: -70.45, w: -70.62 };
 Object.defineProperty(navigator,'geolocation',{value:{
   watchPosition:(s)=>{setTimeout(()=>s({coords:{latitude:19.2214,longitude:-70.5295}}),40);return 1;},
   clearWatch:()=>{}},configurable:true});`;
@@ -37,7 +42,46 @@ async function preparar(page) {
   await page.route('**/fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: '' }));
   await page.route('**/tiles.openfreemap.org/**', r => r.abort());
   await page.route('**/rest/v1/app_config*', r => r.fulfill({ contentType: 'application/json', body: '[]' }));
-  await page.route('**/rest/v1/reports*', r => r.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/reports*', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify(REPORTES) }));
+}
+
+// Con reportes en pantalla, no con el mapa vacío: el contador de la marca
+// ("N en vista") crece con los dígitos, y medir siempre con 0 escondía justo
+// el caso que rompía.
+const REPORTES = [...Array(128)].map((_, i) => ({
+  id: 'r' + i, lat: 19.2214 + (i % 20) * 0.0006, lng: -70.5295 + Math.floor(i / 20) * 0.0006,
+  photo: null, note: '', ts: Date.now() - 60000, category: 'reten_fijo',
+  confirms: 0, denies: 0, approx: false, photo_flags: 0
+}));
+
+// Los cuatro anchos de teléfono que importan. Hasta v17.9 esto se medía SOLO
+// a 320px, y ahí el contador de la marca está oculto por un `@media`: o sea
+// que la única medición era la del único ancho donde el problema no podía
+// aparecer. A 360 y 390 —los dos más comunes— la campana se salía de la
+// pantalla por 47 y 17px.
+const ANCHOS = [320, 360, 390, 412];
+
+async function medirTopbar(browser, ancho) {
+  const ctx = await browser.newContext({ viewport: { width: ancho, height: 720 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  await preparar(page);
+  await page.goto(BASE + '/amet-radar.html', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(900);
+  const w = await page.$('#welcome-ok'); if (w) { await w.click(); await page.waitForTimeout(250); }
+  const caja = await page.evaluate(() => {
+    const r = e => { const b = e.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right) }; };
+    const nombre = document.querySelector('.brand-name');
+    return {
+      marca: r(document.querySelector('.brand')),
+      acciones: r(document.querySelector('.topbar-actions')),
+      campana: r(document.getElementById('push-toggle-btn')),
+      recortado: nombre.scrollWidth > nombre.clientWidth + 1,
+      cuenta: document.getElementById('stat-count').textContent,
+      ancho: window.innerWidth
+    };
+  });
+  await ctx.close();
+  return caja;
 }
 
 (async () => {
@@ -72,11 +116,6 @@ async function preparar(page) {
     const acciones = document.querySelector('.topbar-actions');
     return { btn: r(btn), marca: r(marca), acciones: r(acciones), ancho: window.innerWidth };
   });
-  console.log(`\n[320px] marca ${caja.marca.l}→${caja.marca.r} | acciones ${caja.acciones.l}→${caja.acciones.r} | pantalla ${caja.ancho}`);
-  check('[320px] la topbar no se sale de pantalla', caja.acciones.r <= caja.ancho,
-        `borde derecho ${caja.acciones.r} vs ${caja.ancho}`);
-  check('[320px] la marca no se solapa con los botones', caja.marca.r <= caja.acciones.l,
-        `marca hasta ${caja.marca.r}, botones desde ${caja.acciones.l}`);
   check('[320px] el botón ⓘ mide 44px (mínimo táctil)', caja.btn.h >= 44 && caja.btn.w >= 44,
         `${caja.btn.w}x${caja.btn.h}`);
 
@@ -149,6 +188,35 @@ async function preparar(page) {
   });
   check('admin.html tiene noindex', !!robots && /noindex/.test(robots), String(robots));
   await ctx2.close();
+
+  // ---- La topbar entra en TODOS los anchos de teléfono, con el mapa lleno ----
+  for(const ancho of ANCHOS){
+    const c = await medirTopbar(browser, ancho);
+    console.log(`\n[${ancho}px] cuenta=${c.cuenta} | marca →${c.marca.r} | botones ${c.acciones.l}→ | campana →${c.campana.r} de ${c.ancho}`);
+    check(`[${ancho}px] la campana NO se sale de la pantalla`, c.campana.r <= c.ancho,
+          `termina en ${c.campana.r} de ${c.ancho}`);
+    check(`[${ancho}px] la marca no se solapa con los botones`, c.marca.r <= c.acciones.l,
+          `marca hasta ${c.marca.r}, botones desde ${c.acciones.l}`);
+    check(`[${ancho}px] el nombre de la app no queda recortado`, !c.recortado,
+          'la elipsis es la red de seguridad, no el aspecto normal');
+  }
+
+  // ---- La red de seguridad, ejercitada donde NADA alcanza ----
+  // A 280px (teléfonos viejos, o el navegador con mucho zoom) la marca entera
+  // más los tres botones no entran de ninguna manera. Lo que tiene que pasar
+  // es que ceda la marca —recortando el nombre— y NUNCA que se vaya un botón
+  // fuera de la pantalla. Sin `min-width:0` + `overflow:hidden` en `.brand`,
+  // nada de la fila puede encogerse y la campana termina fuera del viewport.
+  // Este chequeo es el único que prueba esa capa: el `@media` que oculta el
+  // contador tapa el caso en los anchos normales.
+  {
+    const c = await medirTopbar(browser, 280);
+    console.log(`\n[280px] marca →${c.marca.r} | campana →${c.campana.r} de ${c.ancho} (recortado=${c.recortado})`);
+    check('[280px] aunque no entre, la campana sigue dentro de la pantalla',
+          c.campana.r <= c.ancho, `termina en ${c.campana.r} de ${c.ancho}`);
+    check('[280px] la que cede es la marca, no los botones', c.recortado,
+          'el nombre tiene que recortarse; si no, algo más se está saliendo');
+  }
 
   console.log(fails.length ? `\n>>> ${fails.length} FALLO(S): ${fails.join(' | ')}` : '\n>>> TODOS LOS CHEQUEOS PASARON');
   await browser.close();
