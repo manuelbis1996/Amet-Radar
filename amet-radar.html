@@ -706,7 +706,7 @@
   // CLAUDE.md): al subir uno, subir el otro. Se muestra en el header para
   // poder confirmar a simple vista que una PWA instalada ya tomó la
   // versión nueva del service worker, sin tener que abrir devtools.
-  const APP_VERSION = 'v17.10';
+  const APP_VERSION = 'v17.11';
   // [lat, lng] — ojo que el orden es al revés del que usa MapLibre.
   // Es solo el punto de arranque mientras no hay señal de GPS: apenas
   // llega el primer fix, el mapa se centra en el usuario (ver firstFix).
@@ -985,9 +985,33 @@
     return { ok:false, reason: data.reason || 'error' };
   }
 
+  // ---- Almacenamiento local que NO puede tumbar la app ----
+  //
+  // `localStorage` no solo devuelve null cuando no hay nada: puede TIRAR.
+  // Pasa con la cuota llena, con "bloquear todas las cookies" en Safari, y
+  // sobre todo en los navegadores embebidos que abren los links dentro de
+  // otra app — que es justo por donde se comparte esta (WhatsApp).
+  //
+  // Y una excepción acá no era un detalle: `canReport()` escribía sin
+  // protección y es lo PRIMERO que toca el botón de Reportar, así que un
+  // almacenamiento que rechaza escrituras MATABA el botón principal de la
+  // app en silencio — sin hoja, sin toast, sin llegar a la red y sin nada en
+  // pantalla. Verificado reproduciéndolo.
+  //
+  // La regla que dejan estos cuatro ayudantes: si el almacenamiento falla, la
+  // app funciona igual pero se olvida de las cosas. Nunca deja de funcionar.
+  // Todo acceso pasa por acá; no queda ningún `localStorage.` suelto.
+  function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+  function lsSet(k, v){ try{ localStorage.setItem(k, v); return true; }catch(e){ return false; } }
+  function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+  function lsJson(k, porDefecto){
+    try{ const v = lsGet(k); return v === null ? porDefecto : JSON.parse(v); }
+    catch(e){ return porDefecto; }   // también cubre un valor corrupto
+  }
+
   const PHOTO_FLAGS_KEY = 'amet_photo_flagged_v1';
-  function getFlagged(){ try{ return new Set(JSON.parse(localStorage.getItem(PHOTO_FLAGS_KEY)||'[]')); }catch(e){ return new Set(); } }
-  function saveFlagged(s){ try{ localStorage.setItem(PHOTO_FLAGS_KEY, JSON.stringify([...s])); }catch(e){} }
+  function getFlagged(){ return new Set(lsJson(PHOTO_FLAGS_KEY, [])); }
+  function saveFlagged(s){ lsSet(PHOTO_FLAGS_KEY, JSON.stringify([...s])); }
 
   // El servidor rechazó el reporte por una regla del anti-spam (no es un
   // problema de red). Se distingue de NetworkError porque acá NO hay que
@@ -1095,8 +1119,8 @@
   const MINE_KEY = 'amet_my_reports_v1';
   const TIMES_KEY = 'amet_report_times_v1';
 
-  function getVoted(){ try{ return new Set(JSON.parse(localStorage.getItem(VOTED_KEY)||'[]')); }catch(e){ return new Set(); } }
-  function saveVoted(set){ localStorage.setItem(VOTED_KEY, JSON.stringify([...set])); }
+  function getVoted(){ return new Set(lsJson(VOTED_KEY, [])); }
+  function saveVoted(set){ lsSet(VOTED_KEY, JSON.stringify([...set])); }
   // Además de "ya votó" (VOTED_KEY), se guarda EN QUÉ sentido, para poder
   // mostrarlo en la hoja de detalle. Clave aparte y no un cambio de formato
   // de VOTED_KEY, para no romper los votos ya guardados en los teléfonos
@@ -1110,13 +1134,9 @@
   // SHA-256, que no sirve para borrar. Antes "es mío" se validaba solo con
   // MINE_KEY del lado del cliente, o sea que no validaba nada.
   const TOKENS_KEY = 'amet_report_tokens_v1';
-  function getTokens(){ try{ return JSON.parse(localStorage.getItem(TOKENS_KEY)||'{}'); }catch(e){ return {}; } }
-  function saveToken(id, token){
-    try{ const m = getTokens(); m[id] = token; localStorage.setItem(TOKENS_KEY, JSON.stringify(m)); }catch(e){}
-  }
-  function dropToken(id){
-    try{ const m = getTokens(); delete m[id]; localStorage.setItem(TOKENS_KEY, JSON.stringify(m)); }catch(e){}
-  }
+  function getTokens(){ return lsJson(TOKENS_KEY, {}); }
+  function saveToken(id, token){ const m = getTokens(); m[id] = token; lsSet(TOKENS_KEY, JSON.stringify(m)); }
+  function dropToken(id){ const m = getTokens(); delete m[id]; lsSet(TOKENS_KEY, JSON.stringify(m)); }
   function newOwnerToken(){
     const b = new Uint8Array(16);
     crypto.getRandomValues(b);
@@ -1143,35 +1163,37 @@
     const txt = await res.text();
     return txt ? JSON.parse(txt) : null;
   }
-  function getVoteDirs(){ try{ return JSON.parse(localStorage.getItem(VOTE_DIR_KEY)||'{}'); }catch(e){ return {}; } }
+  function getVoteDirs(){ return lsJson(VOTE_DIR_KEY, {}); }
   function saveVoteDir(id, dir){
     const m = getVoteDirs(); m[id] = dir;
-    try{ localStorage.setItem(VOTE_DIR_KEY, JSON.stringify(m)); }catch(e){}
+    lsSet(VOTE_DIR_KEY, JSON.stringify(m));
   }
-  function getMine(){ try{ return new Set(JSON.parse(localStorage.getItem(MINE_KEY)||'[]')); }catch(e){ return new Set(); } }
-  function saveMine(set){ localStorage.setItem(MINE_KEY, JSON.stringify([...set])); }
+  function getMine(){ return new Set(lsJson(MINE_KEY, [])); }
+  function saveMine(set){ lsSet(MINE_KEY, JSON.stringify([...set])); }
 
   // Freno local, para dar respuesta inmediata sin una ida y vuelta a la red.
   // YA NO ES LA DEFENSA: se resetea borrando los datos del sitio, y publicar
   // ni siquiera necesita pasar por acá (se puede llamar a la API a mano). El
   // límite que cuenta lo aplica create_report en el servidor — ver "Anti-spam
   // del lado del servidor" en CLAUDE.md. Esto queda como comodidad de UX.
+  // Si el almacenamiento no responde se DEJA reportar (fail open). Es lo
+  // correcto y no una concesión: el límite que cuenta lo aplica
+  // `create_report` en el servidor, así que negar acá solo dejaría sin
+  // publicar a alguien que no puede guardar nada — sin proteger nada.
   function canReport(){
-    const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]').filter(t => (Date.now()-t) < CONFIG.reportWindowMin*60000);
-    localStorage.setItem(TIMES_KEY, JSON.stringify(times));
+    const times = lsJson(TIMES_KEY, []).filter(t => (Date.now()-t) < CONFIG.reportWindowMin*60000);
+    lsSet(TIMES_KEY, JSON.stringify(times));
     return times.length < CONFIG.reportLimit;
   }
   function unregisterLastReportTime(){
-    try{
-      const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]');
-      times.pop();
-      localStorage.setItem(TIMES_KEY, JSON.stringify(times));
-    }catch(e){}
+    const times = lsJson(TIMES_KEY, []);
+    times.pop();
+    lsSet(TIMES_KEY, JSON.stringify(times));
   }
   function registerReportTime(){
-    const times = JSON.parse(localStorage.getItem(TIMES_KEY)||'[]');
+    const times = lsJson(TIMES_KEY, []);
     times.push(Date.now());
-    localStorage.setItem(TIMES_KEY, JSON.stringify(times));
+    lsSet(TIMES_KEY, JSON.stringify(times));
   }
 
   // Cola de reportes ya creados que no se pudieron enviar por falta de red
@@ -1179,8 +1201,13 @@
   // estado del flujo de creación en curso). Persistida para sobrevivir un
   // reload; pendingIds es un derivado en memoria para lookups O(1).
   const PENDING_KEY = 'amet_pending_queue_v1';
-  function getPendingQueue(){ try{ return JSON.parse(localStorage.getItem(PENDING_KEY)||'[]'); }catch(e){ return []; } }
-  function savePendingQueue(list){ localStorage.setItem(PENDING_KEY, JSON.stringify(list)); }
+  function getPendingQueue(){ return lsJson(PENDING_KEY, []); }
+  // Si no se puede persistir, `pendingQueue` sigue viva EN MEMORIA y el
+  // reintento igual ocurre mientras la pestaña esté abierta — se pierde solo
+  // al recargar. Antes esto tiraba dentro del `catch` de publicar, o sea que
+  // la excepción se escapaba y la hoja "Publicando…" quedaba colgada para
+  // siempre, justo en el caso de quedarse sin señal.
+  function savePendingQueue(list){ lsSet(PENDING_KEY, JSON.stringify(list)); }
 
   let pendingQueue = getPendingQueue();
   let pendingIds = new Set(pendingQueue.map(p => p.id));
@@ -1982,7 +2009,7 @@
         p_lng: latlng[1]
       });
       if(guardada !== true) throw new Error('No se pudo guardar la suscripción');
-      localStorage.setItem(PUSH_ENDPOINT_KEY, json.endpoint);
+      lsSet(PUSH_ENDPOINT_KEY, json.endpoint);
       lastPushPosUpdate = { latlng, ts: Date.now() };
       setPushButtonState('active');
       showToast('Listo, te vamos a avisar de retenes cerca');
@@ -2007,7 +2034,7 @@
         await sub.unsubscribe();
       }
     }catch(err){ console.error('Error cancelando suscripción push', err); }
-    localStorage.removeItem(PUSH_ENDPOINT_KEY);
+    lsDel(PUSH_ENDPOINT_KEY);
     setPushButtonState('inactive');
     showToast('Avisos de retenes cerca desactivados');
   }
@@ -2072,10 +2099,8 @@
     if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
     if(pushToggleBtn.dataset.state === 'active') return;
     if(Notification.permission !== 'default') return; // ya decidió, en un sentido o en otro
-    try{
-      if(localStorage.getItem(PUSH_ASKED_KEY)) return;
-      localStorage.setItem(PUSH_ASKED_KEY, '1');
-    }catch(e){ return; }
+    if(lsGet(PUSH_ASKED_KEY)) return;
+    lsSet(PUSH_ASKED_KEY, '1');
     const ov = document.getElementById('flow-overlay');
     if(ov && !ov.hidden) return; // no encimarle una hoja a otra
     renderSheet(`
@@ -3089,9 +3114,9 @@
   const ONBOARDED_KEY = 'amet_onboarded_v1';
   function maybeShowWelcome(){
     let seen = false;
-    try{ seen = !!localStorage.getItem(ONBOARDED_KEY); }catch(e){}
+    seen = !!lsGet(ONBOARDED_KEY);
     if(seen) return;
-    try{ localStorage.setItem(ONBOARDED_KEY, '1'); }catch(e){}
+    lsSet(ONBOARDED_KEY, '1');
     renderSheet(`
       <h2>Bienvenido a AMET Radar</h2>
       <p class="sub">Reportes de retenes de tránsito en La Vega, hechos por la comunidad.</p>
@@ -3177,23 +3202,21 @@
       && !/crios|fxios/i.test(navigator.userAgent);
   }
   function aperturas(){
-    try{
-      const n = (parseInt(localStorage.getItem(APERTURAS_KEY), 10) || 0) + 1;
-      localStorage.setItem(APERTURAS_KEY, String(n));
-      return n;
-    }catch(e){ return 1; }
+    const n = (parseInt(lsGet(APERTURAS_KEY), 10) || 0) + 1;
+    lsSet(APERTURAS_KEY, String(n));
+    return n;
   }
   const APERTURAS = aperturas();
 
   function marcarInstalarPreguntado(){
-    try{ localStorage.setItem(INSTALL_KEY, '1'); }catch(e){}
+    lsSet(INSTALL_KEY, '1');
   }
 
   function quizasOfrecerInstalar(){
     if(yaInstalada()) return;
     if(APERTURAS < 2) return;              // recién en la segunda vuelta
     if(!promptInstalar && !esIOS()) return; // el navegador no la puede instalar
-    try{ if(localStorage.getItem(INSTALL_KEY)) return; }catch(e){ return; }
+    if(lsGet(INSTALL_KEY)) return;
     const ov = document.getElementById('flow-overlay');
     if(ov && !ov.hidden) return;            // no encimarle una hoja a otra
     if(!detailEl.hidden) return;            // ni tapar un reporte compartido
