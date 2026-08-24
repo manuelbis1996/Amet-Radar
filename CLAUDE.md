@@ -144,7 +144,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   proyecto ya mordió al menos una vez: verificación contra la base real cuando
   se toca RLS o una RPC, `APP_VERSION`/`CACHE_NAME` subidos juntos, y qué se
   rompe.
-- `tests/` — las 22 suites, versionadas en el repo. **Leer
+- `tests/` — las 23 suites, versionadas en el repo. **Leer
   `tests/README.md` antes de tocarlas**: dice qué cubre cada una y, sobre
   todo, **qué no pueden ver** (mockean la red y nunca llegan a Postgres, con
   la tabla de los bugs históricos que se colaron justo por ahí y cómo probar
@@ -159,7 +159,7 @@ El frontend ya está publicado en internet, no solo corriendo local: ver
   320 px, que `admin.html` tenga `noindex`, y sobre todo que **el correo no
   quede escrito entero en el HTML servido** (lee el archivo del repo, no el
   DOM).
-- `tests/check-base-real.js` — el complemento de las 22: pega contra la base
+- `tests/check-base-real.js` — el complemento de las 23: pega contra la base
   **real** de Supabase con la anon key (sin secrets) y cubre lo que las suites
   mockeadas no pueden ver por construcción — RLS, grants, RPCs, Storage. **No
   entra en `node tests/run.js`**: la convención es que `check-*-real.js` queda
@@ -364,6 +364,81 @@ respondió `radius: 2000` y después `radius: 3500` sin redesplegar nada — o s
 que lo lee en vivo. Para eso el campo `radius` va en la respuesta: es la única
 forma de distinguir "tomó el valor nuevo" de "cayó al de por defecto". El
 `check` de la columna se comprobó rechazando un `update` a 10 (`23514`).
+
+## El almacenamiento local podía matar el botón principal (v17.11)
+
+Salió de una auditoría de lanzamiento, no de un reporte: se probó la app con
+un `localStorage` que **rechaza escrituras**, que es como se comporta un
+navegador con los datos de sitio bloqueados, con la cuota llena, o con
+"bloquear todas las cookies" en Safari.
+
+**Resultado antes del arreglo: tocar Reportar no hacía absolutamente nada.**
+Sin hoja, sin toast, sin llegar a la red, y con una excepción sin capturar.
+
+**La causa**: `canReport()` escribía sin protección y es **lo primero** que
+toca el botón. La excepción se escapaba del handler del click, así que moría
+el flujo entero antes de empezar. Mismo patrón silencioso que la campana de
+v17.9 — un control a la vista que no responde y no explica nada.
+
+**El segundo, peor todavía porque pega en el caso que más importa**:
+`savePendingQueue()` tiraba **desde dentro del `catch`** de publicar, o sea
+justo en la rama de "no hay señal". La excepción se escapaba y la hoja
+**"Publicando…" quedaba colgada para siempre**. Reproducido y cubierto.
+
+### Por qué esto importa más de lo que parece en este proyecto
+
+El link se comparte **por WhatsApp**, y WhatsApp abre los links en su propio
+navegador embebido. Ese es exactamente el tipo de entorno donde el
+almacenamiento puede estar restringido — o sea que el fallo caía justo sobre
+el canal de distribución del proyecto, el día del lanzamiento.
+
+### Cómo quedó: cuatro ayudantes y ningún acceso crudo
+
+`lsGet` / `lsSet` / `lsDel` / `lsJson` envuelven todo. `lsJson` además cubre
+un valor corrupto, que antes también tiraba en `canReport()` y en
+`registerReportTime()`.
+
+**La regla que dejan**: si el almacenamiento falla, la app **funciona igual
+pero se olvida de las cosas**. Nunca deja de funcionar. En particular
+`canReport()` **deja publicar** (fail open) — y no es una concesión: el
+límite que cuenta lo aplica `create_report` en el servidor, así que negar en
+el cliente solo dejaría sin publicar a alguien que no puede guardar nada, sin
+proteger nada a cambio.
+
+`admin.html` tenía la misma fragilidad con `sessionStorage` y el password del
+panel: ahora hay una copia **en memoria**, así que el panel funciona durante
+la sesión aunque no se pueda guardar — lo único que se pierde es sobrevivir a
+un F5.
+
+**La guarda incluye un chequeo sobre el archivo del repo**, no solo sobre el
+DOM: falla si aparece cualquier `localStorage.` fuera de los ayudantes. Sin
+eso, la protección valdría para los caminos que la suite recorre y no para el
+código que se escriba mañana.
+
+### Lo que la auditoría miró y encontró SANO
+
+Vale anotarlo para no repetir el trabajo: se probó el servidor caído (500),
+una respuesta corrupta que no es JSON, la red cortada y filas con campos
+nulos, categoría inventada y tipos equivocados. Los cuatro casos degradan
+bien y sin una sola excepción. `check-base-real.js` pasa entero contra
+producción y el linter de Supabase no muestra nada nuevo — sus avisos son los
+cinco `rls_enabled_no_policy` esperados y los `SECURITY DEFINER` de las siete
+RPC públicas a propósito.
+
+### Lo que queda sabido y NO se tocó
+
+**El service worker cachea `./amet-radar.html`, no `/`.** Quien tiene la PWA
+instalada abre por `start_url` (`./amet-radar.html`) y tiene offline; quien
+llega por el link compartido —que desde v17.0 es siempre la raíz— no. Se
+decidió **no** tocarlo: `sw.js` es el archivo que ya congeló dispositivos una
+vez (ver "Bug del 307"), y el beneficio es chico porque sin red el mapa
+tampoco carga.
+
+**Si algún día se hace, ojo con la trampa**: agregar `'./'` a `APP_SHELL`
+rompe el chequeo `isAppShell`, porque `path.replace('./','')` queda en `''` y
+**`endsWith('')` es `true` para cualquier URL** — el service worker pasaría a
+interceptar todo, incluidas las llamadas a Supabase y los tiles. Hay que
+cambiar el matcheo primero.
 
 ## La campana se salía de la pantalla (v17.10)
 

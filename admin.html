@@ -592,7 +592,24 @@
   // Leer y editar app_config siguen abiertas con la anon key (RLS), así que
   // para eso el login sigue siendo solo un gate de conveniencia.
   const SESSION_KEY = 'amet_admin_pw_v1';
-  function getAdminPassword(){ return sessionStorage.getItem(SESSION_KEY) || ''; }
+  // `sessionStorage` puede TIRAR (datos de sitio bloqueados, cuota, algunos
+  // navegadores embebidos), no solo devolver null. Sin protección, el login
+  // del panel se caía ahí mismo y no había forma de moderar nada. La copia en
+  // memoria hace que el panel funcione igual durante la sesión aunque no se
+  // pueda guardar: lo único que se pierde es sobrevivir a un F5.
+  let pwEnMemoria = '';
+  function getAdminPassword(){
+    try{ return sessionStorage.getItem(SESSION_KEY) || pwEnMemoria; }
+    catch(e){ return pwEnMemoria; }
+  }
+  function setAdminPassword(pw){
+    pwEnMemoria = pw;
+    try{ sessionStorage.setItem(SESSION_KEY, pw); }catch(e){}
+  }
+  function clearAdminPassword(){
+    pwEnMemoria = '';
+    try{ clearAdminPassword(); }catch(e){}
+  }
   let authed = !!getAdminPassword();
 
   const loginScreen = document.getElementById('login-screen');
@@ -640,7 +657,7 @@
         return;
       }
       authed = true;
-      sessionStorage.setItem(SESSION_KEY, password);
+      setAdminPassword(password);
       document.getElementById('password-input').value = '';
       showEntry();
     }catch(err){
@@ -654,7 +671,7 @@
 
   document.getElementById('logout-btn').addEventListener('click', () => {
     authed = false;
-    sessionStorage.removeItem(SESSION_KEY);
+    clearAdminPassword();
     showEntry();
   });
 
@@ -873,7 +890,7 @@
       });
       if(res.status === 401){
         // El password de admin cambió mientras la pestaña seguía abierta.
-        sessionStorage.removeItem(SESSION_KEY);
+        clearAdminPassword();
         authed = false;
         showEntry();
         showToast('Tu sesión venció. Entra de nuevo.', true);
@@ -959,7 +976,7 @@
         body: JSON.stringify({ password: getAdminPassword(), config: body })
       });
       if(res.status === 401){
-        sessionStorage.removeItem(SESSION_KEY);
+        clearAdminPassword();
         authed = false;
         showEntry();
         showToast('Tu sesión venció. Entra de nuevo.', true);
@@ -1366,7 +1383,7 @@
       if(res.status === 401){
         // El password cambió con la pestaña abierta: mismo tratamiento que en
         // el resto del panel.
-        sessionStorage.removeItem(SESSION_KEY); authed = false; showEntry();
+        clearAdminPassword(); authed = false; showEntry();
         showToast('Tu sesión venció. Entra de nuevo.', true);
         return;
       }
